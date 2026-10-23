@@ -1,4 +1,4 @@
-# LUNA + Tibber – lokale Linux-Steuerung, Version 1.1
+# LUNA + Tibber – lokale Linux-Steuerung, Version 1.2
 
 Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 
@@ -23,6 +23,98 @@ regelmäßige Zeitfenster TOU. Zuerst den lokalen Test und das Verhalten neben E
 Das Programm verändert weder Netzschutz noch Einspeiselimit, TOU, AC-Freigabe oder die
 angezeigten Netzladegrenzen. Es löst ausschließlich zeitlich begrenztes Laden und Stopp aus.
 Bei gegenseitigen Steuerbefehlen von Enpal/evcc ist kein zuverlässiger Parallelbetrieb garantiert.
+
+## Neu: WLAN-Connector für openHABian / NetworkManager
+
+Der Connector ist Teil dieses Pakets und funktioniert mit System-Python 3.9.
+Er läuft getrennt vom Ladeprozess: nur das Netzwerkwerkzeug braucht root;
+Tibber-Token und Installateurpasswort bleiben beim normalen Benutzer.
+`wlan0` wird für Huawei reserviert. Keine Änderungen an LAN-Profilen, kein
+Neustart von NetworkManager/dhcpcd während der Einrichtung.
+
+Für den beobachteten Pi (NetworkManager UND dhcpcd aktiv):
+
+```bash
+cd ~/apps/luna-tibber
+git pull --ff-only
+sudo apt install -y iw
+sudo python3 wifi.py configure --interface wlan0 --exclude-dhcpcd
+sudo python3 wifi.py install-service
+```
+
+`configure` fragt SSID und WLAN-Passwort sichtbar ab. Das Passwort landet nur
+im root-lesbaren NetworkManager-Profil (600), nicht in Argumenten oder Logs.
+Die Zusatzoption ergänzt `denyinterfaces wlan0` global in dhcpcd.conf und
+legt vorher eine Sicherung unter /etc/dhcpcd.conf.luna-backup-* an.
+Diese Reservierung ist erst nach einem Neustart für den Connector freigegeben:
+
+```bash
+sudo reboot
+```
+
+Neustart unterbricht openHAB und SSH kurz. Danach erneut anmelden:
+
+```bash
+cd ~/apps/luna-tibber
+systemctl status luna-wifi --no-pager
+journalctl -u luna-wifi -n 30 --no-pager
+ip route get 192.168.200.1
+ip route get 1.1.1.1
+.venv/bin/python luna.py wifi-enable
+.venv/bin/python luna.py probe
+```
+
+Voraussetzung für `wifi-enable` ist die normale App-Konfiguration (`setup`).
+Token später sichtbar ändern, ohne sonstige Einstellungen zurückzusetzen:
+
+```bash
+.venv/bin/python luna.py credentials
+```
+
+Schutzverhalten:
+- Fremde aktive Profile, fremde WLAN-Assoziation, konkurrierende automatisch
+  verbindende WLAN-Profile, dedizierte wpa_supplicant-Prozesse und -Units,
+  unmanaged/gesperrter Adapter, WLAN-Standardroute und Subnetzkonflikte führen
+  zum Abbruch. Keine fremde Verbindung wird getrennt, kein rfkill entsperrt.
+- Der globale D-Bus-Dienst wpa_supplicant ist mit NetworkManager normal und
+  wird nicht allein wegen seines Laufens als Konflikt gewertet.
+- Eigenes Profil verwendet weder Standardroute noch DHCP-DNS oder zusätzliche
+  DHCP-Routen. IPv6 ist nur in diesem Profil deaktiviert.
+- Verbindung und Route werden alle 20 Sekunden geprüft. Maximal fünf Versuche
+  mit steigenden Pausen, anschließend manueller Neustart des WLAN-Dienstes.
+- Ein bereits verbundenes eigenes Profil wird nicht ständig neu aktiviert.
+- Fremde FusionSolar-Sitzungen auf Handys sind nicht zuverlässig erkennbar.
+  Der Connector sendet selbst keine Huawei-Anmeldung/Ladebefehle.
+- Die Lade-App prüft bei aktiviertem WLAN-Modus das Profil und die Route.
+  Bei Verlust endet der Ladeprozess mit einem Stoppversuch. WLAN kann sich
+  wiederverbinden, aber automatisches Laden muss nach dem Fehler bewusst
+  neu gestartet werden. Keine endlosen Wiederanmeldungen gegen Enpal.
+- `wifi.py status` prüft zusätzlich TCP-Port 6607 ohne Geräteanmeldung.
+  Während watch läuft ist das Werkzeug gesperrt; für laufenden Status journalctl
+  verwenden. Eigene Verbindung bleibt beim Beenden von watch bestehen.
+
+Diagnose bei Konflikt: Meldung lesen, nicht andere Dienste pauschal abschalten.
+Ein bestehendes Profil kann ohne Änderung geprüft werden:
+`nmcli -f NAME,UUID,TYPE,AUTOCONNECT connection show`.
+Für Änderungen an SSID/Passwort zuerst WLAN-Dienst stoppen, eigenes Profil
+mit `sudo nmtui` bearbeiten und wieder starten. Profil nicht umbenennen oder
+UUID/Interface/Routenschutz ändern. Gespeicherte SSID in /etc/luna-wifi.json
+ist nur Metadatum; genutzt wird die Profil-UUID.
+
+```bash
+sudo systemctl stop luna-wifi
+sudo python3 wifi.py status
+sudo systemctl start luna-wifi
+```
+
+Bei Updates von wifi.py den Dienst stoppen, `install-service` erneut ausführen
+und starten: der Dienst nutzt eine root-eigene Kopie unter /usr/local/lib,
+keine veränderbare Datei im Benutzerverzeichnis.
+
+Auf dem echten Pi noch nicht getestet; Konfliktfälle sind mit simulierten
+Netzwerkantworten getestet. Das Werkzeug garantiert keine Erkennung sämtlicher
+beliebiger Netzwerkprogramme. Die folgenden manuellen nmcli-Befehle sind eine
+Alternative und sollen nicht zusätzlich zum Connector ausgeführt werden.
 
 ## 1. Voraussetzungen und WLAN
 
@@ -71,7 +163,7 @@ LUNA_PYTHON=/usr/bin/python3.12 bash install.sh
 ```
 
 Tibber Personal Access Token unter https://developer.tibber.com/settings/accesstoken
-im eigenen Konto erzeugen. Token und Huawei-Installateurpasswort **nur lokal** eingeben.
+im eigenen Konto erzeugen. Tibber-Token wird auf Wunsch sichtbar eingegeben (Einfügen möglich). Das Huawei-Installateurpasswort bleibt verdeckt; auch dort funktioniert Einfügen. Beide **nur lokal** eingeben.
 Sie landen in `config.json` mit Dateirechten 600. Nicht hier im Chat teilen.
 
 ## 3. Verbindungstest – noch keine Batterie-Schreibbefehle
@@ -212,7 +304,7 @@ Gewinnschwelle: Tagpreis > Nachtpreis / Wirkungsgrad + Verschleißkosten.
 Beispiel: 20 / 0,85 = 23,53 ct/kWh. Gegen 30 ct bleiben 6,47 ct/kWh vor Verschleiß,
 bei 5 kWh tatsächlich später genutztem Strom rund 0,32 Euro.
 
-Version 1.1 verlangt zusätzlich zur Kaufgrenze einen Preisvorteil gegenüber dem
+Version 1.2 verlangt zusätzlich zur Kaufgrenze einen Preisvorteil gegenüber dem
 **niedrigsten** Viertelstundenpreis im nächsten konfigurierten Verbrauchsfenster:
 `Referenzpreis - aktueller Preis / Wirkungsgrad - Verschleiß >= Mindestvorteil`.
 Der Vorteil muss außerdem positiv sein. Innerhalb des Verbrauchsfensters wird nicht

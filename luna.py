@@ -21,7 +21,7 @@ DEFAULT = {
     "expected_serial": "", "username": "installer", "password": "",
     "tibber_token": "", "tibber_home_id": "", "mode": "monitor",
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
-    "max_session_minutes": 120,
+    "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
     "use_start_hour": 6, "use_end_hour": 9, "timezone": "Europe/Berlin",
 }
@@ -212,6 +212,9 @@ async def operate(args, c, folder):
         else:
             emit("prices", slots=prices)
         return
+    if c.get("wifi_enabled"):
+        from wifi import check_app
+        await asyncio.to_thread(check_app, c["host"])
     hw = Huawei(c)
     pending = folder / "pending-charge.json"
     commissioned = folder / "commissioned.json"
@@ -294,6 +297,8 @@ async def operate(args, c, folder):
                 except Exception as exc:
                     prices = []
                     emit("price_error", error_type=type(exc).__name__)
+            if c.get("wifi_enabled"):
+                await asyncio.to_thread(check_app, c["host"])
             snapshot = await hw.snapshot()
             now = datetime.now(timezone.utc)
             eligible, reason, slot = decide(c, snapshot, prices if time.monotonic() - fetched < 600 else [], now)
@@ -345,7 +350,7 @@ async def operate(args, c, folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
-    parser.add_argument("command", choices=["setup", "probe", "prices", "plan", "charge-test", "stop", "run"])
+    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     args = parser.parse_args()
     path = args.config.resolve()
@@ -354,7 +359,7 @@ def main():
         if path.exists():
             raise ValueError("config.json existiert bereits; direkt bearbeiten")
         c = dict(DEFAULT)
-        c["tibber_token"] = getpass.getpass("Tibber Personal Access Token (verdeckt): ")
+        c["tibber_token"] = input("Tibber Personal Access Token (sichtbar): ").strip()
         c["password"] = getpass.getpass("Lokales Huawei-Installateurpasswort (verdeckt): ")
         write_json(path, c)
         print("Konfiguration angelegt. Jetzt probe; danach expected_serial eintragen.")
@@ -368,6 +373,20 @@ def main():
             fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         except BlockingIOError:
             raise RuntimeError("Eine Instanz läuft bereits; Dienst zuerst stoppen") from None
+        if args.command == "credentials":
+            token = input("Neuer Tibber-Token (sichtbar; Enter behält bisherigen): ").strip()
+            if token:
+                c["tibber_token"] = token
+            write_json(path, c)
+            print("Token gespeichert.")
+            return
+        if args.command == "wifi-enable":
+            from wifi import load
+            load()
+            c["wifi_enabled"] = True
+            write_json(path, c)
+            print("WLAN-Prüfung aktiviert. Netzwerkdienst separat starten.")
+            return
         asyncio.run(operate(args, c, path.parent))
 
 if __name__ == "__main__":
