@@ -88,7 +88,8 @@ def load():
     ipaddress.IPv4Address(c['host'])
     return c
 
-def guard(c, configuring=False):
+def guard(c, configuring=False, prepare_handoff=False):
+    prepare_handoff = configuring and prepare_handoff and active("dhcpcd")
     interface = c['interface']
     if not active('NetworkManager'):
         raise Conflict('NetworkManager ist nicht aktiv')
@@ -96,7 +97,7 @@ def guard(c, configuring=False):
     if kind != 'wifi':
         raise Conflict('Adapter fehlt oder ist kein WLAN-Adapter')
     state = nm('GENERAL.STATE', 'device', 'show', interface)
-    if state.startswith(('10 ', '20 ')):
+    if state.startswith('10 ') or (state.startswith('20 ') and not prepare_handoff):
         raise Conflict('WLAN ist unmanaged, gesperrt oder nicht verfügbar; keine Übernahme')
     current = nm('GENERAL.CON-UUID', 'device', 'show', interface)
     if current not in ('', '--', c['uuid']):
@@ -114,7 +115,8 @@ def guard(c, configuring=False):
             continue
         if argv and Path(argv[0]).name == 'wpa_supplicant':
             if ('-i' + interface) in argv or any(a == '-i' and i + 1 < len(argv) and argv[i+1] == interface for i, a in enumerate(argv)):
-                raise Conflict('Eigenständiger wpa_supplicant-Prozess belegt den Adapter')
+                if not prepare_handoff:
+                    raise Conflict('Eigenständiger wpa_supplicant-Prozess belegt den Adapter')
     # The global D-Bus wpa_supplicant service is normal for NetworkManager.
     for uid in nm('UUID', 'connection', 'show').splitlines():
         if uid == c['uuid']:
@@ -173,8 +175,8 @@ def configure(args):
          'host': '192.168.200.1', 'port': 6607, 'ssid': ''}
     if not re.fullmatch(r'[a-zA-Z0-9_-]{1,15}', c['interface']):
         raise ValueError('Ungültiger Adaptername')
-    guard(c, configuring=True)
     dual = active('dhcpcd')
+    guard(c, configuring=True, prepare_handoff=dual and args.exclude_dhcpcd)
     if dual and not args.exclude_dhcpcd:
         raise Conflict('dhcpcd läuft ebenfalls. --exclude-dhcpcd reserviert nur diesen WLAN-Adapter für NetworkManager')
     c['ssid'] = input('Huawei WLAN-Name (SSID): ').strip()
