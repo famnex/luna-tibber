@@ -48,7 +48,7 @@ sudo loginctl enable-linger "$(id -un)"
 
 Das Installationsskript fragt beim ersten Start ein Web-Passwort (mindestens 12 Zeichen)
 ab. Im Browser `http://PI-LAN-IP:8099` öffnen, für den bisher beobachteten Pi
-`http://192.168.178.76:8099`. Kein Portforwarding: HTTP ist für das vertrauenswürdige
+`http://<SERVER-IP>:8099`. Kein Portforwarding: HTTP ist für das vertrauenswürdige
 Heimnetz gedacht. Für Zugriff über nicht vertrauenswürdige Netze TLS-Reverse-Proxy
 oder einen SSH-Tunnel verwenden. Keine CORS-Freigabe, Session-Cookies HttpOnly/SameSite,
 Host-Prüfung, Login-Drosselung und keine Zugangsdaten in Statusantworten.
@@ -415,3 +415,27 @@ Befehlsreihenfolge, Stopp nach Schreibfehlern und Schreibsperren. Kein echter Ge
 
 Das Paket enthält eigenen Anwendungscode und Abhängigkeitsangaben; Drittanbieter-Bibliotheken
 werden beim Installieren bezogen und unterliegen ihren jeweiligen Lizenzen.
+
+
+### Einmalig „Geplant“ laden
+Im Webinterface Startdatum/-uhrzeit und Ende als Uhrzeit oder Ziel-SOC wählen.
+Eine Enduhrzeit vor dem Start bedeutet den Folgetag. Alle Zeiten gelten in der
+konfigurierten Zeitzone; mehrdeutige/fehlende Zeiten beim Sommerzeitwechsel werden
+abgewiesen. Auch SOC-Aufträge enden spätestens nach `max_session_minutes`.
+Bei Uhrzeit-Aufträgen gilt zusätzlich der konfigurierte Ziel-SOC. Der SOC eines
+Einmalauftrags überschreibt die Konfiguration nicht. Kein Tibber-Preisfilter.
+„Aus“, Fehler oder Serverneustart beenden/verwerfen den Auftrag. Ein verpasstes
+Fenster wird nicht nachgeholt. SOC wird per Abfrage geprüft, daher ist ein kleiner
+Überschwinger möglich; kein exakt auf die Sekunde garantierter Stopp.
+
+### Grenzen und Eingriffe
+Die Software schreibt ausschließlich die vier Register für erzwungene Ladeleistung,
+Ladedauer, Zielmodus TIME und CHARGE/STOP. Diese Positivliste wird vor jedem Schreiben
+geprüft. Das ist ein Eingriff in die Wechselrichtersteuerung; es wird keine
+vollständige Wiederherstellung vorheriger Registerwerte versprochen. Netzschutz,
+Netzcode, BMS-Grenzen und Firmware werden nicht beschrieben.
+Kurze Aufträge (höchstens zwei Minuten) begrenzen einen Verbindungsabbruch nur, wenn
+die Gerätefirmware den Timer korrekt umsetzt. Softwaretests ersetzen keine Prüfung
+am Gerät. Enpal-Fremdsteuerung, Firmwareverhalten, Hardwarefehler und zusätzliche
+Batteriealterung bleiben Risiken. Die Wartungsfunktion ist keine Herstellerfreigabe
+für diese Automatisierung. Vertrags-/Garantiebedingungen vor Dauerbetrieb klären.

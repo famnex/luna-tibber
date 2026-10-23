@@ -106,3 +106,46 @@ class HTTPTests(unittest.TestCase):
         conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
         conn.request('GET','/',headers={'Host':'attacker.invalid'})
         r=conn.getresponse();self.assertEqual(r.status,403);r.read();conn.close()
+
+class PlannedTests(unittest.TestCase):
+    def setUp(self):
+        self.c = dict(luna.DEFAULT)
+        self.now = datetime(2026,10,23,18,tzinfo=timezone.utc)
+        self.data = {'start':'2026-10-23T23:30','end_kind':'time','end':'01:00'}
+    def test_overnight(self):
+        p=web.planned_order(self.data,self.c,self.now)
+        self.assertEqual((datetime.fromisoformat(p['end'])-datetime.fromisoformat(p['start'])).total_seconds(),5400)
+    def test_soc_has_hard_deadline(self):
+        p=web.planned_order({**self.data,'end_kind':'soc','target_soc':75},self.c,self.now)
+        self.assertEqual(p['target_soc'],75)
+        self.assertEqual((datetime.fromisoformat(p['end'])-datetime.fromisoformat(p['start'])).total_seconds(),self.c['max_session_minutes']*60)
+        self.assertEqual(self.c['target_soc'],luna.DEFAULT['target_soc'])
+    def test_invalid_and_dst(self):
+        for patch in [{'start':'2026-10-23T12:00'}, {'end':'06:00'}, {'end_kind':'soc','target_soc':float('nan')}, {'start':'2026-10-25T02:30'}]:
+            with self.assertRaises(ValueError):web.planned_order({**self.data,**patch},self.c,self.now)
+    def test_start_once_expire_and_no_restart(self):
+        with tempfile.TemporaryDirectory() as d:
+            app=web.Dashboard(Path(d),start_worker=False)
+            app.planned=web.planned_order(self.data,self.c,self.now)
+            app.mode='planned'
+            start=datetime.fromisoformat(app.planned['start'])
+            end=datetime.fromisoformat(app.planned['end'])
+            with patch.object(app,'preflight'),patch.object(app,'launch') as launch:
+                app.tick_planned(self.now)
+                launch.assert_not_called()
+                app.tick_planned(start)
+                app.tick_planned(start)
+                launch.assert_called_once_with('charge',target_soc=self.c['target_soc'])
+                app.tick_planned(end)
+                self.assertEqual(app.mode,'off')
+                self.assertIsNone(app.planned)
+            self.assertIsNone(web.Dashboard(Path(d),start_worker=False).planned)
+    def test_missed_window_does_not_launch(self):
+        with tempfile.TemporaryDirectory() as d:
+            app=web.Dashboard(Path(d),start_worker=False)
+            app.planned=web.planned_order(self.data,self.c,self.now)
+            app.mode='planned'
+            with patch.object(app,'launch') as launch:
+                app.tick_planned(datetime.fromisoformat(app.planned['end']))
+                launch.assert_not_called()
+                self.assertEqual(app.mode,'off')

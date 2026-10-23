@@ -61,6 +61,38 @@ def schedule_at(rows, now):
             return row['mode'], f'{day}:{i}'
     return 'off', 'outside'
 
+def planned_order(data, c, now=None):
+    now = now or datetime.now(timezone.utc)
+    zone = ZoneInfo(c['timezone'])
+    local = datetime.fromisoformat(data['start'])
+    if local.tzinfo is not None:
+        raise ValueError('Start als lokale Uhrzeit mit Datum eingeben')
+    start = local.replace(tzinfo=zone).astimezone(timezone.utc)
+    if start.astimezone(zone).replace(tzinfo=None) != local or local.replace(tzinfo=zone,fold=0).utcoffset() != local.replace(tzinfo=zone,fold=1).utcoffset():
+        raise ValueError('Start liegt in einer mehrdeutigen oder fehlenden Zeit bei Zeitumstellung')
+    if start <= now:
+        raise ValueError('Start muss in der Zukunft liegen')
+    kind = data['end_kind']
+    target = c['target_soc']
+    end = start + timedelta(minutes=c['max_session_minutes'])
+    if kind == 'time':
+        clock = datetime.strptime(data['end'], '%H:%M').time()
+        finish = datetime.combine(local.date(),clock)
+        if finish <= local:
+            finish += timedelta(days=1)
+        end = finish.replace(tzinfo=zone).astimezone(timezone.utc)
+        if end.astimezone(zone).replace(tzinfo=None) != finish or finish.replace(tzinfo=zone,fold=0).utcoffset() != finish.replace(tzinfo=zone,fold=1).utcoffset():
+            raise ValueError('Ende liegt in einer Zeitumstellung')
+    elif kind == 'soc':
+        target = data['target_soc']
+        if type(target) not in (int,float) or not 10 <= target <= 95:
+            raise ValueError('Ziel-SOC muss zwischen 10 und 95 Prozent liegen')
+    else:
+        raise ValueError('Ende muss Uhrzeit oder SOC sein')
+    if not 120 <= (end-start).total_seconds() <= c['max_session_minutes']*60:
+        raise ValueError('Ladefenster: mindestens 2 Minuten, höchstens maximale Sitzungslänge')
+    return {'start':start.isoformat(),'end':end.isoformat(),'target_soc':target,'end_kind':kind,'phase':'waiting'}
+
 class Dashboard:
     def __init__(self, folder=BASE, start_worker=True):
         self.folder = folder
@@ -71,6 +103,7 @@ class Dashboard:
         self.generation = 0
         self.mode = 'off'  # Never resume charging merely because the server rebooted.
         self.until = None
+        self.planned = None
         self.schedules = validate_schedules(read(folder/'schedules.json', []))
         self.last_slot = None
         self.fault = ''
@@ -94,7 +127,7 @@ class Dashboard:
             raise ValueError('Bitte ergänzen: ' + ', '.join(missing))
         if commissioning and read(self.folder/'commissioned.json',{}).get('serial') != c['expected_serial']:
             raise ValueError('Bitte zuerst den beaufsichtigten 2-Minuten-Ladetest erfolgreich durchführen')
-    def launch(self, job):
+    def launch(self, job, target_soc=None):
         if self.proc is not None:
             raise ValueError('Ein Vorgang läuft noch; zuerst stoppen')
         self.generation += 1
@@ -102,6 +135,8 @@ class Dashboard:
         cmd = [sys.executable,str(BASE/'luna.py'),'--config',str(self.config_path),job]
         if job in ('run','charge','charge-test','stop'):
             cmd.append('--execute')
+        if target_soc is not None:
+            cmd.extend(['--target-soc',str(target_soc)])
         if job == 'probe':
             self.last_probe_serial = None
         self.proc = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
@@ -132,12 +167,18 @@ class Dashboard:
                 if rc:
                     self.fault = self.fault or f'Vorgang beendet (Code {rc})'
                     self.mode = 'off'
+                if job == 'charge' and self.mode in ('on','planned'):
+                    self.mode = 'off'
+                    self.until = None
+                    if self.planned:
+                        self.planned['phase'] = 'failed' if rc else 'completed'
                 if rc == 0 and job == 'probe':
                     self.device = read(self.folder/'device.json',{})
                     self.last_probe_serial = self.device.get('serial')
     def stop(self):
         # Called with lock held; collector needs lock, so poll process directly.
         self.mode = 'off'
+        self.planned = None
         self.until = None
         self.last_slot = None
         p = self.proc
@@ -206,6 +247,17 @@ class Dashboard:
                 self.preflight(self.config(),False)
                 self.fault = ''
                 self.launch('charge-test')
+            elif name == 'planned':
+                c = self.config()
+                order = planned_order(data,c)
+                self.preflight(c)
+                self.fault = ''
+                self.stop()
+                if self.fault:
+                    raise ValueError(self.fault)
+                self.save_settings({})
+                self.planned = order
+                self.mode = 'planned'
             elif name == 'mode':
                 mode = data['mode']
                 if mode not in MODES:
@@ -216,7 +268,7 @@ class Dashboard:
                     if mode == 'smart' and not c['tibber_token']:
                         raise ValueError('Tibber-Token fehlt')
                     minutes = data.get('minutes',30)
-                    if type(minutes) is not int or not 2 <= minutes <= c['max_session_minutes']:
+                    if mode == 'on' and (type(minutes) is not int or not 2 <= minutes <= c['max_session_minutes']):
                         raise ValueError('Manuelle Dauer: 2 bis maximale Sitzungslänge in Minuten')
                 self.fault = ''
                 self.stop()
@@ -243,6 +295,9 @@ class Dashboard:
                     if self.until and time.monotonic() >= self.until:
                         self.stop()
                         continue
+                    if self.mode == 'planned':
+                        self.tick_planned()
+                        continue
                     mode,key = self.mode,self.mode
                     if mode == 'schedule':
                         mode,key = schedule_at(self.schedules,datetime.now(ZoneInfo(self.config()['timezone'])))
@@ -259,8 +314,29 @@ class Dashboard:
                             self.preflight(self.config())
                             self.launch('charge' if mode=='on' else 'run')
                 except Exception as exc:
-                    self.mode = 'off'
+                    self.stop()
                     self.fault = str(exc) if isinstance(exc,(ValueError,RuntimeError)) else 'Steuerung fehlgeschlagen'
+    def tick_planned(self, now=None):
+        now = now or datetime.now(timezone.utc)
+        order = self.planned
+        if not order:
+            self.stop()
+            return
+        end = datetime.fromisoformat(order['end'])
+        if now >= end:
+            self.stop()
+            return
+        if now < datetime.fromisoformat(order['start']):
+            return
+        if order['phase'] == 'waiting':
+            if (end-now).total_seconds() < 120:
+                self.stop()
+                return
+            self.preflight(self.config())
+            self.until = time.monotonic() + (end-now).total_seconds()
+            self.launch('charge',target_soc=order['target_soc'])
+            order['phase'] = 'charging'
+
     def price_worker(self):
         while not self.closed.is_set():
             with self.lock:
@@ -286,7 +362,7 @@ class Dashboard:
             plan = luna.economics_plan(c,prices,now)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'mode':self.mode,'job':self.job,'fault':self.fault,'settings':settings,
+            return {'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,

@@ -189,6 +189,13 @@ class Huawei:
             raise ValueError("Fehlt in den Einstellungen: " + ", ".join(missing))
         await asyncio.wait_for(self.device.login(self.c["username"], self.c["password"]), 30)
     async def write(self, name, value):
+        from huawei_solar import register_names as rn
+        allowed = {rn.STORAGE_FORCIBLE_CHARGE_POWER,
+                   rn.STORAGE_FORCED_CHARGING_AND_DISCHARGING_PERIOD,
+                   rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_SETTING_MODE,
+                   rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_WRITE}
+        if name not in allowed:
+            raise ValueError("Schreibzugriff auf dieses Register nicht erlaubt")
         if not await asyncio.wait_for(self.device.set(name, value), 15):
             raise RuntimeError("Huawei hat den Schreibbefehl nicht bestätigt")
     async def charge(self, watts, minutes):
@@ -315,6 +322,9 @@ async def operate(args, c, folder):
                      "price_ct_kwh": slot["ct"] if slot else None, "eligible": eligible, "reason": reason}
             write_json(status_path, state)
             emit("decision", **state)
+            if c.get("_manual") and snapshot["soc"] >= c["target_soc"]:
+                emit("target_reached", soc=snapshot["soc"])
+                break
             if live:
                 if own_charge and snapshot["battery_power_w"] > c["charge_power_w"] * 1.25 + 100:
                     raise RuntimeError("Ladeleistung überschreitet Vorgabe; mögliche Fremdsteuerung")
@@ -360,6 +370,7 @@ def main():
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
     parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
+    parser.add_argument("--target-soc", type=float, help="Temporärer Ziel-SOC nur für charge")
     args = parser.parse_args()
     path = args.config.resolve()
     os.umask(0o077)
@@ -375,6 +386,11 @@ def main():
     if path.stat().st_mode & 0o077:
         raise ValueError("Konfiguration enthält Geheimnisse: chmod 600 config.json")
     c = validate({**DEFAULT, **json.loads(path.read_text())})
+    if args.target_soc is not None:
+        if args.command != "charge":
+            raise ValueError("--target-soc nur bei charge erlaubt")
+        c["target_soc"] = args.target_soc
+        validate(c)
     # A separate status/probe cannot race with a running controller.
     with (path.parent / "controller.lock").open("w") as lock:
         try:
