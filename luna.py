@@ -23,6 +23,7 @@ DEFAULT = {
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
     "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
+    "night_start_hour": 0, "night_end_hour": 6,
     "use_start_hour": 6, "use_end_hour": 9, "timezone": "Europe/Berlin",
 }
 QUERY = '''{ viewer { homes { id appNickname currentSubscription {
@@ -63,6 +64,9 @@ def validate(c):
     if not (type(c["use_start_hour"]) is int and type(c["use_end_hour"]) is int
             and 0 <= c["use_start_hour"] < c["use_end_hour"] <= 24):
         raise ValueError("Verbrauchsfenster: ganzzahlige Stunden 0 <= Start < Ende <= 24")
+    if not (type(c['night_start_hour']) is int and type(c['night_end_hour']) is int
+            and 0 <= c['night_start_hour'] < c['night_end_hour'] <= 24):
+        raise ValueError('Nachtvergleich: ganzzahlige Stunden 0 <= Start < Ende <= 24')
     return c
 
 def fetch_prices(c):

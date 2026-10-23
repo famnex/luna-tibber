@@ -149,3 +149,30 @@ class PlannedTests(unittest.TestCase):
                 app.tick_planned(datetime.fromisoformat(app.planned['end']))
                 launch.assert_not_called()
                 self.assertEqual(app.mode,'off')
+
+class PriceComparisonTests(unittest.TestCase):
+    def prices(self,start,hours):
+        from datetime import timedelta
+        return [{'start':start+timedelta(minutes=15*i),'end':start+timedelta(minutes=15*(i+1)),'ct':10 if i<24 else 30} for i in range(hours*4)]
+    def test_full_day_and_losses(self):
+        c=dict(luna.DEFAULT);c['timezone']='UTC'
+        p=self.prices(datetime(2026,10,24,tzinfo=timezone.utc),24)
+        r=web.next_day_comparison(c,p,datetime(2026,10,23,tzinfo=timezone.utc))
+        self.assertEqual(r['day_ct'],25)
+        self.assertEqual(r['night_ct'],10)
+        self.assertAlmostEqual(r['saving_ct'],25-10/.85)
+    def test_gap_is_not_average(self):
+        c=dict(luna.DEFAULT);c['timezone']='UTC'
+        p=self.prices(datetime(2026,10,24,tzinfo=timezone.utc),24)
+        del p[30]
+        r=web.next_day_comparison(c,p,datetime(2026,10,23,tzinfo=timezone.utc))
+        self.assertFalse(r['complete']);self.assertIsNone(r['saving_ct'])
+    def test_dst_25_hour_day_and_negative_prices(self):
+        c=dict(luna.DEFAULT)
+        p=self.prices(datetime(2026,10,24,22,tzinfo=timezone.utc),25)
+        for row in p:row['ct']=-5
+        r=web.next_day_comparison(c,p,datetime(2026,10,24,12,tzinfo=timezone.utc))
+        self.assertTrue(r['complete']);self.assertEqual(r['day_ct'],-5)
+    def test_empty_prices(self):
+        r=web.next_day_comparison(dict(luna.DEFAULT),[],datetime.now(timezone.utc))
+        self.assertFalse(r['complete']);self.assertIsNone(r['night_ct'])

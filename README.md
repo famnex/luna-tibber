@@ -439,3 +439,16 @@ die Gerätefirmware den Timer korrekt umsetzt. Softwaretests ersetzen keine Prü
 am Gerät. Enpal-Fremdsteuerung, Firmwareverhalten, Hardwarefehler und zusätzliche
 Batteriealterung bleiben Risiken. Die Wartungsfunktion ist keine Herstellerfreigabe
 für diese Automatisierung. Vertrags-/Garantiebedingungen vor Dauerbetrieb klären.
+
+### Preisübersicht und Bedienung
+Das Dashboard zeigt Ladeindikatoren, Fortschrittsmeldungen, Verbindungsstatus,
+veraltete Messwerte und einen per Maus, Touch oder Tastatur bedienbaren Preisgraphen.
+Einstellungen sind nach Verbindung, Tibber, Ladegrenzen und Preisvergleich gruppiert.
+Token und Passwort sind zunächst verdeckt; Einfügen ist möglich.
+Der Vergleich nutzt den vollständigen nächsten lokalen Kalendertag (00–24 Uhr)
+und dessen einstellbares Nachtfenster (Standard 00–06 Uhr). Zeitgewichtete Mittelwerte
+berücksichtigen auch 23-/25-Stunden-Tage. Fehlende Intervalle verhindern einen
+vollständigen Vergleich. Vorteil = Tagesmittel − Nachtmittel / Wirkungsgrad −
+Verschleißreserve. Diese Orientierung ändert die Smart-Entscheidung nicht.
+System-WLAN-Zugangsdaten bleiben im separat privilegierten WLAN-Connector; der
+Webdienst verändert keine Betriebssystem-Netzwerkkonfiguration.

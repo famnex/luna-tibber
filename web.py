@@ -61,6 +61,33 @@ def schedule_at(rows, now):
             return row['mode'], f'{day}:{i}'
     return 'off', 'outside'
 
+def next_day_comparison(c, prices, now):
+    """Time weighted, complete local-day coverage; handles 23/25 hour DST days."""
+    zone = ZoneInfo(c['timezone'])
+    day = now.astimezone(zone).date() + timedelta(days=1)
+    midnight = datetime.combine(day,datetime.min.time(),tzinfo=zone)
+    start = midnight.astimezone(timezone.utc)
+    end = (midnight+timedelta(days=1)).astimezone(timezone.utc)
+    night_start = (midnight+timedelta(hours=c['night_start_hour'])).astimezone(timezone.utc)
+    night_end = (midnight+timedelta(hours=c['night_end_hour'])).astimezone(timezone.utc)
+    def average(a,b):
+        cursor,total = a,0.0
+        for row in sorted(prices,key=lambda p:p['start']):
+            left,right = max(a,row['start']),min(b,row['end'])
+            if right <= left:
+                continue
+            if left != cursor:  # Missing or overlapping prices are not a complete series.
+                return None
+            total += row['ct']*(right-left).total_seconds()
+            cursor = right
+        return total/(b-a).total_seconds() if cursor == b and b>a else None
+    daily,night = average(start,end),average(night_start,night_end)
+    effective = None if night is None else night/c['roundtrip_efficiency']+c['wear_ct_kwh']
+    saving = None if daily is None or effective is None else daily-effective
+    return {'date':str(day),'day_ct':daily,'night_ct':night,'effective_ct':effective,
+            'saving_ct':saving,'night_start':night_start.isoformat(),'night_end':night_end.isoformat(),
+            'complete':daily is not None and night is not None}
+
 def planned_order(data, c, now=None):
     now = now or datetime.now(timezone.utc)
     zone = ZoneInfo(c['timezone'])
@@ -366,6 +393,8 @@ class Dashboard:
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
+                    'comparison':next_day_comparison(c,prices,now),
+                    'price_age_seconds':max(0,int(time.monotonic()-self.price_at)) if self.price_at else None,
                     'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
                     'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
                     'wifi':{k:wifi.get(k) for k in ('interface','ssid','host')},
