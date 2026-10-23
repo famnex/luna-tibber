@@ -149,6 +149,7 @@ class Dashboard:
         self.last_probe_serial = None
         self.price_data = []
         self.price_at = 0
+        self.price_fetched_at = 0
         self.price_error = ''
         self.sample_at = -60
         self.closed = threading.Event()
@@ -204,6 +205,9 @@ class Dashboard:
                 if rc and job != 'sample':
                     self.fault = self.fault or f'Vorgang beendet (Code {rc})'
                     self.mode = 'off'
+                    self.until = None
+                    if self.planned:
+                        self.planned['phase'] = 'failed'
                 if job == 'charge' and self.mode in ('on','planned'):
                     self.mode = 'off'
                     self.until = None
@@ -256,6 +260,7 @@ class Dashboard:
             if c['expected_serial'] != old_serial:
                 (self.folder/'commissioned.json').unlink(missing_ok=True)
         self.price_at = 0
+        self.price_fetched_at = 0
         self.price_data = []
     def action(self, name, data):
         with self.lock:
@@ -331,8 +336,7 @@ class Dashboard:
                 try:
                     if self.mode == 'off':
                         continue
-                    if self.until and time.monotonic() >= self.until:
-                        self.stop()
+                    if self.expire_order():
                         continue
                     if self.mode == 'planned':
                         self.tick_planned()
@@ -355,6 +359,12 @@ class Dashboard:
                 except Exception as exc:
                     self.stop()
                     self.fault = str(exc) if isinstance(exc,(ValueError,RuntimeError)) else 'Steuerung fehlgeschlagen'
+    def expire_order(self):
+        if self.until is not None and time.monotonic() >= self.until:
+            self.stop()
+            return True
+        return False
+
     def tick_planned(self, now=None):
         now = now or datetime.now(timezone.utc)
         order = self.planned
@@ -383,13 +393,16 @@ class Dashboard:
                 due = time.monotonic()-self.price_at >= 300
             if due:
                 try:
-                    prices = luna.fetch_prices(c)
-                    error = ''
+                    from price_cache import get
+                    prices,stamp,fallback = get(c,self.folder,luna.fetch_prices)
+                    error = 'Tibber nicht erreichbar · gespeicherte Preise werden verwendet' if fallback else ''
                 except Exception:
+                    stamp = 0
                     prices,error = [],'Tibber-Preise nicht verfügbar; Token und Zuhause-ID prüfen'
                 with self.lock:
-                    if self.config().get('tibber_token') == c['tibber_token']:
+                    if all(self.config().get(k)==c[k] for k in ('tibber_token','tibber_home_id')):
                         self.price_data,self.price_error,self.price_at = prices,error,time.monotonic()
+                        self.price_fetched_at = stamp
             self.closed.wait(10)
     def request_sample(self, fast=False):
         # Called only by a visible browser. Reuse ongoing controller measurements.
@@ -416,7 +429,7 @@ class Dashboard:
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
-                    'price_age_seconds':max(0,int(time.monotonic()-self.price_at)) if self.price_at else None,
+                    'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
                     'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
                     'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
                     'server_time':datetime.now(timezone.utc).isoformat(),

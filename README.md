@@ -505,3 +505,9 @@ und nächste Phase bzw. Ende. Bei „An“ läuft die Restzeit lokal sekündlich
 Bei verstecktem Tab wird nicht weiter gezeichnet; beim Zurückkehren wird synchronisiert.
 Bei 00:00 wartet die Anzeige auf Serverbestätigung statt einen erfolgreichen Stopp
 zu behaupten. Es entstehen keine zusätzlichen sekündlichen Geräte-/Netzabfragen.
+
+### Phasenanzeige und Preis-Cache
+
+Die Statuskarte zeigt geplanten Start, Ladebestätigung, Ladephase, Pause und Stopp mit Symbolen. Smart bleibt zwischen Ladefenstern aktiv. An und Geplant wechseln nach Zeitablauf bzw. nach Erreichen des Ziel-SOC automatisch auf Aus; der Server übernimmt dies auch bei geschlossenem Browser. Am bekannten Phasenwechsel fragt die sichtbare Oberfläche den Status zusätzlich ab. Angezeigte Smart-Stoppzeiten berücksichtigen den 130-Sekunden-Sicherheitsabstand des Controllers; Pläne werden anhand aktueller Messwerte neu berechnet.
+
+Webserver und Controller teilen einen lokalen Tibber-Cache (`tibber-prices.json`, Dateirechte 0600). Er übersteht Neustarts und vermeidet doppelte Preisabrufe innerhalb von fünf Minuten. Bei Abruffehlern werden höchstens 24 Stunden alte, noch zeitlich gültige Preisintervalle weiterverwendet. Die bestehende Prüfung auf vollständige Nacht-/Verbrauchsfenster bleibt aktiv. Der Cache ist an Token und Zuhause-ID gebunden, enthält aber keine Zugangsdaten. Änderungen dieser Zugangsdaten verhindern die Wiederverwendung des alten Caches. Die Oberfläche meldet die Verwendung gespeicherter Preise bei Abruffehlern.

@@ -23,3 +23,7 @@ device.json.tmp
 
 web-sessions.json
 web-sessions.json.tmp
+
+tibber-prices.json
+tibber-prices.lock
+.tibber-*

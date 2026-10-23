@@ -58,6 +58,14 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.app.mode,'on')
         self.assertIsNotNone(self.app.until)
         self.assertEqual(web.Dashboard(self.folder,start_worker=False).mode,'off')
+    def test_deadline_switches_off_without_browser(self):
+        for mode in ('on','planned'):
+            self.app.mode=mode
+            self.app.until=0
+            self.assertTrue(self.app.expire_order())
+            self.assertEqual(self.app.mode,'off')
+            self.assertIsNone(self.app.until)
+
     def test_manual_still_obeys_soc_and_ac(self):
         c={**luna.DEFAULT,'_manual':True}
         s={'soc':61,'battery_status':2,'ac_charge_enabled':True}

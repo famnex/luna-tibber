@@ -70,6 +70,10 @@ def validate(c):
         raise ValueError('Nachtvergleich: ganzzahlige Stunden 0 <= Start < Ende <= 24')
     return c
 
+def cached_prices(c, folder):
+    from price_cache import get
+    return get(c, folder, fetch_prices)[0]
+
 def fetch_prices(c):
     if not c["tibber_token"]:
         raise ValueError("Tibber-Token fehlt; zuerst setup ausführen")
@@ -230,7 +234,7 @@ async def operate(args, c, folder):
     if args.command == "charge":
         c = {**c, "_manual": True, "mode": "auto"}
     if args.command in ("prices", "plan"):
-        prices = await asyncio.to_thread(fetch_prices, c)
+        prices = await asyncio.to_thread(cached_prices, c, folder)
         if args.command == "plan":
             emit("plan", **economics_plan(c, prices, datetime.now(timezone.utc)))
         else:
@@ -317,7 +321,7 @@ async def operate(args, c, folder):
             if not c.get("_manual") and mono - attempted >= 300:
                 attempted = mono
                 try:
-                    prices = await asyncio.to_thread(fetch_prices, c)
+                    prices = await asyncio.to_thread(cached_prices, c, folder)
                     fetched = time.monotonic()
                 except Exception as exc:
                     prices = []
@@ -326,7 +330,7 @@ async def operate(args, c, folder):
                 await asyncio.to_thread(check_app, c["host"])
             snapshot = await hw.snapshot()
             now = datetime.now(timezone.utc)
-            eligible, reason, slot = decide(c, snapshot, prices if time.monotonic() - fetched < 600 else [], now)
+            eligible, reason, slot = decide(c, snapshot, prices, now)
             state = {"time": now.isoformat(), "live": live, **snapshot,
                      "economics": economics_plan(c, prices, now),
                      "price_ct_kwh": slot["ct"] if slot else None, "eligible": eligible, "reason": reason}

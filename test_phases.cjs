@@ -1,0 +1,13 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/app.js','utf8'),ctx={Date};vm.createContext(ctx);
+vm.runInContext(source.slice(source.indexOf('function phaseInfo'),source.indexOf('function renderBatteryCard')),ctx);
+const now=Date.parse('2026-10-24T01:00:00Z'),iso=m=>new Date(now+m*60000).toISOString();
+const d={mode:'planned',settings:{timezone:'Europe/Berlin'},telemetry:{time:iso(0),battery_power_w:1000},planned:{start:iso(10),end:iso(30),phase:'waiting',end_kind:'time'}};
+assert.match(ctx.phaseInfo(d,now)[1],/Geplanter Start.*Geplanter Stopp/);
+d.planned.phase='charging';d.planned.start=iso(-5);assert.match(ctx.phaseInfo(d,now)[0],/Lade/);
+assert.match(ctx.phaseInfo(d,now+31*60000)[1],/Aus/);
+d.mode='smart';d.smart_preview={windows:[{start:iso(-5),end:iso(10)},{start:iso(20),end:iso(30)}],reason:'Plan'};
+assert.match(ctx.phaseInfo(d,now)[1],/Geplante Pause.*Weiter/);
+assert.match(ctx.phaseInfo(d,now+15*60000)[1],/Geplanter Start/);
+d.mode='off';assert.match(ctx.phaseInfo(d,now)[0],/Aus/);
+console.log('Phase display: planned start/end, loading, Smart pause/resume, off passed');

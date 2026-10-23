@@ -84,6 +84,29 @@ function drawCountdown(){
  $('countdown').textContent=String(mins).padStart(2,'0')+':'+String(secs).padStart(2,'0');
  $('timerhint').textContent=left?'Bis zum Zeitlimit · Ziel-SOC kann früher stoppen':'Zeitlimit erreicht · Statusbestätigung abwarten';
 }
+function phaseInfo(d,now=Date.now()){
+ const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+ const t=d.telemetry||{}, fresh=t.time&&Math.abs(now-Date.parse(t.time))<=90000;
+ const loading=fresh&&t.battery_power_w>100;
+ if(d.fault)return ['⚠ Steuerungsfehler',d.fault];
+ if(d.mode==='off')return ['○ Aus','Kein Ladeauftrag aktiv'];
+ if(d.mode==='planned'&&d.planned){
+  const p=d.planned;
+  if(now>=Date.parse(p.end))return ['⌛ Auftrag beendet · Stopp wird bestätigt','Automatischer Wechsel zu Aus'];
+  const end=p.end_kind==='soc'?`■ Stopp bei ${p.target_soc} % · spätestens ${fmt(p.end)}`:`■ Geplanter Stopp um ${fmt(p.end)}`;
+  if(p.phase==='waiting'&&now<Date.parse(p.start))return ['◷ Warte auf geplanten Start',`▶ Geplanter Start um ${fmt(p.start)} · ${end}`];
+  return [loading?'ϟ Lade …':'⌛ Warte auf Ladebestätigung',end];
+ }
+ if(d.mode==='smart'){
+  const p=d.smart_preview,slots=p.windows||[];
+  const active=slots.find(w=>Date.parse(w.start)<=now&&now<Date.parse(w.end)-130000);
+  const next=slots.find(w=>Date.parse(w.start)>now);
+  if(active){const later=slots.some(w=>Date.parse(w.start)>=Date.parse(active.end));return [loading?'ϟ Smart · Lade …':'⌛ Smart · Warte auf Ladebestätigung',`${later?'Ⅱ Geplante Pause':'■ Geplanter Stopp'} um ${fmt(Date.parse(active.end)-130000)}${next?' · ▶ Weiter um '+fmt(next.start):''}`];}
+  if(next)return ['Ⅱ Smart · Warte auf günstigen Zeitslot',`▶ Geplanter Start um ${fmt(next.start)} · ${p.reason}`];
+  return ['◷ Smart · Warte auf neue Ladegelegenheit',p.reason];
+ }
+ return [loading?'ϟ Lade …':'⌛ Warte auf Ladebestätigung',d.remaining_seconds!==null?`■ Geplanter Stopp um ${fmt(now+d.remaining_seconds*1000)}`:'Status wird aktualisiert'];
+}
 function renderBatteryCard(d){
  const t=d.telemetry,age=t.time?(Date.now()-Date.parse(t.time))/1000:Infinity;
  const fresh=age>=0&&age<=90;
@@ -97,10 +120,7 @@ function renderBatteryCard(d){
  $('socfill').setAttribute('width',fresh?Math.min(1000,Math.max(0,t.soc*10)):0);
  $('soctarget').setAttribute('x1',target*10);$('soctarget').setAttribute('x2',target*10);
  $('socgraphic').setAttribute('aria-label',fresh?`Akkustand ${t.soc} Prozent, Ziel ${target} Prozent`:'Akkustand veraltet oder unbekannt');
- $('cardstatus').textContent=d.fault?'Steuerungsfehler':d.mode==='off'?'App-Steuerung aus · Batteriestatus unabhängig davon':d.mode==='smart'?(charging?'Smart · Ladephase aktiv':'Smart · wartet / pausiert'):d.mode==='planned'?'Geplanter Ladeauftrag':'Manueller Ladeauftrag';
- const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
- const first=d.smart_preview.windows[0];
- $('cardplan').textContent=d.mode==='planned'&&d.planned?fmt(d.planned.phase==='waiting'?d.planned.start:d.planned.end):d.mode==='smart'&&first?fmt(first.start):d.remaining_seconds!==null?fmt(Date.now()+d.remaining_seconds*1000):'—';
+ const phase=phaseInfo(d);$('cardstatus').textContent=phase[0];$('cardplan').textContent=phase[1];
  $('timerlabel').textContent=d.mode==='on'?'MANUELL · RESTZEIT':'RESTZEIT';
  drawCountdown();
 }
@@ -125,7 +145,16 @@ function scheduleRefresh(){
  clearTimeout(refreshTimer);
  if(document.hidden)return;
  const pending=watch||['sample','probe','charge-test','stop'].includes(lastStatus?.job);
- refreshTimer=setTimeout(refresh,pending?10000:60000);
+ let delay=pending?10000:60000;
+ // Refresh at a known phase boundary; the server remains authoritative.
+ if(lastStatus){
+  const d=lastStatus,now=Date.now(),bounds=[];
+  if(d.remaining_seconds!==null&&d.remaining_seconds!==undefined)bounds.push(d.remaining_seconds*1000);
+  if(d.mode==='planned'&&d.planned)bounds.push(Date.parse(d.planned.start)-now,Date.parse(d.planned.end)-now);
+  if(d.mode==='smart')for(const w of d.smart_preview?.windows||[])bounds.push(Date.parse(w.start)-now,Date.parse(w.end)-130000-now);
+  for(const ms of bounds)if(ms>=0)delay=Math.min(delay,Math.max(1000,ms+1000));
+ }
+ refreshTimer=setTimeout(refresh,delay);
 }
 document.addEventListener('visibilitychange',()=>{clearTimeout(refreshTimer);if(!document.hidden)refresh();});
 refresh();
