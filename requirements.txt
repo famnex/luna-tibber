@@ -1,0 +1,5 @@
+huawei-solar==3.0.7
+tmodbus==0.6.2
+tenacity==9.2.1
+serialx==1.14.0
+typing-extensions==4.16.0
