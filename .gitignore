@@ -1,0 +1,14 @@
+.venv/
+__pycache__/
+*.pyc
+config.json
+config.json.tmp
+status.json
+status.json.tmp
+commissioned.json
+commissioned.json.tmp
+pending-charge.json
+pending-charge.json.tmp
+controller.lock
+.env
+*.log
