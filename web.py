@@ -163,6 +163,7 @@ class Dashboard:
         self.price_data = []
         self.price_at = 0
         self.price_error = ''
+        self.sample_at = -60
         self.closed = threading.Event()
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
@@ -206,14 +207,14 @@ class Dashboard:
                     self.telemetry = event
                 if event.get('event') == 'connected':
                     self.device = event
-                if event.get('event') == 'error':
+                if event.get('event') == 'error' and job != 'sample':
                     self.fault = event.get('message','Vorgang fehlgeschlagen')
         rc = proc.wait()
         with self.lock:
             if gen == self.generation:
                 self.proc = None
                 self.job = None
-                if rc:
+                if rc and job != 'sample':
                     self.fault = self.fault or f'Vorgang beendet (Code {rc})'
                     self.mode = 'off'
                 if job == 'charge' and self.mode in ('on','planned'):
@@ -401,6 +402,14 @@ class Dashboard:
                     if self.config().get('tibber_token') == c['tibber_token']:
                         self.price_data,self.price_error,self.price_at = prices,error,time.monotonic()
             self.closed.wait(10)
+    def request_sample(self, fast=False):
+        # Called only by a visible browser. Reuse ongoing controller measurements.
+        with self.lock:
+            if self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
+                return
+            self.sample_at = time.monotonic()
+            self.launch('sample')
+
     def snapshot(self):
         with self.lock:
             c = self.config()
@@ -428,6 +437,22 @@ class Dashboard:
         with self.lock:
             self.stop()
 
+SESSION_SECONDS = 30 * 24 * 60 * 60
+
+def session_key(token):
+    return hashlib.sha256(token.encode()).hexdigest()
+
+def load_sessions(path, auth):
+    data = read(path,{})
+    if data.get('auth_hash') != auth['hash']:
+        return {}
+    return {k:v for k,v in data.get('sessions',{}).items() if isinstance(v,(int,float)) and v>time.time()}
+
+def save_sessions(server):
+    path = getattr(server,'session_path',None)
+    if path is not None:
+        luna.write_json(path,{'auth_hash':server.auth['hash'],'sessions':server.sessions})
+
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):
         pass
@@ -451,7 +476,7 @@ class Handler(BaseHTTPRequestHandler):
             cookie = SimpleCookie(self.headers.get('Cookie',''))
             token = cookie['luna'].value
             with self.server.auth_lock:
-                return self.server.sessions.get(token,0)>time.monotonic()
+                return self.server.sessions.get(session_key(token),0)>time.time()
         except (KeyError,ValueError):
             return False
     def do_GET(self):
@@ -464,7 +489,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,(BASE/filename).read_bytes(),kind)
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
-        if self.path == '/api/status':
+        if self.path in ('/api/status','/api/status?fast=1'):
+            self.server.app.request_sample(fast=self.path.endswith('?fast=1'))
             return self.send(200,self.server.app.snapshot())
         self.send(404,{'error':'Nicht gefunden'})
     def do_POST(self):
@@ -490,16 +516,18 @@ class Handler(BaseHTTPRequestHandler):
                     digest = hashlib.pbkdf2_hmac('sha256',str(data.get('password','')).encode(),bytes.fromhex(auth['salt']),300000).hex()
                     if not hmac.compare_digest(digest,auth['hash']):
                         return self.send(401,{'error':'Passwort falsch'})
-                    self.server.sessions = {k:v for k,v in self.server.sessions.items() if v>now}
+                    self.server.sessions = {k:v for k,v in self.server.sessions.items() if v>time.time()}
                     token = secrets.token_urlsafe(32)
-                    self.server.sessions[token]=now+43200
-                return self.send(200,{'ok':True},cookie=f'luna={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age=43200')
+                    self.server.sessions[session_key(token)]=time.time()+SESSION_SECONDS
+                    save_sessions(self.server)
+                return self.send(200,{'ok':True},cookie=f'luna={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={SESSION_SECONDS}')
             if not self.authenticated():
                 return self.send(401,{'error':'Bitte anmelden'})
             if self.path == '/api/logout':
                 cookie=SimpleCookie(self.headers.get('Cookie',''))
                 with self.server.auth_lock:
-                    self.server.sessions.pop(cookie['luna'].value,None)
+                    self.server.sessions.pop(session_key(cookie['luna'].value),None)
+                    save_sessions(self.server)
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
@@ -535,7 +563,8 @@ def main():
         server=ThreadingHTTPServer((args.host,args.port),Handler)
         server.daemon_threads=True
         server.app,server.auth=app,auth
-        server.sessions={}
+        server.session_path=BASE/'web-sessions.json'
+        server.sessions=load_sessions(server.session_path,auth)
         server.attempts=deque()
         server.auth_lock=threading.Lock()
         server.allowed_hosts={'localhost','127.0.0.1',args.host}

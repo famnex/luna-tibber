@@ -1,0 +1,14 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/app.js','utf8');
+let delay,callback,refreshed=0;
+const ctx={document:{hidden:false,addEventListener:(name,fn)=>callback=fn},setTimeout:(fn,ms)=>{delay=ms;return 1;},clearTimeout:()=>{delay=null;},refresh:()=>{refreshed++;},notify:()=>{},lastStatus:null,Date};
+vm.createContext(ctx);
+vm.runInContext(source.slice(source.indexOf('let refreshTimer=null,watch=null;')),ctx);
+vm.runInContext('scheduleRefresh()',ctx);assert.equal(delay,60000);
+vm.runInContext("watchChange('mode',{mode:'on'});scheduleRefresh()",ctx);assert.equal(delay,10000);
+ctx.document.hidden=true;callback();assert.equal(delay,null);
+ctx.document.hidden=false;callback();assert.equal(refreshed,2);
+ctx.lastStatus={mode:'on',telemetry:{eligible:true}};
+ctx.d={mode:'on',telemetry:{time:new Date(Date.now()+1000).toISOString(),battery_power_w:1000,eligible:true}};
+vm.runInContext('trackTransition(d);scheduleRefresh()',ctx);assert.equal(delay,60000);
+console.log('Polling: 60s / 10s, hidden pause, resume and measurement confirmation passed');

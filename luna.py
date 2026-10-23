@@ -257,7 +257,7 @@ async def operate(args, c, folder):
             return
         initial = await hw.snapshot()
         emit("snapshot", **initial)
-        if args.command == "probe":
+        if args.command in ("probe", "sample"):
             write_json(folder / "device.json", {"serial": hw.device.serial_number, "model": hw.device.model_name, "time": datetime.now(timezone.utc).isoformat(), **initial})
             return
         if live:
@@ -279,9 +279,9 @@ async def operate(args, c, folder):
             await asyncio.wait_for(hw.charge(watts, 2), 60)
             emit("test_started", watts=watts, max_minutes=2)
             positive_samples = 0
-            for _ in range(6):
+            for _ in range(12):
                 try:
-                    await asyncio.wait_for(stop_event.wait(), 20)
+                    await asyncio.wait_for(stop_event.wait(), 10)
                     break
                 except TimeoutError:
                     pass
@@ -334,7 +334,7 @@ async def operate(args, c, folder):
                     raise RuntimeError("Ladeleistung überschreitet Vorgabe; mögliche Fremdsteuerung")
                 if own_charge and session_start and time.monotonic() - session_start > 60:
                     no_charge_samples = no_charge_samples + 1 if snapshot["battery_power_w"] <= 100 else 0
-                    if no_charge_samples >= 3:
+                    if no_charge_samples >= 6:
                         raise RuntimeError("Keine anhaltende Ladeleistung: mögliche Fremdsteuerung; Automatik beendet")
                 if session_start and time.monotonic() - session_start >= c["max_session_minutes"] * 60:
                     raise RuntimeError("Maximale Sitzungslänge erreicht; Einstellungen prüfen und Dienst manuell neu starten")
@@ -356,7 +356,7 @@ async def operate(args, c, folder):
                     session_start, deadline, no_charge_samples = None, 0, 0
                     emit("stopped", reason=reason)
             try:
-                await asyncio.wait_for(stop_event.wait(), 20)
+                await asyncio.wait_for(stop_event.wait(), 10)
             except TimeoutError:
                 pass
     finally:
@@ -372,7 +372,7 @@ async def operate(args, c, folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
-    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge"])
+    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     parser.add_argument("--target-soc", type=float, help="Temporärer Ziel-SOC nur für charge")
     args = parser.parse_args()

@@ -210,3 +210,41 @@ class SmartPreviewTests(unittest.TestCase):
         self.assertEqual(p['start'],now.isoformat())
         self.assertEqual(p['end'],(now+timedelta(minutes=30)).isoformat())
         self.assertIsNone(web.smart_preview(c,[],now)['start'])
+
+class SessionPersistenceTests(unittest.TestCase):
+    def test_persistence_expiry_password_change_and_revoke(self):
+        from types import SimpleNamespace
+        import time
+        with tempfile.TemporaryDirectory() as folder:
+            path=Path(folder)/'web-sessions.json'
+            token='browser-session-secret'
+            key=web.session_key(token)
+            server=SimpleNamespace(session_path=path,auth={'hash':'password-hash'},sessions={key:time.time()+1000,'expired':1})
+            web.save_sessions(server)
+            self.assertNotIn(token,path.read_text())
+            self.assertEqual(path.stat().st_mode & 0o777,0o600)
+            self.assertIn(key,web.load_sessions(path,server.auth))
+            self.assertNotIn('expired',web.load_sessions(path,server.auth))
+            self.assertEqual(web.load_sessions(path,{'hash':'new-password'}),{})
+            server.sessions.pop(key)
+            web.save_sessions(server)
+            self.assertNotIn(key,web.load_sessions(path,server.auth))
+
+class DisplaySamplingTests(unittest.TestCase):
+    def test_rate_limit_and_running_controller_reuse(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app=web.Dashboard(Path(folder),start_worker=False)
+            app.save_settings({})
+            with patch.object(app,'launch') as launch,patch('web.time.monotonic',return_value=100):
+                app.request_sample()
+                app.request_sample()
+                launch.assert_called_once_with('sample')
+            with patch.object(app,'launch') as launch,patch('web.time.monotonic',return_value=111):
+                app.request_sample()
+                launch.assert_not_called()
+                app.request_sample(fast=True)
+                launch.assert_called_once_with('sample')
+            app.proc=object()
+            with patch.object(app,'launch') as launch,patch('web.time.monotonic',return_value=500):
+                app.request_sample(fast=True)
+                launch.assert_not_called()

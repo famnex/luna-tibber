@@ -467,3 +467,18 @@ Felder. Die Auswahl allein startet keine Ladung. Aus stoppt unmittelbar per Anfr
 Verbindung und Inbetriebnahme haben einen eigenen Hauptmenüpunkt. Spinner erscheinen
 an Aktionen und in einer festen Statusanzeige; Geräteaufträge bleiben bis zum Ende
 als laufend markiert.
+
+### Anmeldung und sichtbare Anzeige
+Browser-Anmeldungen bleiben 30 Tage erhalten, auch nach Dienstneustart. Das
+HttpOnly-Cookie enthält eine zufällige Sitzungskennung, kein Passwort. Auf dem
+Server werden nur deren Hashes in web-sessions.json (600, nicht in Git) gespeichert.
+Abmelden widerruft die Sitzung. Ein über web.py setup geändertes Passwort verwirft
+bisherige Sitzungen beim nächsten Dienststart.
+Der Wochenplan-Reiter entfällt; einmaliges Planen bleibt unter „Geplant“.
+Bei sichtbarer Webseite erfolgt die normale Statusabfrage alle 60 Sekunden, nach
+Steuerungswechseln alle 10 Sekunden bis zur bestätigten Änderung. Nach 3 Minuten
+ohne Bestätigung erscheint ein Hinweis und der normale Takt wird wieder verwendet.
+Beim Verbergen des Tabs pausiert die Anzeige; beim Öffnen wird sie aktualisiert.
+Im Leerlauf werden Messwerte auf Anfrage gelesen. Während einer Steuerung werden
+deren ohnehin erforderliche Sicherheitsmessungen wiederverwendet. Diese laufen
+unabhängig vom geöffneten Browser weiter. Bereits gestartete Abfragen dürfen enden.

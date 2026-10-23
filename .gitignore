@@ -20,3 +20,6 @@ schedules.json
 schedules.json.tmp
 device.json
 device.json.tmp
+
+web-sessions.json
+web-sessions.json.tmp
