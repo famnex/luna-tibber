@@ -17,9 +17,19 @@ async function refresh(){if(refreshing)return;refreshing=true;try{const r=await 
 $('loginform').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;showBusy(true,'Anmeldung läuft …',b);notify('Anmeldung läuft …','loading');try{await api('login',{password:$('loginpassword').value});$('loginpassword').value='';initialized=false;notify('');await refresh();}catch(err){notify(err.message,'error');}finally{showBusy(false,'',b);b.disabled=false;}};
 $('logout').onclick=async()=>{if(settingsDirty&&!confirm('Ungespeicherte Einstellungen verwerfen und abmelden?'))return;notify('Abmeldung läuft …','loading');try{await api('logout',{});initialized=false;settingsDirty=false;notify('Abgemeldet.');await refresh();}catch(e){notify(e.message,'error');}};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(s=>s.hidden=s.id!==b.dataset.tab);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));});
-document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{chosenMode=b.dataset.mode;modeDirty=true;renderControl(lastStatus);if(chosenMode==='off')perform('mode',{mode:'off'},b);});
-$('startmanual').onclick=e=>perform('mode',{mode:'on',minutes:Number($('minutes').value)},e.currentTarget);
-$('startsmart').onclick=e=>perform('mode',{mode:'smart'},e.currentTarget);
+document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{chosenMode=b.dataset.mode;modeDirty=true;renderControl(lastStatus);});
+$('confirmmode').onclick=async e=>{
+ if(!modeDirty||!lastStatus)return;
+ if(chosenMode==='planned'){
+  if(!$('plannedform').reportValidity())return;
+  await perform('planned',{start:$('plannedstart').value,end_kind:$('plannedkind').value,end:$('plannedend').value,target_soc:Number($('plannedsoc').value)},e.currentTarget);
+ }else{
+  if(chosenMode==='on'&&!$('minutes').reportValidity())return;
+  await perform('mode',{mode:chosenMode,minutes:Number($('minutes').value)},e.currentTarget);
+ }
+ if(lastStatus)renderControl(lastStatus);
+};
+$('cancelmode').onclick=()=>{modeDirty=false;chosenMode=lastStatus?.mode||'off';renderControl(lastStatus);};
 $('stop').onclick=async()=>{showBusy(true,'Stopp wird angefordert …',$('stop'));notify('Stopp wird angefordert …','loading');try{await api('mode',{mode:'off'});chosenMode='off';modeDirty=false;notify('Stopp angefordert. Gerätestatus abwarten.');await refresh();}catch(e){notify(e.message,'error');}finally{showBusy(false,'',$('stop'));}};
 $('probe').onclick=e=>perform('probe',{},e.currentTarget);
 $('adopt').onclick=async e=>{await perform('adopt-serial',{},e.currentTarget);initialized=false;await refresh();};
@@ -31,7 +41,7 @@ $('scheduleform').onsubmit=e=>{e.preventDefault();const rows=[...document.queryS
 refresh();setInterval(refresh,5000);
 
 $('plannedkind').onchange=()=>{$('endtimelabel').hidden=$('plannedkind').value!=='time';$('endsoclabel').hidden=$('plannedkind').value!=='soc';$('plannedend').required=$('plannedkind').value==='time';};
-$('plannedform').onsubmit=e=>{e.preventDefault();perform('planned',{start:$('plannedstart').value,end_kind:$('plannedkind').value,end:$('plannedend').value,target_soc:Number($('plannedsoc').value)},e.submitter);};
+$('plannedform').onsubmit=e=>{e.preventDefault();};
 
 $('settingsform').addEventListener('input',()=>{settingsDirty=true;notify('Ungespeicherte Einstellungen. Zum Speichern zuerst auf Aus schalten.','info');});
 window.addEventListener('beforeunload',e=>{if(settingsDirty){e.preventDefault();e.returnValue='';}});
@@ -54,8 +64,10 @@ function renderControl(d){
  if(!modeDirty)chosenMode=d.mode;
  for(const [id,mode] of [['manualcontrols','on'],['plannedcontrols','planned'],['smartcontrols','smart']])$(id).hidden=chosenMode!==mode;
  document.querySelectorAll('[data-mode]').forEach(b=>{b.classList.toggle('active',b.dataset.mode===chosenMode);b.setAttribute('aria-pressed',String(b.dataset.mode===chosenMode));});
- $('modedraft').textContent=modeDirty&&chosenMode!==d.mode?'Auswahl: '+modes[chosenMode]+' · Erst mit der Schaltfläche unten aktivieren. Aktuell: '+modes[d.mode]:chosenMode==='off'?'Aus: kein Ladeauftrag durch diese App.':'Aktueller Modus: '+modes[d.mode];
+ $('modedraft').textContent=modeDirty?'Auswahl: '+modes[chosenMode]+' · Erst mit der Schaltfläche unten aktivieren. Aktuell: '+modes[d.mode]:chosenMode==='off'?'Aus: kein Ladeauftrag durch diese App.':'Aktueller Modus: '+modes[d.mode];
  $('plannedform').hidden=d.mode==='planned'&&!modeDirty;
- $('startsmart').hidden=d.mode==='smart';
- $('startmanual').textContent=d.mode==='on'?'Mit dieser Dauer neu starten':'Jetzt laden';
+ $('modeconfirmation').hidden=!modeDirty;
+ const c=d.settings;
+ const info=chosenMode==='off'?'Die erzwungene Ladung und aktive Zeitplanung dieser App werden beendet.':chosenMode==='smart'?`Ziel ${c.target_soc} % · Leistung bis ${c.charge_power_w} W · Kaufgrenze ${ct(c.max_buy_ct_kwh)} · Mindestvorteil ${ct(c.min_saving_ct_kwh)}.`:chosenMode==='on'?`Ziel ${c.target_soc} % · Leistung bis ${c.charge_power_w} W · maximale Sitzung ${c.max_session_minutes} Minuten. Kein Preisvergleich.`:`Leistung bis ${c.charge_power_w} W · maximale Sitzung ${c.max_session_minutes} Minuten. Start und Ende wie oben eingegeben.`;
+ $('modepreview').textContent=info+' Ohne Bestätigung bleibt der aktive Modus unverändert.';
 }
