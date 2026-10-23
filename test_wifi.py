@@ -68,3 +68,14 @@ class WifiTests(unittest.TestCase):
         with patch('wifi.active',side_effect=lambda s:s in ('NetworkManager','dhcpcd')),patch('wifi.nm',side_effect=self.nm),patch('wifi.command',side_effect=self.command),patch('wifi.Path.read_text',side_effect=['denyinterfaces wlan0\n','boot-1']):
             with self.assertRaisesRegex(wifi.Conflict,'neu starten'):
                 wifi.guard({**C,'dhcpcd_boot':'boot-1'})
+
+    def test_unavailable_allowed_only_for_explicit_handoff_preparation(self):
+        def values(field,*args):
+            return '20 (unavailable)' if field=='GENERAL.STATE' else self.nm(field,*args)
+        with patch('wifi.active',side_effect=lambda s:s in ('NetworkManager','dhcpcd')),patch('wifi.nm',side_effect=values),patch('wifi.command',side_effect=self.command):
+            wifi.guard(C,configuring=True,prepare_handoff=True)
+            with self.assertRaises(wifi.Conflict): wifi.guard(C,configuring=True)
+            with self.assertRaises(wifi.Conflict): wifi.guard(C,prepare_handoff=True)
+    def test_handoff_still_refuses_existing_association(self):
+        with patch('wifi.active',side_effect=lambda s:s in ('NetworkManager','dhcpcd')),patch('wifi.nm',side_effect=self.nm),patch('wifi.command',return_value='Connected to aa:bb:cc:dd:ee:ff'):
+            with self.assertRaises(wifi.Conflict): wifi.guard(C,configuring=True,prepare_handoff=True)
