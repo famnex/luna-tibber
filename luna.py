@@ -134,6 +134,8 @@ def economics_plan(c, prices, now):
 
 def decide(c, snapshot, prices, now):
     slot = next((p for p in prices if p["start"] <= now < p["end"]), None)
+    if c.get("_manual"):
+        slot = {"start": now, "end": now + timedelta(minutes=15), "ct": None}
     if slot is None:
         return False, "Kein gültiger aktueller Preis", None
     if snapshot["soc"] >= c["target_soc"]:
@@ -142,6 +144,8 @@ def decide(c, snapshot, prices, now):
         return False, "Batterie offline oder gestört", slot
     if not snapshot["ac_charge_enabled"]:
         return False, "Von AC-Seite laden ist deaktiviert", slot
+    if c.get("_manual"):
+        return True, "Manuelles Laden bis Ziel-SOC oder Zeitlimit", slot
     if slot["ct"] > c["max_buy_ct_kwh"]:
         return False, "Preis oberhalb Kaufgrenze", slot
     if (slot["end"] - now).total_seconds() < 130:
@@ -180,8 +184,9 @@ class Huawei:
         result["ac_charge_enabled"] = bool(result["ac_charge_enabled"])
         return result
     async def login(self):
-        if not self.c["expected_serial"] or not self.c["password"]:
-            raise ValueError("Vor Schreibzugriff expected_serial und password lokal setzen")
+        missing = [label for key, label in (("expected_serial", "Wechselrichter-Seriennummer"), ("password", "Huawei-Installateurpasswort")) if not self.c[key]]
+        if missing:
+            raise ValueError("Fehlt in den Einstellungen: " + ", ".join(missing))
         await asyncio.wait_for(self.device.login(self.c["username"], self.c["password"]), 30)
     async def write(self, name, value):
         if not await asyncio.wait_for(self.device.set(name, value), 15):
@@ -205,6 +210,8 @@ class Huawei:
             await self.client.disconnect()
 
 async def operate(args, c, folder):
+    if args.command == "charge":
+        c = {**c, "_manual": True, "mode": "auto"}
     if args.command in ("prices", "plan"):
         prices = await asyncio.to_thread(fetch_prices, c)
         if args.command == "plan":
@@ -223,7 +230,7 @@ async def operate(args, c, folder):
     live = args.execute and (args.command != "run" or c["mode"] == "auto")
     if args.command in ("charge-test", "stop") and not args.execute:
         raise ValueError("Für diesen ausdrücklich gewünschten Schreibtest --execute ergänzen")
-    if args.command == "run" and c["mode"] == "auto" and not args.execute:
+    if args.command in ("run", "charge") and c["mode"] == "auto" and not args.execute:
         raise ValueError("Automatik zusätzlich mit --execute starten")
     stop_event = asyncio.Event()
     loop = asyncio.get_running_loop()
@@ -240,6 +247,7 @@ async def operate(args, c, folder):
         initial = await hw.snapshot()
         emit("snapshot", **initial)
         if args.command == "probe":
+            write_json(folder / "device.json", {"serial": hw.device.serial_number, "model": hw.device.model_name, "time": datetime.now(timezone.utc).isoformat(), **initial})
             return
         if live:
             await hw.login()
@@ -289,7 +297,7 @@ async def operate(args, c, folder):
         no_charge_samples = 0
         while not stop_event.is_set():
             mono = time.monotonic()
-            if mono - attempted >= 300:
+            if not c.get("_manual") and mono - attempted >= 300:
                 attempted = mono
                 try:
                     prices = await asyncio.to_thread(fetch_prices, c)
@@ -350,7 +358,7 @@ async def operate(args, c, folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
-    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run"])
+    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     args = parser.parse_args()
     path = args.config.resolve()

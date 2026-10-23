@@ -86,7 +86,7 @@ class CommandTests(unittest.IsolatedAsyncioTestCase):
             self.assertFalse((Path(folder)/'commissioned.json').exists())
             self.assertFalse((Path(folder)/'pending-charge.json').exists())
     async def test_probe_never_logs_in_or_writes(self):
-        fake=SimpleNamespace(connect=AsyncMock(),snapshot=AsyncMock(return_value={}),login=AsyncMock(),close=AsyncMock(),stop_charge=AsyncMock())
+        fake=SimpleNamespace(device=SimpleNamespace(serial_number="TEST",model_name="SUN2000-5KTL-M1"),connect=AsyncMock(),snapshot=AsyncMock(return_value={}),login=AsyncMock(),close=AsyncMock(),stop_charge=AsyncMock())
         with tempfile.TemporaryDirectory() as folder,patch('luna.Huawei',return_value=fake):
             await luna.operate(SimpleNamespace(command='probe',execute=False),dict(luna.DEFAULT),Path(folder))
         fake.login.assert_not_awaited()

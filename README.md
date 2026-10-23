@@ -1,4 +1,4 @@
-# LUNA + Tibber – lokale Linux-Steuerung, Version 1.2
+# LUNA + Tibber – lokale Linux-Steuerung, Version 2.0
 
 Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 
@@ -14,8 +14,7 @@ Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 **Stand:** Mit der installierten Python-Bibliothek und simulierten Geräten getestet.
 Kein Hardwaretest an deinem Wechselrichter und kein Abruf deines Tibber-Kontos möglich.
 Dies ist eine erste technische Version, kein fertiger Ertragsoptimierer. Keine PV-Prognose,
-keine Verbrauchsprognose, keine automatische Entladesperre für günstige Stunden und keine
-Weboberfläche. Der Wechselrichter entscheidet außerhalb unserer Ladebefehle weiter selbst
+keine Verbrauchsprognose und keine automatische Entladesperre für günstige Stunden. Der Wechselrichter entscheidet außerhalb unserer Ladebefehle weiter selbst
 über die Entladung. Ein billiger Einkauf allein garantiert daher keine Einsparung.
 
 Huawei beschreibt erzwungenes Laden als Wartungs-/Testfunktion und empfiehlt für
@@ -23,6 +22,86 @@ regelmäßige Zeitfenster TOU. Zuerst den lokalen Test und das Verhalten neben E
 Das Programm verändert weder Netzschutz noch Einspeiselimit, TOU, AC-Freigabe oder die
 angezeigten Netzladegrenzen. Es löst ausschließlich zeitlich begrenztes Laden und Stopp aus.
 Bei gegenseitigen Steuerbefehlen von Enpal/evcc ist kein zuverlässiger Parallelbetrieb garantiert.
+
+## Webinterface (Version 2)
+
+Responsive Oberfläche auf dem Pi, keine Cloud und keine zusätzlichen Python-Pakete.
+Anmeldung mit eigenem Web-Passwort. Die Anwendung nutzt den normalen Linux-Benutzer.
+
+Vorherigen CLI-Ladedienst zuerst beenden/deaktivieren, falls eingerichtet:
+
+```bash
+systemctl --user disable --now luna-tibber.service
+```
+
+Ein Fehler „Unit does not exist“ bedeutet lediglich, dass dieser Dienst nicht installiert war.
+Einen direkt im Terminal laufenden Controller mit Strg+C beenden.
+Dann:
+
+```bash
+cd ~/apps/luna-tibber
+git pull --ff-only
+.venv/bin/python -m unittest -v
+bash install-web.sh
+sudo loginctl enable-linger "$(id -un)"
+```
+
+Das Installationsskript fragt beim ersten Start ein Web-Passwort (mindestens 12 Zeichen)
+ab. Im Browser `http://PI-LAN-IP:8099` öffnen, für den bisher beobachteten Pi
+`http://192.168.178.76:8099`. Kein Portforwarding: HTTP ist für das vertrauenswürdige
+Heimnetz gedacht. Für Zugriff über nicht vertrauenswürdige Netze TLS-Reverse-Proxy
+oder einen SSH-Tunnel verwenden. Keine CORS-Freigabe, Session-Cookies HttpOnly/SameSite,
+Host-Prüfung, Login-Drosselung und keine Zugangsdaten in Statusantworten.
+
+Einrichtung vollständig für Batterie/Tibber im Browser:
+1. Einstellungen: Huawei-Installateurpasswort und Tibber-Token eintragen, speichern.
+2. Übersicht: Gerät auslesen. Danach Seriennummer übernehmen. Die Seriennummer
+   wird nur nach einem erfolgreichen Probe-Vorgang übernehmbar.
+3. Beaufsichtigten 2-Minuten-Ladetest starten und Netzbezug/Ladeleistung prüfen.
+4. Danach Smart, An oder Zeitpläne aktivieren.
+
+Die bisherige Meldung „expected_serial und password lokal setzen“ wird durch konkrete
+fehlende Felder ersetzt. Ohne passende Seriennummer/Passwort sind Schreibbefehle gesperrt.
+Ein Wechsel der Seriennummer verwirft die bisherige Ladetest-Freigabe.
+
+Modi:
+- **Aus**: beendet den eigenen Ladeprozess und sendet bei vorhandenen Zugangsdaten
+  zusätzlich Stopp. Normale Enpal-/Huawei-Ladung/Entladung wird nicht deaktiviert.
+- **Smart**: bestehender Preisfilter mit Kaufgrenze, Gesamtwirkungsgrad,
+  Verschleißreserve, Mindestvorteil und konfiguriertem Verbrauchsfenster.
+- **An**: sofortiges preisunabhängiges Laden mit manuell gewählter Dauer;
+  SOC-Limit, AC-Freigabe, Gerätestatus, Leistungsgrenzen und Testfreigabe gelten weiter.
+- **Zeitpläne**: Wochenfenster für Aus/Smart/An, auch über Mitternacht. Erster
+  passender Eintrag gewinnt; sonst Aus. Zeitzone aus Einstellungen. Bei der
+  Zeitumstellung werden lokale Fenster berücksichtigt; es gibt keinen separaten
+  zweiten Start derselben Fensterinstanz in der wiederholten Stunde.
+
+Nach Webserver-Neustart immer **Aus**. Zeitpläne bleiben gespeichert, müssen aber
+wieder aktiviert werden. Fehler führen zu Aus, ohne automatische Wiederholung des
+Ladeprozesses. Die maximale zusammenhängende Sitzung gilt auch bei Zeitplänen.
+Prozessausgaben werden nur als begrenzte Ereignisliste im Speicher gehalten.
+
+Im Modus Aus wird die Gerätetelemetrie per „Gerät / Status auslesen“ aktualisiert;
+bei laufendem Laden/Smart automatisch. Die Oberfläche zeigt das Alter der letzten
+Messung. Die Preisrechnung wird unabhängig davon regelmäßig aktualisiert.
+
+WLAN-Profil/SSID werden angezeigt und die WLAN-Prüfung kann in den Einstellungen
+aktiviert werden. Die privilegierte OS-Netzwerkeinrichtung (SSID/Passwort ändern,
+dhcpcd-Übergabe) bleibt beim mitgelieferten `wifi.py`/NetworkManager-Werkzeug:
+der Webserver erhält absichtlich keine Root-Rechte. Das ist noch keine Web-Verwaltung
+sämtlicher Betriebssystem-Netzwerkeinstellungen.
+
+Betrieb:
+
+```bash
+systemctl --user status luna-web --no-pager
+journalctl --user -u luna-web -n 50 --no-pager
+systemctl --user restart luna-web
+```
+
+Passwort neu setzen: Webdienst stoppen, `.venv/bin/python web.py setup` ausführen,
+Webdienst wieder starten. Das setzt auch die bestehenden Web-Sitzungen zurück.
+Manueller Vordergrundstart: `.venv/bin/python web.py serve --host 0.0.0.0 --port 8099`.
 
 ## Neu: WLAN-Connector für openHABian / NetworkManager
 
@@ -304,7 +383,7 @@ Gewinnschwelle: Tagpreis > Nachtpreis / Wirkungsgrad + Verschleißkosten.
 Beispiel: 20 / 0,85 = 23,53 ct/kWh. Gegen 30 ct bleiben 6,47 ct/kWh vor Verschleiß,
 bei 5 kWh tatsächlich später genutztem Strom rund 0,32 Euro.
 
-Version 1.2 verlangt zusätzlich zur Kaufgrenze einen Preisvorteil gegenüber dem
+Version 2.0 verlangt zusätzlich zur Kaufgrenze einen Preisvorteil gegenüber dem
 **niedrigsten** Viertelstundenpreis im nächsten konfigurierten Verbrauchsfenster:
 `Referenzpreis - aktueller Preis / Wirkungsgrad - Verschleiß >= Mindestvorteil`.
 Der Vorteil muss außerdem positiv sein. Innerhalb des Verbrauchsfensters wird nicht

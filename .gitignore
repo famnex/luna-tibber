@@ -12,3 +12,11 @@ pending-charge.json.tmp
 controller.lock
 .env
 *.log
+
+web-auth.json
+web-auth.json.tmp
+web.lock
+schedules.json
+schedules.json.tmp
+device.json
+device.json.tmp
