@@ -61,10 +61,10 @@ def schedule_at(rows, now):
             return row['mode'], f'{day}:{i}'
     return 'off', 'outside'
 
-def next_day_comparison(c, prices, now):
+def next_day_comparison(c, prices, now, day_offset=1):
     """Time weighted, complete local-day coverage; handles 23/25 hour DST days."""
     zone = ZoneInfo(c['timezone'])
-    day = now.astimezone(zone).date() + timedelta(days=1)
+    day = now.astimezone(zone).date() + timedelta(days=day_offset)
     midnight = datetime.combine(day,datetime.min.time(),tzinfo=zone)
     start = midnight.astimezone(timezone.utc)
     end = (midnight+timedelta(days=1)).astimezone(timezone.utc)
@@ -393,7 +393,8 @@ class Dashboard:
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
-                    'comparison':next_day_comparison(c,prices,now),
+                    'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
+                    'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                     'price_age_seconds':max(0,int(time.monotonic()-self.price_at)) if self.price_at else None,
                     'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
                     'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
@@ -434,8 +435,9 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
-        if self.path in static:
-            filename,kind = static[self.path]
+        asset_path = self.path.split('?',1)[0]
+        if asset_path in static:
+            filename,kind = static[asset_path]
             return self.send(200,(BASE/filename).read_bytes(),kind)
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})

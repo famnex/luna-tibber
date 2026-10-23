@@ -455,3 +455,15 @@ Webdienst verändert keine Betriebssystem-Netzwerkkonfiguration.
 
 Der Smart-Vergleich nimmt gleichmäßig verteilten Verbrauch im Verbrauchsfenster an.
 Ein einzelnes günstiges Intervall bestimmt den Vergleichspreis nicht mehr.
+
+### Bedienung und Vergleichsdatum
+Während des eingestellten Nachtfensters vergleicht „Automatisch“ die laufende
+Nacht mit dem heutigen Tag; nach Ende des Nachtfensters den nächsten Tag.
+„Heute“/„Morgen“ erlauben eine ausdrückliche Auswahl. Fehlende Preise werden nicht
+durch andere Tagesdaten ersetzt. Der volle Nachtmittelwert enthält während der
+laufenden Nacht auch bereits vergangene Intervalle und ist keine Ladeprognose.
+In der Steuerung wählt man An/Smart/Geplant und bestätigt anschließend die passenden
+Felder. Die Auswahl allein startet keine Ladung. Aus stoppt unmittelbar per Anfrage.
+Verbindung und Inbetriebnahme haben einen eigenen Hauptmenüpunkt. Spinner erscheinen
+an Aktionen und in einer festen Statusanzeige; Geräteaufträge bleiben bis zum Ende
+als laufend markiert.

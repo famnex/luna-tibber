@@ -176,3 +176,26 @@ class PriceComparisonTests(unittest.TestCase):
     def test_empty_prices(self):
         r=web.next_day_comparison(dict(luna.DEFAULT),[],datetime.now(timezone.utc))
         self.assertFalse(r['complete']);self.assertIsNone(r['night_ct'])
+
+class ComparisonDateTests(unittest.TestCase):
+    def test_after_midnight_uses_today_during_night(self):
+        from datetime import timedelta
+        with tempfile.TemporaryDirectory() as folder:
+            app=web.Dashboard(Path(folder),start_worker=False)
+            start=datetime(2026,10,23,22,tzinfo=timezone.utc)
+            app.price_data=[{'start':start+timedelta(minutes=15*i),'end':start+timedelta(minutes=15*(i+1)),'ct':20} for i in range(96)]
+            import time
+            app.price_at=time.monotonic()
+            with patch('web.datetime',wraps=datetime) as clock:
+                clock.now.return_value=datetime(2026,10,23,23,tzinfo=timezone.utc)
+                status=app.snapshot()
+            self.assertEqual(status['comparison']['date'],'2026-10-24')
+            self.assertTrue(status['comparison']['complete'])
+            self.assertFalse(status['comparisons']['tomorrow']['complete'])
+    def test_after_night_selects_next_day(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app=web.Dashboard(Path(folder),start_worker=False)
+            with patch('web.datetime',wraps=datetime) as clock:
+                clock.now.return_value=datetime(2026,10,24,10,tzinfo=timezone.utc)
+                status=app.snapshot()
+            self.assertEqual(status['comparison']['date'],'2026-10-25')
