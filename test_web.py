@@ -199,3 +199,14 @@ class ComparisonDateTests(unittest.TestCase):
                 clock.now.return_value=datetime(2026,10,24,10,tzinfo=timezone.utc)
                 status=app.snapshot()
             self.assertEqual(status['comparison']['date'],'2026-10-25')
+
+class SmartPreviewTests(unittest.TestCase):
+    def test_window_and_duration_cap(self):
+        from datetime import timedelta
+        c={**luna.DEFAULT,'timezone':'UTC','use_start_hour':6,'use_end_hour':9,'max_session_minutes':30}
+        now=datetime(2026,10,24,1,tzinfo=timezone.utc)
+        prices=[{'start':now+timedelta(minutes=15*i),'end':now+timedelta(minutes=15*(i+1)),'ct':10 if i<8 else 30} for i in range(32)]
+        p=web.smart_preview(c,prices,now)
+        self.assertEqual(p['start'],now.isoformat())
+        self.assertEqual(p['end'],(now+timedelta(minutes=30)).isoformat())
+        self.assertIsNone(web.smart_preview(c,[],now)['start'])

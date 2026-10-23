@@ -88,6 +88,28 @@ def next_day_comparison(c, prices, now, day_offset=1):
             'saving_ct':saving,'night_start':night_start.isoformat(),'night_end':night_end.isoformat(),
             'complete':daily is not None and night is not None}
 
+def smart_preview(c, prices, now):
+    """First contiguous economical window, not a hardware or SOC forecast."""
+    start = end = None
+    for row in sorted(prices,key=lambda p:p['start']):
+        at = max(now,row['start'])
+        if (row['end']-at).total_seconds() < 130:
+            continue
+        eligible = row['ct'] <= c['max_buy_ct_kwh'] and luna.economics_plan(c,prices,at)['ok']
+        if start is None:
+            if not eligible:
+                continue
+            start,end = at,row['end']
+        elif eligible and row['start'] == end:
+            end = row['end']
+        else:
+            break
+    if start is not None:
+        end = min(end,start+timedelta(minutes=c['max_session_minutes']))
+    return {'start':start.isoformat() if start else None,'end':end.isoformat() if end else None,
+            'power_w':c['charge_power_w'],'target_soc':c['target_soc'],
+            'max_minutes':c['max_session_minutes']}
+
 def planned_order(data, c, now=None):
     now = now or datetime.now(timezone.utc)
     zone = ZoneInfo(c['timezone'])
@@ -392,6 +414,7 @@ class Dashboard:
             return {'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
+                    'smart_preview':smart_preview(c,prices,now),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
