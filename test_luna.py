@@ -26,6 +26,15 @@ class LogicTests(unittest.TestCase):
         self.assertFalse(luna.economics_plan(self.c,self.p[:-1],self.now)["ok"])
         self.assertFalse(luna.economics_plan({**self.c,"wear_ct_kwh":20},self.p,self.now)["ok"])
         self.assertFalse(luna.economics_plan(self.c,self.p,self.p[1]["start"])["ok"])
+    def test_consumption_reference_uses_mean_not_minimum(self):
+        self.p[1]['ct'] = 14
+        expected = (14 + 11 * 30) / 12
+        plan = luna.economics_plan(self.c, self.p, self.now)
+        self.assertAlmostEqual(plan['reference_ct_kwh'], expected)
+        self.assertAlmostEqual(plan['saving_ct_kwh'], expected - 15/.85)
+        self.assertTrue(plan['ok'])
+        self.assertTrue(luna.decide(self.c, self.s, self.p, self.now)[0])
+
     def test_price_and_soc(self):
         self.assertTrue(luna.decide(self.c,self.s,self.p,self.now)[0])
         self.s['soc']=80

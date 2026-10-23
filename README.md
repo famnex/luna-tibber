@@ -384,7 +384,7 @@ Beispiel: 20 / 0,85 = 23,53 ct/kWh. Gegen 30 ct bleiben 6,47 ct/kWh vor Verschle
 bei 5 kWh tatsächlich später genutztem Strom rund 0,32 Euro.
 
 Version 2.0 verlangt zusätzlich zur Kaufgrenze einen Preisvorteil gegenüber dem
-**niedrigsten** Viertelstundenpreis im nächsten konfigurierten Verbrauchsfenster:
+**zeitgewichteten durchschnittlichen** Viertelstundenpreis im nächsten konfigurierten Verbrauchsfenster:
 `Referenzpreis - aktueller Preis / Wirkungsgrad - Verschleiß >= Mindestvorteil`.
 Der Vorteil muss außerdem positiv sein. Innerhalb des Verbrauchsfensters wird nicht
 netzgeladen. Fehlen zukünftige Preise auch nur teilweise, wird nicht geladen.
@@ -452,3 +452,6 @@ vollständigen Vergleich. Vorteil = Tagesmittel − Nachtmittel / Wirkungsgrad �
 Verschleißreserve. Diese Orientierung ändert die Smart-Entscheidung nicht.
 System-WLAN-Zugangsdaten bleiben im separat privilegierten WLAN-Connector; der
 Webdienst verändert keine Betriebssystem-Netzwerkkonfiguration.
+
+Der Smart-Vergleich nimmt gleichmäßig verteilten Verbrauch im Verbrauchsfenster an.
+Ein einzelnes günstiges Intervall bestimmt den Vergleichspreis nicht mehr.

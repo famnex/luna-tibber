@@ -105,7 +105,7 @@ def fetch_prices(c):
     return sorted(prices.values(), key=lambda p: p["start"])
 
 def economics_plan(c, prices, now):
-    """Conservative price filter for an explicitly assumed consumption window."""
+    """Time-weighted mean price filter; assumes uniform consumption in the window."""
     local = now.astimezone(ZoneInfo(c["timezone"]))
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
     start = midnight + timedelta(hours=c["use_start_hour"])
@@ -127,7 +127,7 @@ def economics_plan(c, prices, now):
         cursor = p["end"]
     if cursor != end:
         return {"ok": False, "reason": "Preise des Verbrauchsfensters noch nicht vollständig verfügbar"}
-    reference = min(p["ct"] for p in future)
+    reference = sum(p["ct"] * (p["end"] - p["start"]).total_seconds() for p in future) / (end - start).total_seconds()
     effective = current["ct"] / c["roundtrip_efficiency"] + c["wear_ct_kwh"]
     saving = reference - effective
     ok = saving > 0 and saving >= c["min_saving_ct_kwh"]
