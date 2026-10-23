@@ -201,15 +201,13 @@ class ComparisonDateTests(unittest.TestCase):
             self.assertEqual(status['comparison']['date'],'2026-10-25')
 
 class SmartPreviewTests(unittest.TestCase):
-    def test_window_and_duration_cap(self):
+    def test_stale_soc_blocks_preview(self):
         from datetime import timedelta
-        c={**luna.DEFAULT,'timezone':'UTC','use_start_hour':6,'use_end_hour':9,'max_session_minutes':30}
+        c={**luna.DEFAULT,'battery_capacity_kwh':10}
         now=datetime(2026,10,24,1,tzinfo=timezone.utc)
-        prices=[{'start':now+timedelta(minutes=15*i),'end':now+timedelta(minutes=15*(i+1)),'ct':10 if i<8 else 30} for i in range(32)]
-        p=web.smart_preview(c,prices,now)
-        self.assertEqual(p['start'],now.isoformat())
-        self.assertEqual(p['end'],(now+timedelta(minutes=30)).isoformat())
-        self.assertIsNone(web.smart_preview(c,[],now)['start'])
+        p=web.smart_preview(c,[],now,{'soc':30,'time':(now-timedelta(minutes=3)).isoformat()})
+        self.assertEqual(p['windows'],[])
+        self.assertIn('Akkustand',p['reason'])
 
 class SessionPersistenceTests(unittest.TestCase):
     def test_persistence_expiry_password_change_and_revoke(self):

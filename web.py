@@ -88,27 +88,14 @@ def next_day_comparison(c, prices, now, day_offset=1):
             'saving_ct':saving,'night_start':night_start.isoformat(),'night_end':night_end.isoformat(),
             'complete':daily is not None and night is not None}
 
-def smart_preview(c, prices, now):
-    """First contiguous economical window, not a hardware or SOC forecast."""
-    start = end = None
-    for row in sorted(prices,key=lambda p:p['start']):
-        at = max(now,row['start'])
-        if (row['end']-at).total_seconds() < 130:
-            continue
-        eligible = row['ct'] <= c['max_buy_ct_kwh'] and luna.economics_plan(c,prices,at)['ok']
-        if start is None:
-            if not eligible:
-                continue
-            start,end = at,row['end']
-        elif eligible and row['start'] == end:
-            end = row['end']
-        else:
-            break
-    if start is not None:
-        end = min(end,start+timedelta(minutes=c['max_session_minutes']))
-    return {'start':start.isoformat() if start else None,'end':end.isoformat() if end else None,
-            'power_w':c['charge_power_w'],'target_soc':c['target_soc'],
-            'max_minutes':c['max_session_minutes']}
+def smart_preview(c, prices, now, telemetry=None):
+    from smart import plan
+    telemetry=telemetry or {}
+    stamp=telemetry.get('time')
+    fresh=stamp and 0 <= (now-datetime.fromisoformat(stamp)).total_seconds() <= 90
+    return plan(c,prices,now,telemetry.get('soc') if fresh else None,
+                telemetry.get('max_charge_power_w') if fresh else None)
+
 
 def planned_order(data, c, now=None):
     now = now or datetime.now(timezone.utc)
@@ -315,6 +302,8 @@ class Dashboard:
                 if mode != 'off':
                     c = self.config()
                     self.preflight(c)
+                    if mode == 'smart' and c['battery_capacity_kwh'] <= 0:
+                        raise ValueError('Nutzbare Akkukapazität in kWh zuerst in den Einstellungen eintragen')
                     if mode == 'smart' and not c['tibber_token']:
                         raise ValueError('Tibber-Token fehlt')
                     minutes = data.get('minutes',30)
@@ -423,13 +412,14 @@ class Dashboard:
             return {'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'smart_preview':smart_preview(c,prices,now),
+                    'smart_preview':smart_preview(c,prices,now,self.telemetry),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                     'price_age_seconds':max(0,int(time.monotonic()-self.price_at)) if self.price_at else None,
                     'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
                     'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
+                    'server_time':datetime.now(timezone.utc).isoformat(),
                     'wifi':{k:wifi.get(k) for k in ('interface','ssid','host')},
                     'events':list(self.events)[-12:]}
     def close(self):

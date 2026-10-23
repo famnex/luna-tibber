@@ -33,10 +33,10 @@ class LogicTests(unittest.TestCase):
         self.assertAlmostEqual(plan['reference_ct_kwh'], expected)
         self.assertAlmostEqual(plan['saving_ct_kwh'], expected - 15/.85)
         self.assertTrue(plan['ok'])
-        self.assertTrue(luna.decide(self.c, self.s, self.p, self.now)[0])
+        self.assertFalse(luna.decide(self.c, self.s, self.p, self.now)[0]) # capacity and night prices not configured
 
     def test_price_and_soc(self):
-        self.assertTrue(luna.decide(self.c,self.s,self.p,self.now)[0])
+        self.assertFalse(luna.decide(self.c,self.s,self.p,self.now)[0]) # no Smart capacity configured
         self.s['soc']=80
         self.assertFalse(luna.decide(self.c,self.s,self.p,self.now)[0])
         self.s['soc']=61

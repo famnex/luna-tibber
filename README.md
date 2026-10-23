@@ -482,3 +482,26 @@ Beim Verbergen des Tabs pausiert die Anzeige; beim Öffnen wird sie aktualisiert
 Im Leerlauf werden Messwerte auf Anfrage gelesen. Während einer Steuerung werden
 deren ohnehin erforderliche Sicherheitsmessungen wiederverwendet. Diese laufen
 unabhängig vom geöffneten Browser weiter. Bereits gestartete Abfragen dürfen enden.
+
+### Smart: Kapazität und günstige Ladephasen
+Vor Smart die **nutzbare Akkukapazität gesamt in kWh** eintragen. Standard 0 bedeutet
+unbekannt und verhindert eine Smart-Freigabe. Bedarf = Kapazität × SOC-Differenz / 100.
+Dauer = Bedarf / batterieseitige Ladeleistung; eine vom Gerät gemeldete niedrigere
+Maximalleistung wird berücksichtigt. Der Roundtrip-Wirkungsgrad bleibt Teil der
+Preisvorteilsrechnung, wird aber nicht nochmals auf die batterieseitige Energie
+angewendet. Die Vorschau benötigt einen höchstens 90 Sekunden alten SOC.
+Smart verteilt den Bedarf auf die preislich günstigsten geeigneten Teile der
+Viertelstundenintervalle im Nachtfenster. Kaufgrenze und Mindestvorteil bleiben
+wirksam. Zwischen den Phasen sendet der Controller STOP und lädt später erneut.
+Er plant anhand frischer Messwerte nach; fehlende Nachtpreise verhindern die Planung.
+Schaltreserve ist berücksichtigt. Unzureichende geeignete Ladezeit wird angezeigt.
+Hausverbrauch/PV werden nicht prognostiziert, und Enpal kann den Akku in Pausen
+entladen. Daher sind Energie, Dauer und Zielerreichung Schätzungen. Das bestehende
+Limit für zusammenhängende Ladesitzungen bleibt als Abbruchgrenze bestehen.
+
+### Statuskarte und Countdown
+Die Übersicht zeigt Batterieleistung, Flussrichtung, Akkustand als Balken, Zielmarke
+und nächste Phase bzw. Ende. Bei „An“ läuft die Restzeit lokal sekündlich in MM:SS.
+Bei verstecktem Tab wird nicht weiter gezeichnet; beim Zurückkehren wird synchronisiert.
+Bei 00:00 wartet die Anzeige auf Serverbestätigung statt einen erfolgreichen Stopp
+zu behaupten. Es entstehen keine zusätzlichen sekündlichen Geräte-/Netzabfragen.

@@ -1,0 +1,11 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const source=fs.readFileSync(__dirname+'/app.js','utf8');const nodes={countdown:{},timerhint:{}};
+const ctx={document:{hidden:false},lastStatus:{remaining_seconds:125,mode:'on'},countdownAnchor:1000,performance:{now:()=>1000},$:id=>nodes[id]};
+vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function drawCountdown()'),source.indexOf('function renderBatteryCard')),ctx);
+vm.runInContext('drawCountdown()',ctx);assert.equal(nodes.countdown.textContent,'02:05');
+ctx.performance.now=()=>62000;vm.runInContext('drawCountdown()',ctx);assert.equal(nodes.countdown.textContent,'01:04');
+ctx.document.hidden=true;ctx.performance.now=()=>200000;vm.runInContext('drawCountdown()',ctx);assert.equal(nodes.countdown.textContent,'01:04');
+ctx.document.hidden=false;vm.runInContext('drawCountdown()',ctx);assert.equal(nodes.countdown.textContent,'00:00');
+assert.match(nodes.timerhint.textContent,/Statusbestätigung/);
+ctx.lastStatus.remaining_seconds=null;vm.runInContext('drawCountdown()',ctx);assert.equal(nodes.countdown.textContent,'—');
+console.log('Countdown: ticks, pauses rendering while hidden, clamps at zero, waits for server confirmation');

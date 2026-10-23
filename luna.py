@@ -21,6 +21,7 @@ DEFAULT = {
     "expected_serial": "", "username": "installer", "password": "",
     "tibber_token": "", "tibber_home_id": "", "mode": "monitor",
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
+    "battery_capacity_kwh": 0.0,
     "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
     "night_start_hour": 0, "night_end_hour": 6,
@@ -47,7 +48,7 @@ def write_json(path, data):
     os.chmod(path, 0o600)
 
 def validate(c):
-    for key, low, high in [("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
@@ -154,8 +155,13 @@ def decide(c, snapshot, prices, now):
         return False, "Preis oberhalb Kaufgrenze", slot
     if (slot["end"] - now).total_seconds() < 130:
         return False, "Preisintervall endet in weniger als 130 Sekunden", slot
-    plan = economics_plan(c, prices, now)
-    return plan["ok"], plan["reason"], slot
+    from smart import plan as smart_plan
+    plan = smart_plan(c, prices, now, snapshot['soc'], snapshot.get('max_charge_power_w'))
+    for window in plan['windows']:
+        start,end=datetime.fromisoformat(window['start']),datetime.fromisoformat(window['end'])
+        if start <= now < end and (end-now).total_seconds() >= 130:
+            return True, 'Smart: ausgewählter günstiger Ladeabschnitt', {**slot,'end':min(slot['end'],end)}
+    return False, plan['reason'] if not plan['windows'] else 'Smart wartet auf einen günstigeren Ladeabschnitt', slot
 
 class Huawei:
     def __init__(self, c):
