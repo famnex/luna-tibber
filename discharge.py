@@ -44,7 +44,7 @@ async def sync(hw, folder, now=None, smart_hold=False):
             raise ValueError('Fremde Änderung der Entladeleistung; Wiederherstellung ausstehend')
     if current!=desired:
         await hw.write(rn.STORAGE_MAXIMUM_DISCHARGING_POWER,desired)
-    if await value()!=desired:
-        raise RuntimeError('Entladeleistung nicht bestätigt; Wiederherstellung bleibt vorgemerkt')
+        if await value()!=desired:
+            raise RuntimeError('Entladeleistung nicht bestätigt; Wiederherstellung bleibt vorgemerkt')
     write_json(folder/'discharge-status.json',{'locked':active,'source':'manual' if manual else 'smart' if active else None,'until':request.get('until') if manual else None,'time':now.isoformat(),'power_w':desired})
     if not active:journal.unlink()

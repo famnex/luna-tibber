@@ -269,10 +269,6 @@ class Dashboard:
         self.job = None
     def save_settings(self, patch):
         old_prices=self.config()
-        if patch and (self.folder/'discharge-restore.json').exists():
-            raise ValueError('Vor Einstellungsänderungen Entladung aktivieren und Wiederherstellung abwarten')
-        if self.proc or self.mode != 'off':
-            raise ValueError('Vor dem Speichern auf Aus schalten und Vorgang beenden')
         allowed = set(luna.DEFAULT)-{'mode'}
         if not set(patch) <= allowed:
             raise ValueError('Unbekannte Einstellung')
@@ -287,11 +283,20 @@ class Dashboard:
         ipaddress.IPv4Address(c['host'])
         c['mode'] = 'auto'  # Web server is the single authority for off/smart/on.
         luna.validate(c)
+        changed={k for k in luna.DEFAULT if c[k]!=old_prices[k]}
+        request=read(self.folder/'discharge-request.json',{})
+        hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
+        if changed & luna.CONNECTION_KEYS and (self.proc or self.mode!='off' or hold or
+                any((self.folder/n).exists() for n in ('discharge-restore.json','pending-charge.json'))):
+            raise ValueError('Nur Geräteverbindung/Zugang benötigen Aus und bestätigte Freigabe; andere Einstellungen sind im Betrieb änderbar')
         with (self.folder/'controller.lock').open('w') as f:
-            try:
-                fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
-            except BlockingIOError:
-                raise ValueError('Ein externer CLI-/Ladedienst läuft; zuerst beenden') from None
+            # Our subprocess consumes atomic file updates in its normal control loop.
+            # For an external owner, continue refusing concurrent configuration writes.
+            if self.proc is None or self.proc.poll() is not None:
+                try:
+                    fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
+                except BlockingIOError:
+                    raise ValueError('Ein externer CLI-/Ladedienst läuft; zuerst beenden') from None
             luna.write_json(self.config_path,c)
             if c['expected_serial'] != old_serial:
                 (self.folder/'commissioned.json').unlink(missing_ok=True)

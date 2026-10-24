@@ -11,6 +11,17 @@ from huawei_solar import register_names as rn, register_values as rv
 from huawei_solar.registers import REGISTERS
 
 class LogicTests(unittest.TestCase):
+    def test_live_reload_keeps_planned_target_and_manual_order(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            path=Path(tmp)/'config.json'
+            c={**luna.DEFAULT,'mode':'auto','_manual':True,'target_soc':75}
+            luna.write_json(path,{**luna.DEFAULT,'target_soc':90,'charge_power_w':2000})
+            new,changed=luna.runtime_settings(c,path,75)
+            self.assertTrue(new['_manual']);self.assertEqual(new['target_soc'],75)
+            self.assertEqual(new['charge_power_w'],2000);self.assertNotIn('target_soc',changed)
+            luna.write_json(path,{**luna.DEFAULT,'host':'192.0.2.1'})
+            with self.assertRaisesRegex(RuntimeError,'Geräteverbindung'):luna.runtime_settings(c,path,75)
+
     def setUp(self):
         self.c = dict(luna.DEFAULT)
         self.now = datetime(2026,10,22,18,0,tzinfo=timezone.utc)
@@ -65,6 +76,31 @@ class LogicTests(unittest.TestCase):
         self.assertFalse(luna.decide(self.c,self.s,slots,b)[0])
 
 class CommandTests(unittest.IsolatedAsyncioTestCase):
+    async def test_live_settings_stop_old_charge_before_new_target(self):
+        c={**luna.DEFAULT,'mode':'auto','expected_serial':'TEST','password':'fake'}
+        state={'soc':50,'ac_charge_enabled':True,'battery_status':2,'max_charge_power_w':5000,'battery_power_w':1000}
+        with tempfile.TemporaryDirectory() as folder:
+            folder=Path(folder);luna.write_json(folder/'config.json',c)
+            luna.write_json(folder/'commissioned.json',{'serial':'TEST'})
+            reads=0
+            async def snapshot():
+                nonlocal reads
+                reads+=1
+                if reads==3:luna.write_json(folder/'config.json',{**c,'target_soc':40})
+                if reads>5:raise AssertionError('New target not applied')
+                return dict(state)
+            fake=SimpleNamespace(device=SimpleNamespace(serial_number='TEST'),connect=AsyncMock(),snapshot=snapshot,
+                login=AsyncMock(),charge=AsyncMock(),stop_charge=AsyncMock(),close=AsyncMock())
+            async def fast_wait(aw,timeout):
+                if getattr(getattr(aw,'cr_code',None),'co_name',None)=='wait':
+                    aw.close();raise TimeoutError()
+                return await aw
+            with patch('luna.Huawei',return_value=fake),patch('luna.asyncio.wait_for',side_effect=fast_wait):
+                await luna.operate(SimpleNamespace(command='charge',execute=True),c,folder)
+            fake.charge.assert_awaited_once();fake.stop_charge.assert_awaited_once()
+            self.assertEqual(fake.c['target_soc'],40)
+            self.assertFalse((folder/'pending-charge.json').exists())
+
     async def test_finite_duration_written_before_start(self):
         hw=luna.Huawei(dict(luna.DEFAULT))
         hw.device=SimpleNamespace(set=AsyncMock(return_value=True))

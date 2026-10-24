@@ -9,6 +9,14 @@ from luna import write_json
 from huawei_solar import register_names as rn
 
 class DischargeTests(unittest.IsolatedAsyncioTestCase):
+    async def test_unchanged_hold_uses_one_read_and_no_write(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp)
+            write_json(folder/'discharge-restore.json',{'serial':'test','original_w':4000})
+            hw=SimpleNamespace(device=SimpleNamespace(serial_number='test',batch_update=AsyncMock(return_value={rn.STORAGE_MAXIMUM_DISCHARGING_POWER:SimpleNamespace(value=0)})),write=AsyncMock())
+            await sync(hw,folder,smart_hold=True)
+            hw.device.batch_update.assert_awaited_once();hw.write.assert_not_awaited()
+
     async def test_lock_restart_release_restores_exact_value(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp);now=datetime.now(timezone.utc)

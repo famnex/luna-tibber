@@ -35,6 +35,21 @@ QUERY = '''{ viewer { homes { id appNickname currentSubscription {
  today { total startsAt currency } tomorrow { total startsAt currency }
  } } } } }'''
 
+CONNECTION_KEYS={'host','port','unit_id','expected_serial','username','password','wifi_enabled'}
+PASSIVE_KEYS={'statistics_enabled','push_contact','reserve_soc'}
+
+def runtime_settings(c,path,target_soc=None):
+    """Reload local configuration only; never reconnect or reset a running order."""
+    if not path.exists():raise RuntimeError('Konfiguration fehlt; Steuerung wird beendet')
+    fresh=validate({**DEFAULT,**json.loads(path.read_text())})
+    if any(fresh[k]!=c[k] for k in CONNECTION_KEYS):
+        raise RuntimeError('Geräteverbindung während Steuerung geändert; kontrollierter Abbruch')
+    fresh['mode']=c['mode']
+    if c.get('_manual'):fresh['_manual']=True
+    if target_soc is not None:fresh['target_soc']=target_soc
+    changed={k for k in DEFAULT if fresh[k]!=c[k]}
+    return fresh,changed
+
 def emit(event, **data):
     print(json.dumps({"time": datetime.now(timezone.utc).isoformat(), "event": event,
                       **data}, ensure_ascii=False, default=str), flush=True)
@@ -339,6 +354,19 @@ async def operate(args, c, folder):
         deadline, session_start = 0.0, None
         no_charge_samples = 0
         while not stop_event.is_set():
+            fresh,changed=runtime_settings(c,getattr(args,'config',folder/'config.json'),getattr(args,'target_soc',None))
+            if changed:
+                # End the old finite command before applying different power/limits.
+                # Preserve the session clock and external manual discharge request.
+                if own_charge and changed-PASSIVE_KEYS:
+                    await hw.stop_charge()
+                    own_charge=False;deadline=0
+                    pending.unlink(missing_ok=True)
+                    emit('stopped',reason='Einstellungen werden übernommen')
+                if changed & {'tibber_token','tibber_home_id'}:
+                    prices=[];attempted=-300.0
+                c=fresh;hw.c=c
+                emit('settings_applied',fields=sorted(changed))
             mono = time.monotonic()
             if not c.get("_manual") and mono - attempted >= 300:
                 attempted = mono
@@ -426,7 +454,7 @@ def main():
         if path.exists():
             raise ValueError("config.json existiert bereits; direkt bearbeiten")
         c = dict(DEFAULT)
-        c["tibber_token"] = input("Tibber Personal Access Token (sichtbar): ").strip()
+        c["tibber_token"] = getpass.getpass("Tibber Personal Access Token (verdeckt): ").strip()
         c["password"] = getpass.getpass("Lokales Huawei-Installateurpasswort (verdeckt): ")
         write_json(path, c)
         print("Konfiguration angelegt. Jetzt probe; danach expected_serial eintragen.")
@@ -446,7 +474,7 @@ def main():
         except BlockingIOError:
             raise RuntimeError("Eine Instanz läuft bereits; Dienst zuerst stoppen") from None
         if args.command == "credentials":
-            token = input("Neuer Tibber-Token (sichtbar; Enter behält bisherigen): ").strip()
+            token = getpass.getpass("Neuer Tibber-Token (verdeckt; Enter behält bisherigen): ").strip()
             if token:
                 c["tibber_token"] = token
             write_json(path, c)

@@ -557,6 +557,22 @@ Heute, gestern, letzte 30 und 365 Kalendertage einschließlich heute, Monats- un
 
 Die Schätzung nimmt vollständige Netzladung mit der angeforderten Leistung und spätere Nutzung zum berechneten Referenzpreis an. Das Modell verteilt den Gesamtwirkungsgrad gleichmäßig auf beide Richtungen (`sqrt(eta)`) und berücksichtigt die Verschleißreserve. Tatsächliche Leistung, PV-Anteile und tatsächliche Entladung werden dafür nicht geprüft. Auch negative Planvorteile bleiben sichtbar. Es ist kein gemessener Einsparungs- oder Rechnungsnachweis. Einstellungen gelten ab Änderung; alte Werte werden nicht nachträglich umgerechnet. Die Erfassung lässt sich in den Einstellungen abschalten.
 
+### Einstellungen während des Betriebs
+
+Grundverbrauch, Zusatzbedarf, Ladeziel/-leistung, Preisgrenzen, Wirkungsgrad, Tibber-Zugang und Anzeigeoptionen lassen sich auch bei aktivem Smart oder manueller Entladesperre speichern. Der Controller übernimmt validierte Änderungen im nächsten regulären Steuerungszyklus, normalerweise nach etwa zehn Sekunden (laufende Gerätekommunikation kann dies verzögern). Die Vorschau kann die neuen Werte deshalb vor der tatsächlichen Übernahme zeigen. Das Ereignis `settings_applied` bestätigt die Übernahme.
+
+Ein laufender Ladebefehl wird bei geänderten Steuerungswerten zuerst gestoppt und anschließend neu bewertet. Laufzeitgrenzen und manuelle Sperren werden nicht zurückgesetzt. Das individuelle Ziel und der Endzeitpunkt eines bereits geplanten Auftrags bleiben erhalten. Ein neuer allgemeiner Ziel-SOC gilt für Smart und manuelles An; geplante Einzelaufträge behalten ihr eigenes Ziel. Wird eine laufende Sitzung durch eine verkürzte Sicherheitsgrenze unzulässig, endet sie mit einer Fehlermeldung.
+
+Nur tatsächlich geänderte Geräteverbindungsdaten (IP, Port, Unit-ID, Seriennummer, Huawei-Zugang, WLAN-Prüfung) benötigen weiterhin Aus, einen beendeten Vorgang und bestätigte Freigabe. Sonst könnte die App den alten Speicher während einer Sperre nicht mehr erreichen. Ein externer CLI-Controller und laufende Softwareupdates sperren das Speichern weiterhin. Unveränderte Verbindungsfelder verhindern keine anderen Änderungen. Im Browser werden nur geänderte Felder gesendet; leere Geheimnisse behalten ihren gespeicherten Wert.
+
+Unveränderte Entladesperren benötigen jetzt nur eine Kontrollabfrage pro Abgleich statt zwei. Nach einer Änderung am Gerät bleibt die zusätzliche Bestätigungsabfrage bestehen. Für die Statistik entstehen weiterhin keine Messabfragen.
+
+### Verbleibende Grenzen der Planung
+
+Die Rechnung kennt noch keine PV-Prognose und kein gelerntes Lastprofil. Die geräteeigene untere Entladegrenze wird nicht automatisch in das Energiebudget eingerechnet; die aus SOC und Kapazität geschätzte nutzbare Energie kann daher zu hoch sein. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
+
+Eine Entladesperre wird durch Wiederherstellen des ursprünglichen maximalen Entladewerts aufgehoben. Anders als ein auf zwei Minuten begrenzter Ladeauftrag hat dieser Gerätewert keine autonome Ablaufzeit. Bei ausgefallenem Server oder unterbrochener Verbindung kann die Sperre deshalb bis zur erfolgreichen Wiederherstellung bestehen bleiben. Das Journal wird dafür dauerhaft gespeichert; eine lokale Kontrolle kann notwendig sein. Nach einem Neustart beginnt der Webdienst im Modus Aus, automatische Fortsetzung von Smart ist noch nicht vorgesehen.
+
 ### Updatebutton
 
 Unter **Einstellungen → Software → Prüfen & aktualisieren** holt die App den aktuellen `main`-Stand von `famnex/luna-tibber`, prüft ihn und startet den Webdienst neu. Dafür muss die App über den mitgelieferten systemd-Benutzerdienst `luna-web.service` laufen. Einmalig diese Version installieren:

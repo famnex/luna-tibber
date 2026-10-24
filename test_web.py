@@ -44,9 +44,29 @@ class DashboardTests(unittest.TestCase):
         luna.write_json(self.folder/'commissioned.json',{'serial':'old'})
         self.app.save_settings({'expected_serial':'new'})
         self.assertFalse((self.folder/'commissioned.json').exists())
-    def test_writes_require_idle(self):
+    def test_settings_live_without_resetting_mode_or_hold(self):
         self.app.mode='smart'
-        with self.assertRaises(ValueError):self.app.save_settings({'target_soc':75})
+        self.app.until=1234
+        journal=self.folder/'discharge-restore.json';journal.write_text('{"serial":"test","original_w":5000}')
+        self.app.save_settings({'target_soc':75,'base_load_w':600})
+        self.assertEqual(self.app.config()['target_soc'],75)
+        self.assertEqual(self.app.mode,'smart');self.assertEqual(self.app.until,1234)
+        self.assertTrue(journal.exists())
+        with self.assertRaisesRegex(ValueError,'Geräteverbindung'):self.app.save_settings({'host':'192.0.2.1'})
+
+    def test_active_process_accepts_only_changed_safe_fields(self):
+        self.app.save_settings({});self.app.mode='smart';self.app.proc=Mock(poll=Mock(return_value=None));self.app.job='run'
+        patch={k:v for k,v in self.app.config().items() if k!='mode'}
+        patch['target_soc']=70
+        self.app.save_settings(patch)
+        self.assertEqual(self.app.config()['target_soc'],70)
+        with self.assertRaises(ValueError):self.app.save_settings({'password':'different-device-password'})
+
+    def test_external_controller_still_blocks_settings(self):
+        import fcntl
+        with (self.folder/'controller.lock').open('w') as lock:
+            fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
+            with self.assertRaisesRegex(ValueError,'externer'):self.app.save_settings({'base_load_w':600})
     def test_on_requires_test(self):
         self.app.save_settings({'expected_serial':'serial','password':'secret'})
         with self.assertRaisesRegex(ValueError,'Ladetest'):
