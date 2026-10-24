@@ -13,14 +13,12 @@ Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 
 **Stand:** Mit der installierten Python-Bibliothek und simulierten Geräten getestet.
 Kein Hardwaretest an deinem Wechselrichter und kein Abruf deines Tibber-Kontos möglich.
-Dies ist eine erste technische Version, kein fertiger Ertragsoptimierer. Keine PV-Prognose,
-keine Verbrauchsprognose und keine automatische Entladesperre für günstige Stunden. Der Wechselrichter entscheidet außerhalb unserer Ladebefehle weiter selbst
-über die Entladung. Ein billiger Einkauf allein garantiert daher keine Einsparung.
+Die Planung verwendet eingestellten Grund-/Zusatzverbrauch und optional eine konservative PV-Wetterprognose. Smart kann die normale Entladung zeitweise sperren. Ein billiger Einkauf allein garantiert keine Einsparung; Wetter, Lastprofil und Fremdsteuerung können vom Plan abweichen.
 
 Huawei beschreibt erzwungenes Laden als Wartungs-/Testfunktion und empfiehlt für
 regelmäßige Zeitfenster TOU. Zuerst den lokalen Test und das Verhalten neben Enpal prüfen.
 Das Programm verändert weder Netzschutz noch Einspeiselimit, TOU, AC-Freigabe oder die
-angezeigten Netzladegrenzen. Es löst ausschließlich zeitlich begrenztes Laden und Stopp aus.
+angezeigten Netzladegrenzen. Es nutzt zeitlich begrenztes Laden/Stopp sowie eine gesicherte, rücksetzbare Begrenzung der maximalen Entladeleistung.
 Bei gegenseitigen Steuerbefehlen von Enpal/evcc ist kein zuverlässiger Parallelbetrieb garantiert.
 
 ## Webinterface (Version 2)
@@ -391,12 +389,11 @@ netzgeladen. Fehlen zukünftige Preise auch nur teilweise, wird nicht geladen.
 `plan` prüft dies mit Tibber ohne Verbindung zum Wechselrichter. Die Rechnung steht
 auch in `status.json` unter `economics`. Sommerzeit wird über Europe/Berlin berücksichtigt.
 Das ist ein Preisfilter, kein optimaler Ladefahrplan: Er nimmt den späteren Verbrauch
-im eingestellten Fenster an und kennt weder dessen Energiemenge noch PV-Ertrag.
-Insbesondere verhindert das Programm keine frühere Entladung durch Enpal.
+im eingestellten Fenster an. Die aktuelle Smart-Entladeplanung berücksichtigt dagegen Grund-/Zusatzverbrauch und optional direkte Solardeckung.
 Den Rechner daher nicht mit einer garantierten Einsparung verwechseln. Lade nur die Menge,
 die später tatsächlich teuren Netzstrom ersetzt. Ein hoher Nacht-SOC kann sonst günstigen
 Solarstrom verdrängen; frühes Entladen vor dem teuren Zeitfenster kann den Nutzen ebenfalls
-aufheben. PV-/Verbrauchsprognose und koordiniertes Entladen sind nächste Ausbauschritte.
+aufheben. Die neuere Smart-Planung mit Entladesperren und optionaler PV-Prognose ist weiter unten beschrieben.
 
 ## Prüfung / Quellen
 
@@ -495,8 +492,7 @@ Viertelstundenintervalle im Nachtfenster. Kaufgrenze und Mindestvorteil bleiben
 wirksam. Zwischen den Phasen sendet der Controller STOP und lädt später erneut.
 Er plant anhand frischer Messwerte nach; fehlende Nachtpreise verhindern die Planung.
 Schaltreserve ist berücksichtigt. Unzureichende geeignete Ladezeit wird angezeigt.
-Hausverbrauch/PV werden nicht prognostiziert, und Enpal kann den Akku in Pausen
-entladen. Daher sind Energie, Dauer und Zielerreichung Schätzungen. Das bestehende
+Grund-/Zusatzverbrauch und optional PV-Ertrag werden modelliert. Fremdsteuerung und Abweichungen vom Wetter-/Verbrauchsmodell bleiben möglich; Energie, Dauer und Zielerreichung sind Schätzungen. Das bestehende
 Limit für zusammenhängende Ladesitzungen bleibt als Abbruchgrenze bestehen.
 
 ### Statuskarte und Countdown
@@ -533,7 +529,7 @@ Unter Einstellungen zuerst **Grundverbrauch (W)** und bei Bedarf **Zusatzverbrau
 
 Der Controller verteilt die aktuell vorhandene Energie nach angenommenen Entladeverlusten auf die teuersten verbleibenden Preisintervalle bis zum nächsten Nachtfenster. Dabei berücksichtigt er den eingestellten Wirkungsgrad und den Grundverbrauch. Aktueller SOC und Preise führen laufend zu einer neuen Planung. In günstigen Abschnitten wird die normale Entladung gesperrt, in teuren wieder freigegeben. Es wird **keine Zwangsentladung und keine Netzeinspeisung** angefordert. Tatsächlicher Verbrauch und Enpal/Huawei-Regelung bestimmen die Leistung. Auch während nächtlicher Ladepausen bleibt die Energie bei aktivierter Smart-Entladung reserviert. Die manuelle zeitliche Entladesperre hat Vorrang.
 
-Der Nachtpreisvergleich nutzt bei aktivierter Smart-Entladung den gewichteten Preis der vorgesehenen Entladestunden. Die separate Tagesmittel-Anzeige bleibt ein Tagesmittel. Ladeziel und Leistung bleiben in deinen Einstellungen; eine PV-Prognose und ein gelerntes Verbrauchsprofil sind noch nicht enthalten. Bei unvollständigen Tagespreisen wird die automatische Entladesperre freigegeben. Es gibt keine feste App-Reserve. Geräteeigene Entladegrenzen bleiben unverändert und können die nutzbare Energie begrenzen. Starke Lastsprünge, Preis-/Messlücken und Kommunikationsausfälle begrenzen die Genauigkeit. Einmalige Ladungen und normale PV-Ladung bleiben getrennt.
+Der Nachtpreisvergleich nutzt bei aktivierter Smart-Entladung den gewichteten Preis der vorgesehenen Entladestunden. Die separate Tagesmittel-Anzeige bleibt ein Tagesmittel. Ladeziel und Leistung bleiben in deinen Einstellungen; eine optionale PV-Prognose ist vorhanden, ein gelerntes Verbrauchsprofil nicht. Bei unvollständigen Tagespreisen wird die automatische Entladesperre freigegeben. Es gibt keine feste App-Reserve. Geräteeigene Entladegrenzen bleiben unverändert und können die nutzbare Energie begrenzen. Starke Lastsprünge, Preis-/Messlücken und Kommunikationsausfälle begrenzen die Genauigkeit. Einmalige Ladungen und normale PV-Ladung bleiben getrennt.
 
 Es wird **keine feste Mindestreserve** mehr abgezogen. Alte `reserve_soc`-Werte in vorhandenen Konfigurationsdateien werden beim Laden automatisch auf 0 normalisiert und haben keinen Einfluss mehr. Das Einstellungsfeld entfällt. Beispiel: 48 % bei 10 kWh ergeben rechnerisch 4,8 kWh im Akku und mit `sqrt(0,85)` rund 4,43 kWh nach Entladeverlusten. Das ist eine Modellschätzung vor geräteeigenen Entladegrenzen; deren Schutzparameter werden weder geändert noch umgangen.
 
@@ -569,7 +565,7 @@ Unveränderte Entladesperren benötigen jetzt nur eine Kontrollabfrage pro Abgle
 
 ### Verbleibende Grenzen der Planung
 
-Die Rechnung kennt noch keine PV-Prognose und kein gelerntes Lastprofil. Die geräteeigene untere Entladegrenze wird nicht automatisch in das Energiebudget eingerechnet; die aus SOC und Kapazität geschätzte nutzbare Energie kann daher zu hoch sein. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
+Die Rechnung kennt kein gelerntes Lastprofil. Die optionale PV-Prognose modelliert eine Dachfläche mit Sicherheitsabschlag. Die geräteeigene untere Entladegrenze wird nicht automatisch in das Energiebudget eingerechnet; die aus SOC und Kapazität geschätzte nutzbare Energie kann daher zu hoch sein. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
 
 Eine Entladesperre wird durch Wiederherstellen des ursprünglichen maximalen Entladewerts aufgehoben. Anders als ein auf zwei Minuten begrenzter Ladeauftrag hat dieser Gerätewert keine autonome Ablaufzeit. Bei ausgefallenem Server oder unterbrochener Verbindung kann die Sperre deshalb bis zur erfolgreichen Wiederherstellung bestehen bleiben. Das Journal wird dafür dauerhaft gespeichert; eine lokale Kontrolle kann notwendig sein. Nach einem Neustart beginnt der Webdienst im Modus Aus, automatische Fortsetzung von Smart ist noch nicht vorgesehen.
 
@@ -593,3 +589,51 @@ Syntaxprüfung und Python-Tests laufen vor der Übernahme in einem separaten Git
 Siehe [PWA.md](PWA.md). PWA-Manifest, App-Symbole, Service Worker und Web Push sind enthalten. Für iPhone-Push ist eine installierte Home-Screen-App über vertrauenswürdiges HTTPS erforderlich. Eine gewöhnliche HTTP-LAN-IP bietet diese Möglichkeit nicht. Ohne HTTPS bleibt die bisherige Weboberfläche verwendbar.
 
 Push ist pro Browser ausdrücklich opt-in. Wichtige Ereignisse: Steuerungsfehler, unbestätigter Stopp/Freigabe, länger fehlende Messwerte/Preise und Abschluss eines einmaligen Ladeauftrags. Normale Smart-Ein/Aus-Wechsel bleiben still. Wiederholte Fehlermeldungen werden 30 Minuten unterdrückt; Abonnements und Zeitpunkte bleiben nach Neustart erhalten. Der Dienst sendet an die Push-Infrastruktur des Browsers, keine Tibber- oder Huawei-Zugangsdaten. Zustellung ist best effort und ersetzt die Statusprüfung nicht.
+
+
+## PV-Prognose in Smart
+
+Unter **Einstellungen → PV-Prognose** Standort als Breitengrad/Längengrad,
+Modulleistung in kWp, Dachneigung und Ausrichtung eintragen, dann aktivieren.
+Die Standardwerte für Standort und Dach sind Platzhalter, keine erkannten Anlagendaten.
+Ausrichtung: 0° Süd, −90° Ost, +90° West, ±180° Nord. Eine gemeinsame Dachfläche;
+unterschiedliche Ost-/Westflächen derzeit nicht zusammen als Südanlage eintragen.
+Grundverbrauch und Akkukapazität müssen gesetzt sein.
+
+Quelle: [Open-Meteo Forecast API](https://open-meteo.com/en/docs), stündliche
+`global_tilted_irradiance` (Mittel der **vorherigen** Stunde), UTC-Unixzeiten.
+Standort, Neigung und Ausrichtung gehen an den Wetterdienst, keine Huawei-/Tibber-Zugangsdaten.
+Wetterdaten CC BY 4.0; die freie API ist für nichtkommerzielle Nutzung vorgesehen.
+Das einfache Modell rechnet `kWp × Einstrahlung / 1000 × 0,85`, begrenzt auf die
+PV-Ausgangsleistung, anschließend multipliziert mit dem konfigurierten Prognose-Anteil.
+Standard 0,7 bedeutet zusätzlich 30 % Sicherheitsabschlag. Kein Verschattungs-,
+Schnee-, Temperatur- oder individuelles Modulmodell; keine Ertragsgarantie.
+
+Zuerst wird zeitgleich erwarteter Hausverbrauch (Grundlast + Zusatzbedarf) direkt
+von PV gedeckt. Nur verbleibender Überschuss darf nach Ladeverlusten und Begrenzung
+der Ladeleistung das Nachtziel senken. Die Rückwärtsrechnung über den folgenden Tag
+berücksichtigt, dass Morgenverbrauch **vor** dem Solarertrag gedeckt werden muss.
+Das eingegebene Ziel bleibt eine Obergrenze. Kann der vollständige erwartete Tagesbedarf
+zeitlich nicht innerhalb dieses Energiebudgets gedeckt werden, bleibt konservativ
+das ursprüngliche Nachtziel; es wird kein voller gemeinsamer PV-/Preisoptimierer behauptet.
+Normale Kaufpreis-/Vorteilsgrenzen gelten weiter. An und Geplant behalten ihre Ziele.
+
+Tagsüber berücksichtigt die Entladeplanung direkte PV-Deckung. Zukünftiger
+Solarüberschuss wird nicht schon als vorhandene Batterieenergie ausgegeben;
+der normale Steuerungszyklus plant mit dem dann tatsächlich vorhandenen SOC neu.
+Die SOC-Projektion bis zum nächsten Nachtbeginn rechnet zukünftige PV-Speicherung
+noch nicht hoch und kann dadurch vorsichtig zu viel Nachtbedarf vorschlagen.
+Keine feste zusätzliche SOC-Reserve; geräteeigene Grenzen gelten unverändert.
+
+Der gemeinsame Cache `pv-forecast.json` wird alle 3 Stunden erneuert, bei Fehlern
+frühestens nach 15 Minuten erneut versucht. Nach 6 Stunden oder bei unpassenden
+Anlagendaten wird er nicht mehr angerechnet. Fehlende Tagesintervalle führen zu
+Planung ohne PV-Abzug. Web-Hintergrunddienst und CLI-Steuerung nutzen denselben
+Cache mit Dateisperre; Browseransichten lesen nur den Cache. Keine zusätzlichen
+Wechselrichterabfragen, keine neue Python-Abhängigkeit. Prognose-/Lockdateien sind
+Git-ignoriert und blockieren den Updater nicht.
+
+Die Smart-Entscheidungskarte bewertet die ausgewählten Nachtladeabschnitte
+energiegewichtet statt des Strompreises beim Seitenaufruf. Bei keinem Ladebedarf
+oder unvollständiger Planung wird der entsprechende Grund angezeigt; ein künftiger
+Plan wird weiterhin nicht vorab als statistische Ersparnis verbucht.

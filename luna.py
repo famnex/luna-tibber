@@ -24,6 +24,8 @@ DEFAULT = {
     "battery_capacity_kwh": 0.0,
     "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 0.0,
     "extra_load_kwh": 0.0, "extra_load_start_hour": 17, "extra_load_end_hour": 19,
+    "pv_enabled": False, "pv_latitude": 0.0, "pv_longitude": 0.0, "pv_kwp": 0.0,
+    "pv_tilt": 30.0, "pv_azimuth": 0.0, "pv_ac_limit_kw": 5.0, "pv_factor": 0.7,
     "statistics_enabled": True, "push_contact": "",
     "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
@@ -68,14 +70,16 @@ def write_json(path, data):
 def validate(c):
     # Legacy configuration key: no fixed application reserve remains.
     c["reserve_soc"] = 0.0
-    for key, low, high in [("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("pv_latitude",-90,90),("pv_longitude",-180,180),("pv_kwp",0,100),("pv_tilt",0,90),("pv_azimuth",-180,180),("pv_ac_limit_kw",0.1,100),("pv_factor",0,1),("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError(f"Ungültiger Wert: {key} (Bereich {low} bis {high})")
-    for key in ('statistics_enabled','smart_discharge_enabled'):
+    for key in ('statistics_enabled','smart_discharge_enabled','pv_enabled'):
         if type(c[key]) is not bool:raise ValueError('Ungültiger Schalter: '+key)
+    if c['pv_enabled'] and c['pv_latitude']==0 and c['pv_longitude']==0:raise ValueError('Für PV-Prognose tatsächlichen Standort statt 0/0 eintragen')
+    if c['pv_enabled'] and (c['pv_kwp']<=0 or c['base_load_w']<=0 or c['battery_capacity_kwh']<=0):raise ValueError('Für PV-Prognose kWp, Grundverbrauch und Akkukapazität eintragen')
     if c['smart_discharge_enabled'] and c['base_load_w']<=0:raise ValueError('Für Smart-Entladen Grundverbrauch größer 0 W einstellen')
     if c["mode"] not in ("monitor", "auto"):
         raise ValueError("mode muss monitor oder auto sein")
@@ -370,6 +374,8 @@ async def operate(args, c, folder):
             mono = time.monotonic()
             if not c.get("_manual") and mono - attempted >= 300:
                 attempted = mono
+                from pv import refresh as refresh_pv
+                await asyncio.to_thread(refresh_pv,c,folder)
                 try:
                     prices = await asyncio.to_thread(cached_prices, c, folder)
                     fetched = time.monotonic()
@@ -380,6 +386,8 @@ async def operate(args, c, folder):
                 await asyncio.to_thread(check_app, c["host"])
             snapshot = await hw.snapshot()
             now = datetime.now(timezone.utc)
+            from pv import attach as attach_pv
+            if not c.get("_manual"):c=attach_pv(c,folder,now)
             eligible, reason, slot = decide(c, snapshot, prices, now)
             from dispatch import plan as discharge_plan
             dispatch=discharge_plan(c,prices,now,snapshot['soc']) if not c.get('_manual') else None

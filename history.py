@@ -29,6 +29,8 @@ class History:
             start=datetime.fromisoformat(event['time']);watts=event['watts'];minutes=event['minutes']
             if start.tzinfo is None or type(watts) not in (int,float) or not math.isfinite(watts) or not 0<watts<=5000 or type(minutes) is not int or not 1<=minutes<=2:return
         except (KeyError,ValueError,TypeError):return
+        from pv import attach
+        c=attach(c,self.path.parent,start)
         from luna import economics_plan
         current=next((p['ct'] for p in prices if p['start']<=start<p['end']),None)
         reference=economics_plan(c,prices,start).get('reference_ct_kwh')

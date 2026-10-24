@@ -54,3 +54,19 @@ class SmartTests(unittest.TestCase):
         p=plan(c,rows,now,30)
         self.assertTrue(p['complete'])
         self.assertEqual(datetime.fromisoformat(p['night_end'])-now,timedelta(hours=7))
+
+    def test_ui_economics_uses_selected_night_prices_not_daytime_price(self):
+        from smart import planned_economics
+        from unittest.mock import patch
+        a=self.now+timedelta(hours=1);b=self.now+timedelta(hours=2)
+        preview={'complete':True,'windows':[{'start':a.isoformat(),'battery_kwh':1},{'start':b.isoformat(),'battery_kwh':3}]}
+        def economics(c,prices,now):
+            effective=10 if now==a else 20
+            return dict(effective_ct_kwh=effective,reference_ct_kwh=30,saving_ct_kwh=30-effective,
+                        window_start=(self.now+timedelta(hours=6)).isoformat(),window_end=(self.now+timedelta(hours=9)).isoformat())
+        with patch('luna.economics_plan',side_effect=economics):
+            result=planned_economics(self.c,[],preview)
+        self.assertAlmostEqual(result['effective_ct_kwh'],17.5)
+        self.assertAlmostEqual(result['saving_ct_kwh'],12.5)
+        self.assertTrue(result['ok'])
+        self.assertNotIn('saving_ct_kwh',planned_economics(self.c,[],{'windows':[],'reason':'PV deckt Restbedarf'}))

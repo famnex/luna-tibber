@@ -28,12 +28,15 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     if now<start and c.get('smart_discharge_enabled'):
         planning_soc,confirmed=projected_soc(c,prices,now,soc,start,hold_until)
         out.update(planning_soc=planning_soc,projected=confirmed,projection_complete=confirmed)
-    need = max(0, c['target_soc'] - planning_soc) * c['battery_capacity_kwh'] / 100
+    from pv import night_target
+    pv=night_target(c,end,power)
+    out.update(pv=pv,effective_target_soc=pv['target_soc'])
+    need = max(0, pv['target_soc'] - planning_soc) * c['battery_capacity_kwh'] / 100
     out['needed_kwh'] = need
     out['duration_minutes'] = need / (power / 1000) * 60
     if need <= 0:
         out['complete'] = True
-        return finish('Ziel-SOC erreicht; kein Laden erforderlich')
+        return finish('PV deckt den geplanten Restbedarf; keine Netzladung nötig' if pv['reduction_kwh']>0 else 'Ziel-SOC erreicht; kein Laden erforderlich')
     rows = sorted((p for p in prices if p['end'] > a and p['start'] < b), key=lambda p: p['start'])
     cursor = a
     for row in rows:
@@ -66,3 +69,20 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     out['planned_kwh'] = need-max(0,remaining)
     return finish('Günstigste geeignete Abschnitte ausgewählt' if out['complete'] else
                   'Ziel voraussichtlich nicht erreichbar: zu wenig geeignete Ladezeit innerhalb der Preisgrenzen')
+
+
+def planned_economics(c,prices,preview):
+    """UI evaluates the selected future purchases, not the price at page-open time."""
+    from datetime import datetime
+    from luna import economics_plan
+    values=[]
+    for w in preview.get('windows',[]):
+        e=economics_plan(c,prices,datetime.fromisoformat(w['start']))
+        if 'saving_ct_kwh' not in e:return {'ok':False,'reason':'Preisvergleich des Ladeplans unvollständig'}
+        values.append((w['battery_kwh'],e))
+    total=sum(n for n,e in values)
+    if total<=0:return {'ok':False,'reason':preview.get('reason','Kein Netzladeabschnitt geplant')}
+    result={k:sum(n*e[k] for n,e in values)/total for k in ('effective_ct_kwh','reference_ct_kwh','saving_ct_kwh')}
+    return {**result,'ok':result['saving_ct_kwh']>0 and result['saving_ct_kwh']>=c['min_saving_ct_kwh'],
+            'reason':'Preisvergleich der geplanten Nachtladeabschnitte'+(' · Teilplan' if not preview.get('complete') else ''),
+            'window_start':values[0][1]['window_start'],'window_end':values[-1][1]['window_end']}

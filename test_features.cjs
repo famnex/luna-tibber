@@ -35,3 +35,13 @@ assert.match(card.children[3].textContent,/Teilbetrag/);
 assert.equal(elements.historyrows.children[0].children.length,4);
 assert.ok(elements.historyrows.children[0].children.slice(1).every(x=>x.textContent.includes('€')));
 console.log('Money statistics rendering passed');
+// PV card distinguishes applied plans, unavailable data and disabled settings.
+for(const id of ['pvcard','pvstatus','pvday','pvsummary','pvage'])elements[id]=element();
+ctx.renderPv({settings:{pv_enabled:true,target_soc:80,timezone:'UTC'},pv_forecast:{age_seconds:180,reason:'Cache'},smart_preview:{night_end:'2026-10-25T06:00:00Z',pv:{applied:true,target_soc:20,generation_kwh:12,direct_kwh:2,surplus_kwh:10,reduction_kwh:6,reason:'PV berücksichtigt'}}});
+assert.match(elements.pvsummary.textContent,/20 % statt 80 %/);
+assert.match(elements.pvsummary.textContent,/6 kWh weniger/);
+ctx.renderPv({settings:{pv_enabled:true},pv_forecast:{reason:'Keine Prognose'},smart_preview:{}});
+assert.match(elements.pvsummary.textContent,/aktuellen Akkustand/);
+assert.equal(elements.pvstatus.textContent,'Keine Prognose');
+ctx.renderPv({settings:{pv_enabled:false}});assert.equal(elements.pvcard.hidden,true);
+console.log('PV forecast rendering passed');

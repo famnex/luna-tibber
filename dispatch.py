@@ -22,14 +22,17 @@ def demand_rows(c,prices,start,end):
     extra_b=(midnight+timedelta(hours=c.get('extra_load_end_hour',19))).astimezone(timezone.utc)
     hours=(extra_b-extra_a).total_seconds()/3600
     extra_kw=c.get('extra_load_kwh',0)/hours if hours>0 else 0
+    from pv import rows_for,power
+    solar=rows_for(c,start,end)
     rows=[]
     for p in prices:
         a,b=max(start,p['start']),min(end,p['end'])
         if b<=a:continue
-        edges=sorted({a,b,*[t for t in (extra_a,extra_b) if a<t<b]})
+        edges=sorted({a,b,*[t for t in (extra_a,extra_b,*[r["start"] for r in solar],*[r["end"] for r in solar]) if a<t<b]})
         for left,right in zip(edges,edges[1:]):
             kw=c['base_load_w']/1000+(extra_kw if extra_a<=left<extra_b else 0)
-            rows.append({**p,'start':left,'end':right,'load_kw':kw})
+            pv_kw=power(solar,left,right)
+            rows.append({**p,'start':left,'end':right,'gross_load_kw':kw,'pv_kw':pv_kw,'load_kw':max(0,kw-pv_kw)})
     return sorted(rows,key=lambda p:p['start'])
 
 
@@ -72,7 +75,7 @@ def plan(c, prices, now, soc, hold_until=None):
         take=min(budget,demand);budget-=take
         allocations[p['start']]=take
     for p in rows:
-        seconds=allocations[p['start']]/p['load_kw']*3600
+        seconds=allocations[p['start']]/p['load_kw']*3600 if p['load_kw']>0 else 0
         split=min(p['end'],p['start']+timedelta(seconds=seconds))
         if seconds>=30:
             out['windows'].append({'start':p['start'].isoformat(),'end':split.isoformat(),'action':'discharge','ct':p['ct'],'allocated_kwh':allocations[p['start']]})
@@ -142,4 +145,4 @@ def economics(c,prices,now):
             'reason':'Preisvergleich mit den reservierten Entladestunden',
             'window_start':start.isoformat(),'window_end':forecast['windows'][-1]['end'],
             'reference_ct_kwh':reference,'effective_ct_kwh':effective,'saving_ct_kwh':saving,
-            'assumption':'Grundverbrauch und Ziel-SOC; keine PV-Prognose'}
+            'assumption':'Grundverbrauch und Ziel-SOC; direkte PV-Deckung bei gültiger Prognose'}

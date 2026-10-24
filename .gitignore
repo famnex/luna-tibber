@@ -40,3 +40,7 @@ plan-history.sqlite3*
 update-state.json
 update-state.tmp
 update.log
+
+pv-forecast.json
+pv-forecast.json.tmp
+pv-forecast.lock

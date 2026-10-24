@@ -15,6 +15,7 @@ function phaseAt(phases,time){return phaseEntryAt(phases,time)?.action;}
 function phaseDescription(w){return (w.projected?'Vorschau · ':'')+(w.surplus_only?'↘ Restenergie frei · Gerätegrenzen gelten':phaseLabel(w.action));}
 function renderExtras(d){
  renderUpdate(d.update,d);
+ renderPv(d);
  document.getElementById('referencelabel').textContent=d.settings.smart_discharge_enabled?'Erwarteter Preis bei Entladung':'Durchschnittspreis im Verbrauchsfenster';
  const q=d.dispatch_preview;
  document.getElementById('dispatchreason').textContent=q?.enabled?'✧ '+q.reason:'ⓘ Smart-Entladen in den Einstellungen aktivierbar';
@@ -22,6 +23,16 @@ function renderExtras(d){
  document.getElementById('dispatchsummary').textContent=q?.enabled?`${num(q.stored_kwh)} kWh im Akku · keine feste App-Reserve\n≈ ${num(q.available_kwh)} kWh nach Entladeverlusten (Gerätegrenzen gelten)\nDavon ${num(q.reserved_later_kwh)} kWh für spätere Planstunden zurückgehalten\n⌁ ${q.base_load_w} W Grundverbrauch${q.extra_load_kwh?' + '+num(q.extra_load_kwh)+' kWh Zusatzbedarf täglich':''}${q.future_complete?'\nVorschau ab Nachtende: ca. '+num(q.future_soc)+' % SOC':q.future_reason?'\nTagesvorschau: '+q.future_reason:''}`:'';
  if(!window.isSecureContext)document.getElementById('pushstatus').textContent='🔒 HTTPS für Installation und Push erforderlich.';
  else if(d.push?.error)document.getElementById('pushstatus').textContent=d.push.error;
+}
+function renderPv(d){
+ const card=document.getElementById('pvcard');if(!card)return;
+ card.hidden=!d.settings.pv_enabled;if(card.hidden)return;
+ const p=d.smart_preview?.pv,forecast=d.pv_forecast||{},num=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
+ document.getElementById('pvstatus').textContent=p?.reason||forecast.reason||'Wetterprognose wird geladen …';
+ const start=d.smart_preview?.night_end;
+ document.getElementById('pvday').textContent=start?'Für den Tag ab '+new Date(start).toLocaleString('de-DE',{timeZone:d.settings.timezone}):'Nächster Tag nach dem Nachtfenster';
+ document.getElementById('pvsummary').textContent=p?.applied?`☀ ${num(p.generation_kwh)} kWh konservativer Solarertrag · davon ${num(p.direct_kwh)} kWh direkte Hausversorgung.\n↗ Bis zu ${num(p.surplus_kwh)} kWh speicherbarer Überschuss vor Kapazitätsbegrenzung.\n☾ Nachtziel ${num(p.target_soc)} % statt ${num(d.settings.target_soc)} % · ${num(p.reduction_kwh)} kWh weniger Nachtladebedarf.`:'Die PV-Planung benötigt einen aktuellen Akkustand und vollständige Wetterdaten. Ohne gültige Prognose wird das Nachtziel nicht reduziert.';
+ document.getElementById('pvage').textContent=typeof forecast.age_seconds==='number'?`Stand vor ${Math.floor(forecast.age_seconds/60)} Minuten · 3 Stunden Cache · nach 6 Stunden ungültig`:'Noch keine gültigen Wetterdaten.';
 }
 let historyData=null,historyLoading=false,historyAt=0;
 async function loadHistory(force=false){

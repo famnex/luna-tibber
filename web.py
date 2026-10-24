@@ -300,6 +300,7 @@ class Dashboard:
             luna.write_json(self.config_path,c)
             if c['expected_serial'] != old_serial:
                 (self.folder/'commissioned.json').unlink(missing_ok=True)
+        if any(c[k]!=old_prices[k] for k in c if k.startswith('pv_')):self.price_at=0
         if any(c[k]!=old_prices[k] for k in ('tibber_token','tibber_home_id')):
             self.price_at = 0
             self.price_fetched_at = 0
@@ -492,6 +493,10 @@ class Dashboard:
                 due = time.monotonic()-self.price_at >= 300
             if due:
                 try:
+                    from pv import refresh as refresh_pv
+                    refresh_pv(c,self.folder)
+                except Exception:pass
+                try:
                     from price_cache import get
                     prices,stamp,fallback = get(c,self.folder,luna.fetch_prices)
                     error = 'Tibber nicht erreichbar · gespeicherte Preise werden verwendet' if fallback else ''
@@ -523,10 +528,13 @@ class Dashboard:
             missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
             prices = self.price_data
             now = datetime.now(timezone.utc)
-            plan = luna.economics_plan(c,prices,now)
+            from pv import attach as attach_pv
+            c=attach_pv(c,self.folder,now)
             request=read(self.folder/'discharge-request.json',{})
             hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
             preview=smart_preview(c,prices,now,self.telemetry,hold_until)
+            from smart import planned_economics
+            plan=planned_economics(c,prices,preview)
             from dispatch import timeline
             dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
@@ -534,7 +542,7 @@ class Dashboard:
             return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':{**updater.read_status(self.folder),'revision':self.revision},
+                    'pv_forecast':{k:v for k,v in c['_pv'].items() if k!='rows'},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':{**updater.read_status(self.folder),'revision':self.revision},
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
