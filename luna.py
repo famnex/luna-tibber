@@ -23,6 +23,7 @@ DEFAULT = {
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
     "battery_capacity_kwh": 0.0,
     "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 20.0,
+    "extra_load_kwh": 0.0, "extra_load_start_hour": 17, "extra_load_end_hour": 19,
     "statistics_enabled": True, "push_contact": "",
     "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
@@ -50,7 +51,7 @@ def write_json(path, data):
     os.chmod(path, 0o600)
 
 def validate(c):
-    for key, low, high in [("base_load_w", 0, 10000), ("reserve_soc", 5, 95), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("reserve_soc", 5, 95), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
@@ -70,6 +71,9 @@ def validate(c):
     if c['push_contact'] and ('@' not in c['push_contact'] or len(c['push_contact'])>240 or any(x.isspace() for x in c['push_contact'])):
         raise ValueError('Ungültige Push-Kontakt-E-Mail')
     ZoneInfo(c["timezone"])
+    if not (type(c['extra_load_start_hour']) is int and type(c['extra_load_end_hour']) is int
+            and 0<=c['extra_load_start_hour']<c['extra_load_end_hour']<=24):
+        raise ValueError('Zusatzverbrauch: ganzzahlige Stunden 0 <= Start < Ende <= 24')
     if not (type(c["use_start_hour"]) is int and type(c["use_end_hour"]) is int
             and 0 <= c["use_start_hour"] < c["use_end_hour"] <= 24):
         raise ValueError("Verbrauchsfenster: ganzzahlige Stunden 0 <= Start < Ende <= 24")

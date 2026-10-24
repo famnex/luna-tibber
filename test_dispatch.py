@@ -1,7 +1,7 @@
 import unittest
 from datetime import datetime,timedelta,timezone
 import luna
-from dispatch import plan
+from dispatch import plan,timeline,demand_rows
 
 class DispatchTests(unittest.TestCase):
     def setUp(self):
@@ -11,7 +11,7 @@ class DispatchTests(unittest.TestCase):
     def test_reserves_for_evening_and_releases_then(self):
         p=plan(self.c,self.prices,self.now,30) # 1 kWh, two expensive hours
         self.assertTrue(p['hold'])
-        releases=[w for w in p['windows'] if w['action']=='discharge']
+        releases=[w for w in p['windows'] if w['action']=='discharge' and not w.get('surplus_only')]
         self.assertEqual([w['ct'] for w in releases],[50,50])
         self.assertFalse(plan(self.c,self.prices,self.now+timedelta(hours=6),30)['hold'])
     def test_more_energy_and_dynamic_soc(self):
@@ -31,11 +31,96 @@ class DispatchTests(unittest.TestCase):
         self.assertEqual(datetime.fromisoformat(p['windows'][0]['end']),datetime(2026,10,25,5,tzinfo=timezone.utc))
     def test_energy_conservation(self):
         p=plan(self.c,self.prices,self.now,27)
-        kwh=sum((datetime.fromisoformat(w['end'])-datetime.fromisoformat(w['start'])).total_seconds()/3600*.5 for w in p['windows'] if w['action']=='discharge')
+        kwh=sum(w.get('allocated_kwh',0) for w in p['windows'])
         self.assertAlmostEqual(kwh,.7)
+        self.assertTrue(any(w.get('surplus_only') for w in p['windows']))
     def test_charge_economics_uses_evening_slots(self):
         c={**self.c,'timezone':'UTC','target_soc':30}
         now=datetime(2026,10,24,tzinfo=timezone.utc)
         rows=[{'start':now+timedelta(hours=i),'end':now+timedelta(hours=i+1),'ct':15 if i<6 else 50 if i in (18,19) else 10} for i in range(24)]
         p=luna.economics_plan(c,rows,now)
         self.assertTrue(p['ok']);self.assertEqual(p['reference_ct_kwh'],50)
+
+    def test_reserve_breakdown(self):
+        p=plan({**self.c,'roundtrip_efficiency':.85},self.prices,self.now,48)
+        self.assertAlmostEqual(p['stored_kwh'],4.8)
+        self.assertAlmostEqual(p['reserve_kwh'],2)
+        self.assertAlmostEqual(p['above_reserve_kwh'],2.8)
+        self.assertAlmostEqual(p['available_kwh'],2.5814724476)
+
+    def test_surplus_after_peak_but_never_below_reserve(self):
+        p=plan(self.c,self.prices,self.now,30)
+        tail=[w for w in p['windows'] if w.get('surplus_only')]
+        self.assertTrue(tail)
+        self.assertTrue(all(w['action']=='discharge' and w['allocated_kwh']==0 for w in tail))
+        later=self.now+timedelta(hours=10)
+        self.assertFalse(plan(self.c,self.prices,later,25)['hold'])
+        p=plan(self.c,self.prices,later,20)
+        self.assertTrue(p['hold']);self.assertTrue(all(w['action']=='hold' for w in p['windows']))
+
+    def test_extra_demand_is_energy_not_minimum_soc(self):
+        c={**self.c,'extra_load_kwh':2,'extra_load_start_hour':18,'extra_load_end_hour':20}
+        rows=demand_rows(c,self.prices,self.now,self.now+timedelta(hours=12))
+        total=sum((w['end']-w['start']).total_seconds()/3600*w['load_kw'] for w in rows)
+        self.assertAlmostEqual(total,8) # 6 kWh base + 2 kWh cooking
+        p=plan(c,self.prices,self.now,50)
+        self.assertAlmostEqual(sum(w.get('allocated_kwh',0) for w in p['windows']),3)
+        self.assertTrue(all(w['ct']==50 for w in p['windows'] if w.get('allocated_kwh',0)>0))
+        self.assertEqual(p['reserve_kwh'],2)
+
+    def test_demand_edges_and_dst(self):
+        c={**self.c,'extra_load_kwh':2,'extra_load_start_hour':2,'extra_load_end_hour':3}
+        a=datetime(2026,10,25,0,tzinfo=timezone.utc);b=a+timedelta(hours=2)
+        rows=demand_rows(c,[{'start':a,'end':b,'ct':20}],a,b)
+        self.assertAlmostEqual(sum((r['end']-r['start']).total_seconds()/3600*r['load_kw'] for r in rows),3)
+        a=datetime(2026,3,29,0,tzinfo=timezone.utc);b=a+timedelta(hours=2)
+        rows=demand_rows(c,[{'start':a,'end':b,'ct':20}],a,b)
+        self.assertAlmostEqual(sum((r['end']-r['start']).total_seconds()/3600*r['load_kw'] for r in rows),1)
+
+    def test_daytime_forecast_includes_tomorrow_and_whole_dst_night(self):
+        from smart import plan as charge_plan
+        from zoneinfo import ZoneInfo
+        c={**self.c,'roundtrip_efficiency':.85,'charge_power_w':5000}
+        a=datetime(2026,10,23,22,tzinfo=timezone.utc)
+        rows=[]
+        for i in range(196):
+            start=a+timedelta(minutes=15*i);hour=start.astimezone(ZoneInfo(c['timezone'])).hour
+            rows.append({'start':start,'end':start+timedelta(minutes=15),'ct':10 if hour<6 else 40 if 18<=hour<20 else 25})
+        charge=charge_plan(c,rows,self.now,48)
+        self.assertTrue(charge['projected']);self.assertAlmostEqual(charge['planning_soc'],20)
+        self.assertAlmostEqual(charge['needed_kwh'],6)
+        p=timeline(c,rows,self.now,48,charge)
+        self.assertTrue(p['future_complete']);self.assertAlmostEqual(p['future_soc'],80)
+        tomorrow=datetime(2026,10,25,5,tzinfo=timezone.utc)
+        self.assertTrue(any(datetime.fromisoformat(w['start'])>=tomorrow and w['action']=='discharge' for w in p['windows']))
+        night=[w for w in p['windows'] if w['action']=='hold' and w['start']=='2026-10-24T22:00:00+00:00']
+        self.assertEqual(datetime.fromisoformat(night[0]['end'])-datetime.fromisoformat(night[0]['start']),timedelta(hours=7))
+        self.assertTrue(plan(c,rows,datetime(2026,10,25,4,tzinfo=timezone.utc),80)['hold'])
+
+    def test_missing_tomorrow_never_invents_forecast(self):
+        p=timeline(self.c,self.prices,self.now,48,{'planned_kwh':0})
+        self.assertFalse(p['future_complete'])
+        self.assertFalse(any(w['action']=='discharge' and w.get('projected') for w in p['windows']))
+
+    def test_forecast_respects_manual_hold(self):
+        from dispatch import projected_soc
+        end=self.now+timedelta(hours=12)
+        soc,complete=projected_soc(self.c,self.prices,self.now,48,end,end)
+        self.assertTrue(complete);self.assertEqual(soc,48)
+
+    def test_extra_settings_validation(self):
+        for changes in ({'extra_load_kwh':-1},{'extra_load_kwh':float('nan')},
+                        {'extra_load_start_hour':19,'extra_load_end_hour':17},
+                        {'extra_load_start_hour':17.5}):
+            with self.assertRaises(ValueError):luna.validate({**self.c,**changes})
+        self.assertEqual(luna.validate({**self.c,'extra_load_kwh':2})['extra_load_kwh'],2)
+
+    def test_reference_price_weights_demand_not_permission_duration(self):
+        c={**self.c,'timezone':'UTC','target_soc':80,'extra_load_kwh':2,
+           'extra_load_start_hour':18,'extra_load_end_hour':20}
+        now=datetime(2026,10,24,tzinfo=timezone.utc)
+        rows=[{'start':now+timedelta(hours=i),'end':now+timedelta(hours=i+1),
+               'ct':10 if i<6 else 50 if i in (18,19) else 20} for i in range(24)]
+        p=luna.economics_plan(c,rows,now)
+        # 3 kWh at 50ct (cooking + base), 3 kWh at 20ct. Surplus permission adds 0.
+        self.assertAlmostEqual(p['reference_ct_kwh'],35)

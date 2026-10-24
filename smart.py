@@ -1,14 +1,14 @@
 """Battery-side energy allocation to cheapest eligible tariff intervals."""
 import math
-from datetime import timedelta, timezone
-from zoneinfo import ZoneInfo
+from datetime import timedelta
 
 
-def plan(c, prices, now, soc, max_power_w=None):
+def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     from luna import economics_plan
     out = dict(windows=[], soc=soc, target_soc=c['target_soc'],
                capacity_kwh=c['battery_capacity_kwh'], power_w=c['charge_power_w'],
-               needed_kwh=None, duration_minutes=None, complete=False, reason='')
+               needed_kwh=None, duration_minutes=None, complete=False, reason='',
+               planning_soc=soc,projected=False,projection_complete=False,planned_kwh=0)
     def finish(reason):
         out['reason'] = reason
         return out
@@ -20,21 +20,20 @@ def plan(c, prices, now, soc, max_power_w=None):
     if type(power) not in (int, float) or not math.isfinite(power) or power < 200:
         return finish('Keine nutzbare Ladeleistung verfügbar')
     out['power_w'] = power
-    need = max(0, c['target_soc'] - soc) * c['battery_capacity_kwh'] / 100
+    from dispatch import night_bounds,projected_soc
+    start,end=night_bounds(c,now)
+    a,b=max(now,start),end
+    out.update(night_start=a.isoformat(),night_end=b.isoformat())
+    planning_soc=soc
+    if now<start and c.get('smart_discharge_enabled'):
+        planning_soc,confirmed=projected_soc(c,prices,now,soc,start,hold_until)
+        out.update(planning_soc=planning_soc,projected=confirmed,projection_complete=confirmed)
+    need = max(0, c['target_soc'] - planning_soc) * c['battery_capacity_kwh'] / 100
     out['needed_kwh'] = need
     out['duration_minutes'] = need / (power / 1000) * 60
     if need <= 0:
         out['complete'] = True
         return finish('Ziel-SOC erreicht; kein Laden erforderlich')
-    local = now.astimezone(ZoneInfo(c['timezone']))
-    midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
-    start = midnight + timedelta(hours=c['night_start_hour'])
-    end = midnight + timedelta(hours=c['night_end_hour'])
-    if local >= end:
-        start += timedelta(days=1)
-        end += timedelta(days=1)
-    a, b = max(now, start.astimezone(timezone.utc)), end.astimezone(timezone.utc)
-    out.update(night_start=a.isoformat(), night_end=b.isoformat())
     rows = sorted((p for p in prices if p['end'] > a and p['start'] < b), key=lambda p: p['start'])
     cursor = a
     for row in rows:

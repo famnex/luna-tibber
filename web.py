@@ -90,13 +90,13 @@ def next_day_comparison(c, prices, now, day_offset=1):
             'saving_ct':saving,'night_start':night_start.isoformat(),'night_end':night_end.isoformat(),
             'complete':daily is not None and night is not None}
 
-def smart_preview(c, prices, now, telemetry=None):
+def smart_preview(c, prices, now, telemetry=None, hold_until=None):
     from smart import plan
     telemetry=telemetry or {}
     stamp=telemetry.get('time')
     fresh=stamp and 0 <= (now-datetime.fromisoformat(stamp)).total_seconds() <= 90
     return plan(c,prices,now,telemetry.get('soc') if fresh else None,
-                telemetry.get('max_charge_power_w') if fresh else None)
+                telemetry.get('max_charge_power_w') if fresh else None,hold_until)
 
 
 def planned_order(data, c, now=None):
@@ -510,9 +510,11 @@ class Dashboard:
             prices = self.price_data
             now = datetime.now(timezone.utc)
             plan = luna.economics_plan(c,prices,now)
-            preview=smart_preview(c,prices,now,self.telemetry)
+            request=read(self.folder/'discharge-request.json',{})
+            hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
+            preview=smart_preview(c,prices,now,self.telemetry,hold_until)
             from dispatch import timeline
-            dispatch=timeline(c,prices,now,preview['soc'],preview)
+            dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
             return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
