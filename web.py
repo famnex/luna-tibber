@@ -310,10 +310,19 @@ class Dashboard:
             if name == 'update':
                 request=read(self.folder/'discharge-request.json',{})
                 hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
-                if self.mode!='off' or self.proc:
+                if self.mode!='off' or (self.proc and self.job!='sample'):
                     raise ValueError('Zum Update auf Aus schalten und laufenden Vorgang abwarten')
                 if hold or any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
                     raise ValueError('Vor dem Update Entladesperre aufheben und Freigabe abwarten')
+                # Status GETs start read-only samples. Wait under the lock so another
+                # browser cannot start a new one before the updater takes ownership.
+                if self.proc:
+                    try:self.proc.wait(timeout=20)
+                    except subprocess.TimeoutExpired:
+                        raise ValueError('Messwertabfrage läuft noch; Update bitte erneut anfordern') from None
+                    self.generation += 1
+                    self.proc = None
+                    self.job = None
                 updater.start(self.folder,**self.update_settings)
             elif name == 'push-subscribe':
                 contact=self.config().get('push_contact','')

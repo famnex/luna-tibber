@@ -118,6 +118,21 @@ class DashboardTests(unittest.TestCase):
             self.app.action('update',{})
             start.assert_called_once()
 
+    def test_update_waits_for_status_sample(self):
+        self.app.proc=Mock();self.app.job='sample'
+        proc=self.app.proc
+        with patch('web.updater.start') as start:
+            self.app.action('update',{})
+            proc.wait.assert_called_once_with(timeout=20)
+            self.assertIsNone(self.app.proc);self.assertIsNone(self.app.job)
+            start.assert_called_once()
+    def test_update_sample_timeout_preserves_process(self):
+        self.app.proc=Mock();self.app.job='sample';proc=self.app.proc
+        proc.wait.side_effect=web.subprocess.TimeoutExpired('sample',20)
+        with patch('web.updater.start') as start:
+            with self.assertRaisesRegex(ValueError,'Messwertabfrage'):
+                self.app.action('update',{})
+            self.assertIs(self.app.proc,proc);start.assert_not_called()
     def test_update_blocks_controls_and_measurements(self):
         self.app.save_settings({})
         with patch('web.updater.busy',return_value=True),patch.object(self.app,'launch') as launch:
