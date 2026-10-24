@@ -20,10 +20,20 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     if capacity<=0 or power<.2 or c['base_load_w']<=0:return None
     from dispatch import night_bounds,demand_rows
     from pv import rows_for
-    from protection import windows as guard_windows
+    from protection import reserve
     night_a,night_b=night_bounds(c,now)
     end,_=night_bounds(c,night_b)
-    if not covers(prices,now,end) or not rows_for(c,now,end):return None
+    night_complete=covers(prices,now,end)
+    if not night_complete:
+        local=now.astimezone(ZoneInfo(c['timezone']))
+        end=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
+        if not covers(prices,now,end):return None
+    bridge_start=night_b if night_complete else now
+    solar_available=bool(rows_for(c,now,end))
+    if not solar_available:
+        # Unknown sunlight is never credited. Retain load/price-based protection.
+        c={**c,'_pv':{'rows':[{'start':now,'end':end,'kw':0}]}}
+
     # Split at midnight as extra household demand repeats on each local date.
     rows=[];cursor=now;zone=ZoneInfo(c['timezone'])
     while cursor<end:
@@ -31,11 +41,10 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         midnight=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
         right=min(end,midnight)
         rows.extend(demand_rows(c,prices,cursor,right));cursor=right
-    guards=guard_windows(c,now,end)
     # Also split at charging/hold boundaries, even for hourly tariff data.
     split=[]
     for r in rows:
-        edges=sorted({r['start'],r['end'],*[t for t in (night_a,night_b,hold_until,*[t for g in guards for t in g]) if t and r['start']<t<r['end']]})
+        edges=sorted({r['start'],r['end'],*[t for t in (night_a,night_b,hold_until) if t and r['start']<t<r['end']]})
         for a,b in zip(edges,edges[1:]):split.append({**r,'start':a,'end':b})
     rows=split;eta=math.sqrt(c['roundtrip_efficiency'])
     floor=c.get('battery_floor_soc',0)
@@ -49,22 +58,27 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         solar=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)*hours
         can_charge=night_a<=r['start']<night_b and r['ct']<=c['max_buy_ct_kwh'] and seconds>=190
         charge=power*max(0,seconds-130)/3600 if can_charge else 0
-        specs.append((load,solar,r['ct'],charge,bool((hold_until and r['start']<hold_until) or any(a<=r['start']<b for a,b in guards)),power/60,0.))
+        specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),power/60,0.))
     # Morning energy is a time-specific minimum, released for consumption after
     # night-end. Stop bridging only once PV covers the configured household load.
-    morning_rows=[(r,s) for r,s in zip(rows,specs) if r['start']>=night_b]
+    morning_rows=[(r,s) for r,s in zip(rows,specs) if r['start']>=bridge_start]
     bridge_ac=0.;pv_start=None
     for r,s in morning_rows:
         if r['pv_kw']>=r['gross_load_kw'] and r['pv_kw']>0:
             pv_start=r['start'];break
         if not s[4]:bridge_ac+=s[0]
-    buffer=c.get('morning_buffer_kwh',0)
+    buffer=bridge_ac*.1 # Automatic forecast allowance, not a permanent SOC floor.
     required=(bridge_ac+buffer)/eta
     minimum=min(limit,required)
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)
     if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:-1],minimum)
     wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
     values=_values(tuple(specs),ceiling,limit,eta,wear,margin)
+    guard=reserve(values[1],ceiling,specs[0][2],eta,wear,capacity,initial,c.get('_guard_held',False))
+    guard['threshold_soc']=floor+guard['trigger_kwh']/capacity*100
+    guard['release_soc']=floor+guard['release_kwh']/capacity*100
+    if guard['hold']:
+        first=specs[0];specs[0]=(*first[:4],True,*first[5:])
     energy=initial;windows=[];charges=[];trace=[];actual_cost=0
     at_night=initial;at_morning=initial
     for i,(r,spec) in enumerate(zip(rows,specs)):
@@ -103,26 +117,26 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
                        effective_ct_kwh=effective,reference_ct_kwh=effective+saving,saving_ct_kwh=saving,
                        window_start=now.isoformat(),window_end=end.isoformat())
     bridge=dict(demand_kwh=bridge_ac,buffer_kwh=buffer,required_kwh=required,
-                required_soc=floor+required/capacity*100,available_kwh=at_morning,
-                shortfall_kwh=max(0,required-at_morning),
+                required_soc=floor+required/capacity*100,available_kwh=at_morning if night_complete else initial,
+                shortfall_kwh=max(0,required-(at_morning if night_complete else initial)),
                 pv_start=pv_start.isoformat() if pv_start else None,
-                night_end=night_b.isoformat(),floor_soc=floor)
+                night_end=bridge_start.isoformat(),floor_soc=floor)
     phases=[]
     for w in windows:
         a=datetime.fromisoformat(w['start']);b=datetime.fromisoformat(w['end'])
         charge=next((x for x in charges if x['start']==w['start']),None)
         action='charge' if charge else w['action']
-        reason='ev' if any(x<=a<y for x,y in guards) else 'manual' if hold_until and a<hold_until else 'price'
+        reason='manual' if hold_until and a<hold_until else 'reserve' if guard['hold'] and a==now else 'price'
         item=dict(start=w['start'],end=w['end'],action=action,reason=reason,
                   kwh=charge['battery_kwh'] if charge else w['allocated_kwh'],low_ct=w['ct'],high_ct=w['ct'])
         if phases and phases[-1]['action']==action and phases[-1]['reason']==reason and phases[-1]['end']==item['start']:
             old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
         else:phases.append(item)
-    solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=night_b),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=night_b))
-    return dict(solar=solar_summary,phases=phases,bridge=bridge,ev_windows=[{'start':a.isoformat(),'end':b.isoformat()} for a,b in guards],economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
-                planning_soc=floor+at_night/capacity*100,morning_soc=floor+at_morning/capacity*100,
+    solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start))
+    return dict(night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
+                planning_soc=floor+at_night/capacity*100,morning_soc=(floor+at_morning/capacity*100) if night_complete else None,
                 power_w=power*1000,night_start=max(now,night_a).isoformat(),night_end=night_b.isoformat(),
-                reason='Gemeinsamer Energieplan: Verbrauch, Nachtpreise und zeitliche PV-Erzeugung')
+                reason='Gemeinsamer Energieplan: Verbrauch, Nachtpreise und zeitliche PV-Erzeugung' if night_complete else 'Tagesplan aktiv · Preise für nächste Nacht noch offen')
 
 
 def _interpolate(values,energy,ceiling):

@@ -532,6 +532,8 @@ class Dashboard:
             c=attach_pv(c,self.folder,now)
             request=read(self.folder/'discharge-request.json',{})
             hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
+            prior=read(self.folder/'discharge-status.json',{})
+            c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
             preview=smart_preview(c,prices,now,self.telemetry,hold_until)
             from smart import planned_economics
             plan=planned_economics(c,prices,preview)

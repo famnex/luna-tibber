@@ -29,7 +29,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
                    projection_complete=True,planning_soc=joint['planning_soc'],
                    effective_target_soc=joint['morning_soc'],joint=joint,
                    night_start=joint['night_start'],night_end=joint['night_end'])
-        return finish(joint['reason'] if joint['charges'] else 'Gemeinsamer Energieplan: keine wirtschaftliche Netzladung erforderlich')
+        return finish(joint['reason'] if joint['charges'] or not joint['night_complete'] else 'Gemeinsamer Energieplan: keine wirtschaftliche Netzladung erforderlich')
     from dispatch import night_bounds,projected_soc
     start,end=night_bounds(c,now)
     a,b=max(now,start),end

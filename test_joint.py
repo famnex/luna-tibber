@@ -7,7 +7,7 @@ import luna,smart,dispatch,joint
 class JointTests(unittest.TestCase):
     def setup_case(self, hour=0, soc=0):
         a=datetime(2026,10,24,tzinfo=timezone.utc)
-        c={**luna.DEFAULT,'morning_buffer_kwh':0,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
+        c={**luna.DEFAULT,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
            'battery_capacity_kwh':10,'target_soc':80,'base_load_w':500,
            'charge_power_w':5000,'roundtrip_efficiency':.81,'wear_ct_kwh':0,'min_saving_ct_kwh':0}
         c['_pv']={'rows':[{'start':a+timedelta(hours=i),'end':a+timedelta(hours=i+1),'kw':4 if 10<=i%24<15 else 0} for i in range(72)]}
@@ -45,8 +45,9 @@ class JointTests(unittest.TestCase):
         self.assertEqual(joint.plan(c,p,n,0)['planned_kwh'],0)
     def test_incomplete_forecast_falls_back_without_inventing_sun(self):
         c,p,n,s=self.setup_case();c['_pv']['rows']=c['_pv']['rows'][:8]
-        self.assertIsNone(joint.plan(c,p,n,s))
-        self.assertNotIn('joint',smart.plan(c,p,n,s))
+        r=joint.plan(c,p,n,s)
+        self.assertFalse(r['pv_available'])
+        self.assertGreater(r['bridge']['required_kwh'],8)
     def test_ui_and_controller_use_same_plan(self):
         c,p,n,s=self.setup_case()
         preview=smart.plan(c,p,n,s);d=dispatch.plan(c,p,n,s)
@@ -80,50 +81,79 @@ class JointTests(unittest.TestCase):
         self.assertGreaterEqual(r['morning_soc'],2/.9/10*100-1e-7)
         self.assertGreater(r['economics']['saving_ct_kwh'],0)
 
-    def test_car_guard_preserves_morning_buffer_and_device_floor(self):
-        c,p,n,s=self.setup_case(hour=17,soc=45)
-        c.update(ev_protection_enabled=True,ev_start_hour=0,ev_end_hour=7,
-                 morning_buffer_kwh=.5,battery_floor_soc=5)
-        r=joint.plan(c,p,n,s)
-        self.assertGreaterEqual(r['morning_soc']+1e-7,r['bridge']['required_soc'])
-        self.assertEqual(r['bridge']['buffer_kwh'],.5)
-        self.assertAlmostEqual(r['bridge']['demand_kwh'],1.5) # 07-10, car guard until 07
-        for w in r['windows']:
-            hour=datetime.fromisoformat(w['start']).hour
-            if hour<7:self.assertEqual(w['action'],'hold')
-        self.assertEqual(r['bridge']['floor_soc'],5)
-        self.assertTrue(any(w['reason']=='ev' for w in r['phases']))
 
-    def test_unreachable_morning_minimum_is_reported(self):
+    def test_reserve_is_independent_of_soc_drop_from_unexpected_load(self):
+        c,p,n,s=self.setup_case(hour=2,soc=70)
+        full=joint.plan(c,p,n,70);low=joint.plan(c,p,n,30)
+        self.assertAlmostEqual(full['guard']['required_kwh'],low['guard']['required_kwh'])
+        self.assertFalse(full['guard']['hold']);self.assertTrue(low['guard']['hold'])
+        self.assertEqual(low['windows'][0]['action'],'hold')
+        self.assertEqual(dispatch.plan(c,p,n,30)['hold'],True)
+
+    def test_hysteresis_prevents_repeated_switching(self):
+        c,p,n,s=self.setup_case(hour=2,soc=70)
+        g=joint.plan(c,p,n,s)['guard']
+        middle=(g['threshold_soc']+g['release_soc'])/2
+        self.assertFalse(joint.plan(c,p,n,middle)['guard']['hold'])
+        self.assertTrue(joint.plan({**c,'_guard_held':True},p,n,middle)['guard']['hold'])
+        self.assertFalse(joint.plan({**c,'_guard_held':True},p,n,g['release_soc']+1)['guard']['hold'])
+
+    def test_cloudy_day_requires_more_retained_energy(self):
+        c,p,n,s=self.setup_case(hour=2,soc=70)
+        sunny=joint.plan(c,p,n,s)
+        c['_pv']['rows']=[{**r,'kw':0} for r in c['_pv']['rows']]
+        cloudy=joint.plan(c,p,n,s)
+        self.assertGreater(cloudy['guard']['required_kwh'],sunny['guard']['required_kwh'])
+        self.assertGreater(cloudy['bridge']['required_kwh'],sunny['bridge']['required_kwh'])
+
+    def test_reserve_is_released_when_future_demand_has_passed(self):
+        c,p,n,s=self.setup_case(hour=23,soc=70)
+        p=[r for r in p if r['start'].date()==n.date()]
+        # At the last expensive interval the next cheap recharge is ahead;
+        # direct helper verifies no permanent SOC reserve at horizon end.
+        from protection import reserve
+        g=reserve([0.]*81,8,40,.9,0,10,1)
+        self.assertEqual(g['required_kwh'],0);self.assertFalse(g['hold'])
+
+    def test_old_car_schedule_and_manual_buffer_are_migrated_away(self):
+        c,p,n,s=self.setup_case();c['pv_enabled']=False
+        c=luna.validate({**c,'ev_protection_enabled':True,'ev_start_hour':22,'ev_end_hour':7,'morning_buffer_kwh':9})
+        for key in ('ev_protection_enabled','ev_start_hour','ev_end_hour','morning_buffer_kwh'):
+            self.assertNotIn(key,c)
+        c['pv_enabled']=True
+        r=joint.plan(c,p,n,s)
+        self.assertAlmostEqual(r['bridge']['buffer_kwh'],r['bridge']['demand_kwh']*.1)
+
+    def test_missing_prices_hold_but_no_sun_uses_conservative_model(self):
+        c,p,n,s=self.setup_case(hour=2,soc=70)
+        d=dispatch.plan(c,[],n,s)
+        self.assertTrue(d['hold']);self.assertTrue(d['guard']['unavailable'])
+        c['_pv']['rows']=[]
+        r=joint.plan(c,p,n,s)
+        self.assertFalse(r['pv_available']);self.assertGreater(r['guard']['required_kwh'],0)
+
+    def test_device_floor_and_unreachable_minimum(self):
         c,p,n,s=self.setup_case()
-        c.update(morning_buffer_kwh=.5,battery_floor_soc=5,max_buy_ct_kwh=0)
+        c.update(battery_floor_soc=5,max_buy_ct_kwh=0)
         r=joint.plan(c,p,n,s)
         self.assertEqual(r['planned_kwh'],0)
         self.assertGreater(r['bridge']['shortfall_kwh'],2)
         self.assertGreater(r['bridge']['required_soc'],25)
+        for change in ({'battery_floor_soc':float('nan')},{'battery_floor_soc':20,'target_soc':20}):
+            with self.assertRaises(ValueError):luna.validate({**c,'pv_enabled':False,**change})
 
-    def test_guard_survives_missing_forecast_and_disabled_discharge_optimizer(self):
-        c,p,n,s=self.setup_case(hour=1,soc=70)
-        c.update(ev_protection_enabled=True,ev_start_hour=22,ev_end_hour=7,
-                 smart_discharge_enabled=False,pv_enabled=False)
-        r=dispatch.plan(c,[],n,s)
-        self.assertTrue(r['hold'])
-        self.assertTrue(any(w.get('ev_guard') for w in r['windows']))
-        self.assertFalse(dispatch.plan(c,[],n.replace(hour=8),s)['hold'])
+    def test_morning_day_plan_survives_unpublished_next_night_prices(self):
+        c,p,n,s=self.setup_case(hour=6,soc=40)
+        p=[r for r in p if r['end']<=n.replace(hour=0)+timedelta(days=1)]
+        r=joint.plan(c,p,n,s)
+        self.assertIsNotNone(r);self.assertFalse(r['night_complete'])
+        self.assertIsNone(r['morning_soc'])
+        self.assertFalse(r['guard']['hold'])
+        self.assertEqual(r['windows'][0]['action'],'discharge')
+        self.assertTrue(dispatch.plan(c,p,n,s)['complete'])
 
-    def test_car_guard_spans_midnight_and_repeated_dst_hour(self):
-        from protection import windows,active
-        c,p,n,s=self.setup_case()
-        c.update(ev_protection_enabled=True,ev_start_hour=22,ev_end_hour=7,timezone='Europe/Berlin')
-        a=datetime(2026,10,24,20,tzinfo=timezone.utc)
-        b=datetime(2026,10,25,6,tzinfo=timezone.utc)
-        self.assertEqual(windows(c,a,b),[(a,b)])
-        for h in (0,1):self.assertTrue(active(c,datetime(2026,10,25,h,tzinfo=timezone.utc)))
-        self.assertFalse(active(c,b))
-
-    def test_new_settings_validation(self):
-        c,p,n,s=self.setup_case();c.update(pv_enabled=False)
-        for changes in ({'ev_start_hour':24},{'ev_end_hour':0},{'ev_protection_enabled':'true'},
-                        {'morning_buffer_kwh':-1},{'battery_floor_soc':float('nan')},
-                        {'battery_floor_soc':20,'target_soc':20}):
-            with self.assertRaises(ValueError):luna.validate({**c,**changes})
+    def test_no_permanent_reserve_for_zero_price_or_no_remaining_demand(self):
+        from protection import reserve
+        for price in (0,20):
+            g=reserve([0.]*81,8,price,.9,0,10,1)
+            self.assertEqual(g['required_kwh'],0)

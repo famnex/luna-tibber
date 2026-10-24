@@ -36,21 +36,7 @@ def demand_rows(c,prices,start,end):
     return sorted(rows,key=lambda p:p['start'])
 
 
-def plan(c,prices,now,soc,hold_until=None):
-    result=_plan(c,prices,now,soc,hold_until)
-    from protection import active,windows as guard_windows
-    # Guard must also work if forecast/price data fail or Smart discharge is off.
-    if not result.get('joint') and c.get('ev_protection_enabled'):
-        _,end=night_bounds(c,now)
-        horizon=max([datetime.fromisoformat(w['end']) for w in result['windows']]+[end])
-        guards=guard_windows(c,now,horizon)
-        result['windows'] += [{'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ev_guard':True} for a,b in guards]
-        if active(c,now):
-            result.update(hold=True,reason='🚗 Entladung für Autoladung gesperrt')
-    return result
-
-
-def _plan(c, prices, now, soc, hold_until=None):
+def plan(c, prices, now, soc, hold_until=None):
     out={'enabled':bool(c.get('smart_discharge_enabled')), 'hold':False, 'complete':False,
          'windows':[], 'reason':'Smart-Entladen deaktiviert', 'available_kwh':None,
          'base_load_w':c.get('base_load_w',0),
@@ -71,8 +57,14 @@ def _plan(c, prices, now, soc, hold_until=None):
         joint=joint_plan(c,prices,now,soc,hold_until=hold_until)
         if joint is not None:
             out.update(windows=joint['windows'],hold=joint['windows'][0]['action']=='hold',
-                       complete=True,reason=joint['reason'],joint=True,
+                       complete=True,reason='Automatisch benötigte Energie schützen' if joint['guard']['hold'] else joint['reason'],joint=True,guard=joint['guard'],
                        reserved_later_kwh=None)
+            return out
+        if c.get('pv_enabled'):
+            _,until=night_bounds(c,now)
+            out.update(hold=True,reason='Preisdaten unvollständig · benötigte Energie vorläufig schützen',
+                       guard={'hold':True,'unavailable':True},
+                       windows=[{'start':now.isoformat(),'end':until.isoformat(),'action':'hold','allocated_kwh':0}])
             return out
     night_a,night_b=night_bounds(c,now)
     if night_a<=now<night_b:
@@ -135,7 +127,7 @@ def timeline(c,prices,now,soc,charge_preview,hold_until=None):
     if charge_preview.get('joint'):
         joint=charge_preview['joint']
         return {'enabled':True,'hold':joint['windows'][0]['action']=='hold','complete':True,
-                'windows':joint['windows'],'reason':joint['reason'],'joint':True,
+                'windows':joint['windows'],'reason':joint['reason'],'joint':True,'guard':joint['guard'],
                 'stored_kwh':soc/100*c['battery_capacity_kwh'],
                 'available_kwh':soc/100*c['battery_capacity_kwh']*math.sqrt(c['roundtrip_efficiency']),
                 'reserved_later_kwh':None,'base_load_w':c['base_load_w'],'extra_load_kwh':c['extra_load_kwh'],'future_complete':True,
