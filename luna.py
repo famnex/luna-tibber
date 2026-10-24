@@ -22,6 +22,8 @@ DEFAULT = {
     "tibber_token": "", "tibber_home_id": "", "mode": "monitor",
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
     "battery_capacity_kwh": 0.0,
+    "battery_floor_soc": 5.0, "morning_buffer_kwh": 0.5,
+    "ev_protection_enabled": False, "ev_start_hour": 0, "ev_end_hour": 7,
     "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 0.0,
     "extra_load_kwh": 0.0, "extra_load_start_hour": 17, "extra_load_end_hour": 19,
     "pv_enabled": False, "pv_latitude": 0.0, "pv_longitude": 0.0, "pv_kwp": 0.0,
@@ -70,13 +72,13 @@ def write_json(path, data):
 def validate(c):
     # Legacy configuration key: no fixed application reserve remains.
     c["reserve_soc"] = 0.0
-    for key, low, high in [("pv_latitude",-90,90),("pv_longitude",-180,180),("pv_kwp",0,100),("pv_tilt",0,90),("pv_azimuth",-180,180),("pv_ac_limit_kw",0.1,100),("pv_factor",0,1),("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("battery_floor_soc",0,30),("morning_buffer_kwh",0,10),("pv_latitude",-90,90),("pv_longitude",-180,180),("pv_kwp",0,100),("pv_tilt",0,90),("pv_azimuth",-180,180),("pv_ac_limit_kw",0.1,100),("pv_factor",0,1),("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError(f"Ungültiger Wert: {key} (Bereich {low} bis {high})")
-    for key in ('statistics_enabled','smart_discharge_enabled','pv_enabled'):
+    for key in ('statistics_enabled','smart_discharge_enabled','pv_enabled','ev_protection_enabled'):
         if type(c[key]) is not bool:raise ValueError('Ungültiger Schalter: '+key)
     if c['pv_enabled'] and c['pv_latitude']==0 and c['pv_longitude']==0:raise ValueError('Für PV-Prognose tatsächlichen Standort statt 0/0 eintragen')
     if c['pv_enabled'] and (c['pv_kwp']<=0 or c['base_load_w']<=0 or c['battery_capacity_kwh']<=0):raise ValueError('Für PV-Prognose kWp, Grundverbrauch und Akkukapazität eintragen')
@@ -90,6 +92,9 @@ def validate(c):
         raise ValueError("charge_power_w muss ganzzahlig sein")
     if c['push_contact'] and ('@' not in c['push_contact'] or len(c['push_contact'])>240 or any(x.isspace() for x in c['push_contact'])):
         raise ValueError('Ungültige Push-Kontakt-E-Mail')
+    if c['battery_floor_soc']>=c['target_soc']:raise ValueError('Geräte-Untergrenze muss unter dem Ziel-SOC liegen')
+    if any(type(c[k]) is not int or not 0<=c[k]<=23 for k in ('ev_start_hour','ev_end_hour')) or c['ev_start_hour']==c['ev_end_hour']:
+        raise ValueError('Autoladung: unterschiedliche ganze Stunden zwischen 0 und 23 einstellen')
     ZoneInfo(c["timezone"])
     if not (type(c['extra_load_start_hour']) is int and type(c['extra_load_end_hour']) is int
             and 0<=c['extra_load_start_hour']<c['extra_load_end_hour']<=24):

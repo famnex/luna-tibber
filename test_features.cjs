@@ -47,5 +47,5 @@ ctx.renderPv({settings:{pv_enabled:false}});assert.equal(elements.pvcard.hidden,
 console.log('PV forecast rendering passed');
 
 ctx.renderPv({settings:{pv_enabled:true,timezone:'UTC'},pv_forecast:{age_seconds:0},smart_preview:{joint:{},planned_kwh:2.3,effective_target_soc:23,night_end:'2026-10-25T06:00:00Z'}});
-assert.match(elements.pvsummary.textContent,/2,3 kWh Netzladung/);
-assert.match(elements.pvsummary.textContent,/Morgenbedarf/);
+assert.match(elements.pvsummary.textContent,/Erzeugung/);
+assert.doesNotMatch(elements.pvsummary.textContent,/Netzladung/);

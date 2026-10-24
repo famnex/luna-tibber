@@ -565,7 +565,7 @@ Unveränderte Entladesperren benötigen jetzt nur eine Kontrollabfrage pro Abgle
 
 ### Verbleibende Grenzen der Planung
 
-Die Rechnung kennt kein gelerntes Lastprofil. Die optionale PV-Prognose modelliert eine Dachfläche mit Sicherheitsabschlag. Die geräteeigene untere Entladegrenze wird nicht automatisch in das Energiebudget eingerechnet; die aus SOC und Kapazität geschätzte nutzbare Energie kann daher zu hoch sein. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
+Die Rechnung kennt kein gelerntes Lastprofil. Die optionale PV-Prognose modelliert eine Dachfläche mit Sicherheitsabschlag. Die Geräte-Untergrenze muss passend zum Wechselrichter eingestellt werden (nur Rechenwert, vorbelegt mit 5 %); sie wird im gemeinsamen PV-Plan vom nutzbaren SOC abgezogen. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
 
 Eine Entladesperre wird durch Wiederherstellen des ursprünglichen maximalen Entladewerts aufgehoben. Anders als ein auf zwei Minuten begrenzter Ladeauftrag hat dieser Gerätewert keine autonome Ablaufzeit. Bei ausgefallenem Server oder unterbrochener Verbindung kann die Sperre deshalb bis zur erfolgreichen Wiederherstellung bestehen bleiben. Das Journal wird dafür dauerhaft gespeichert; eine lokale Kontrolle kann notwendig sein. Nach einem Neustart beginnt der Webdienst im Modus Aus, automatische Fortsetzung von Smart ist noch nicht vorgesehen.
 
@@ -632,8 +632,37 @@ Die Übersicht, die farbigen Diagrammabschnitte und die Steuerung verwenden dens
 Plan. Der Preisvorteil dieses Plans vergleicht mit einer Planung ohne zusätzliche
 Netzladung bei gleichem Anfangsakku, Wetter und Verbrauch. Die bestehende Statistik
 bleibt eine Schätzung aus angeforderten Ladebefehlen. An und Geplant bleiben unverändert.
-Keine feste zusätzliche SOC-Reserve; geräteeigene Grenzen gelten unverändert und
-werden weiterhin nicht automatisch vom rechnerischen SOC-Energiebudget abgezogen.
+Keine dauerhafte zusätzliche SOC-Reserve. Der Morgenpuffer (vorbelegt 0,5 kWh
+nutzbare Energie) gilt am Nachtende für die Versorgung bis zur ausreichenden PV.
+Er darf anschließend verbraucht werden. Die Geräte-Untergrenze wird im gemeinsamen
+Plan berücksichtigt (vorbelegt 5 %, bitte mit der tatsächlichen Einstellung abgleichen).
+Es wird kein entsprechendes Gerätegrenzen-Register geschrieben.
+
+### Autoladung und Morgenversorgung
+Unter **Einstellungen → Autoladung & Morgenpuffer** kann der tägliche Autoladeschutz
+aktiviert werden. Standard-Zeiten 00–07 Uhr, zunächst deaktiviert. Wähle das Fenster
+so, dass es die komplette Autoladung umfasst; auch 22–07 Uhr ist möglich. Die
+Uhrzeiten gelten lokal einschließlich Zeitumstellung. Solange **Smart** läuft,
+sperrt der Schutz die gesamte Entladung – Hausverbrauch läuft dann ebenfalls aus
+dem Netz. Netz- und PV-Laden bleiben möglich. Er wirkt auch bei fehlender PV-/
+Preisprognose; ohne EVCC gibt es keine Erkennung, ob das Auto noch lädt.
+**Aus/An/Geplant** aktivieren diesen Smart-Zeitplan nicht: Verwende bei Bedarf die
+bestehende separate manuelle Entladesperre bis zum tatsächlichen Ladeende.
+
+Der gemeinsame Plan verlangt am Nachtende den berechneten Morgenbedarf plus Puffer
+nach Verlusten und oberhalb der Geräte-Untergrenze. Diese Versorgung hat Vorrang
+vor dem Mindest-Preisvorteil; die maximale Kaufpreisgrenze, Ladeleistung und das
+SOC-Limit werden nicht überschritten. Reicht das nicht, zeigt die Übersicht die
+ungedeckte Menge in kWh. Die Planung berücksichtigt eine manuelle/Auto-Sperre
+während der Morgenstunden (dort ist ohnehin Netzbezug nötig). Eine Prognose ist
+keine Versorgungsgarantie: Mehrverbrauch, Wetterabweichungen, externe Steuerung,
+Kommunikationsausfälle oder ein weiterladendes Auto außerhalb der Sperrzeit können
+abweichen. Bei fehlenden Daten ist der Morgenpuffer nicht bestätigt.
+
+Die dunkle Karte zeigt die eingestellte SOC-Obergrenze; der erwartete SOC am
+Nachtende steht separat in der Steuerung. Der Ablauf listet gruppierte Zeiten,
+Lade-/Entlademengen, Preise und Sperrgründe. Der PV-Abschnitt zeigt nur Solarertrag,
+direkten Hausverbrauch und Überschuss, ohne die Ladeinformationen zu wiederholen.
 
 Der gemeinsame Cache `pv-forecast.json` wird alle 3 Stunden erneuert, bei Fehlern
 frühestens nach 15 Minuten erneut versucht. Nach 6 Stunden oder bei unpassenden

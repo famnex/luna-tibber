@@ -36,7 +36,21 @@ def demand_rows(c,prices,start,end):
     return sorted(rows,key=lambda p:p['start'])
 
 
-def plan(c, prices, now, soc, hold_until=None):
+def plan(c,prices,now,soc,hold_until=None):
+    result=_plan(c,prices,now,soc,hold_until)
+    from protection import active,windows as guard_windows
+    # Guard must also work if forecast/price data fail or Smart discharge is off.
+    if not result.get('joint') and c.get('ev_protection_enabled'):
+        _,end=night_bounds(c,now)
+        horizon=max([datetime.fromisoformat(w['end']) for w in result['windows']]+[end])
+        guards=guard_windows(c,now,horizon)
+        result['windows'] += [{'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ev_guard':True} for a,b in guards]
+        if active(c,now):
+            result.update(hold=True,reason='🚗 Entladung für Autoladung gesperrt')
+    return result
+
+
+def _plan(c, prices, now, soc, hold_until=None):
     out={'enabled':bool(c.get('smart_discharge_enabled')), 'hold':False, 'complete':False,
          'windows':[], 'reason':'Smart-Entladen deaktiviert', 'available_kwh':None,
          'base_load_w':c.get('base_load_w',0),

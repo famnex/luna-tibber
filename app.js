@@ -1,7 +1,7 @@
 'use strict';
 const $=id=>document.getElementById(id);
 let initialized=false,busy=false,refreshing=false,settingsDirty=false,settingsBaseline={},chartSignature="",lastStatus=null,chosenMode=null,modeDirty=false,pendingButton=null;
-const labels={pv_enabled:'PV-Prognose berücksichtigen',pv_latitude:'Breitengrad',pv_longitude:'Längengrad',pv_kwp:'PV-Leistung dieser Dachfläche (kWp)',pv_tilt:'Dachneigung (Grad)',pv_azimuth:'Ausrichtung (0 Süd, −90 Ost, +90 West)',pv_ac_limit_kw:'Maximale PV-Ausgangsleistung (kW)',pv_factor:'Prognose-Anteil (0–1, z. B. 0.7)',smart_discharge_enabled:'Smart: Entladung optimieren',base_load_w:'Erwarteter Grundverbrauch (W)',extra_load_kwh:'Täglicher Zusatzverbrauch (kWh)',extra_load_start_hour:'Zusatzverbrauch ab Stunde',extra_load_end_hour:'Zusatzverbrauch bis Stunde',statistics_enabled:'Planersparnis speichern (ohne Messabfragen)',push_contact:'Kontakt-E-Mail für Push',battery_capacity_kwh:'Nutzbare Akkukapazität gesamt (kWh, erforderlich für Smart)',host:'Wechselrichter-IP',port:'Port',unit_id:'Unit-ID',expected_serial:'Wechselrichter-Seriennummer',username:'Huawei-Benutzername',password:'Huawei-Installateurpasswort',tibber_token:'Tibber Personal Access Token',tibber_home_id:'Tibber Zuhause-ID (bei mehreren Zuhause)',max_buy_ct_kwh:'Maximaler Kaufpreis (ct/kWh)',target_soc:'Ziel-Akkustand (%)',charge_power_w:'Angeforderte Ladeleistung (W)',max_session_minutes:'Maximale Ladesitzung (Minuten)',roundtrip_efficiency:'Gesamtwirkungsgrad (z. B. 0.85)',wear_ct_kwh:'Verschleißreserve (ct/kWh)',min_saving_ct_kwh:'Mindestvorteil (ct/kWh)',use_start_hour:'Verbrauchsfenster ab Stunde',use_end_hour:'Verbrauchsfenster bis Stunde',night_start_hour:'Nachtvergleich ab Stunde (0–23)',night_end_hour:'Nachtvergleich bis Stunde (1–24)',timezone:'Zeitzone',wifi_enabled:'WLAN-Profil vor Laden prüfen'};
+const labels={ev_protection_enabled:'Autoladeschutz in Smart aktivieren',ev_start_hour:'Autoladeschutz ab Stunde',ev_end_hour:'Autoladeschutz bis Stunde',morning_buffer_kwh:'Puffer bis zur PV-Versorgung (kWh)',battery_floor_soc:'Geräte-Untergrenze SOC (%) – nur Berechnung',pv_enabled:'PV-Prognose berücksichtigen',pv_latitude:'Breitengrad',pv_longitude:'Längengrad',pv_kwp:'PV-Leistung dieser Dachfläche (kWp)',pv_tilt:'Dachneigung (Grad)',pv_azimuth:'Ausrichtung (0 Süd, −90 Ost, +90 West)',pv_ac_limit_kw:'Maximale PV-Ausgangsleistung (kW)',pv_factor:'Prognose-Anteil (0–1, z. B. 0.7)',smart_discharge_enabled:'Smart: Entladung optimieren',base_load_w:'Erwarteter Grundverbrauch (W)',extra_load_kwh:'Täglicher Zusatzverbrauch (kWh)',extra_load_start_hour:'Zusatzverbrauch ab Stunde',extra_load_end_hour:'Zusatzverbrauch bis Stunde',statistics_enabled:'Planersparnis speichern (ohne Messabfragen)',push_contact:'Kontakt-E-Mail für Push',battery_capacity_kwh:'Nutzbare Akkukapazität gesamt (kWh, erforderlich für Smart)',host:'Wechselrichter-IP',port:'Port',unit_id:'Unit-ID',expected_serial:'Wechselrichter-Seriennummer',username:'Huawei-Benutzername',password:'Huawei-Installateurpasswort',tibber_token:'Tibber Personal Access Token',tibber_home_id:'Tibber Zuhause-ID (bei mehreren Zuhause)',max_buy_ct_kwh:'Maximaler Kaufpreis (ct/kWh)',target_soc:'Ziel-Akkustand (%)',charge_power_w:'Angeforderte Ladeleistung (W)',max_session_minutes:'Maximale Ladesitzung (Minuten)',roundtrip_efficiency:'Gesamtwirkungsgrad (z. B. 0.85)',wear_ct_kwh:'Verschleißreserve (ct/kWh)',min_saving_ct_kwh:'Mindestvorteil (ct/kWh)',use_start_hour:'Verbrauchsfenster ab Stunde',use_end_hour:'Verbrauchsfenster bis Stunde',night_start_hour:'Nachtvergleich ab Stunde (0–23)',night_end_hour:'Nachtvergleich bis Stunde (1–24)',timezone:'Zeitzone',wifi_enabled:'WLAN-Profil vor Laden prüfen'};
 const types={};
 const modes={off:'Aus',smart:'Smart',on:'An',schedule:'Zeitplan',planned:'Geplant'};
 const ct=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2})+' ct/kWh':'—';
@@ -12,6 +12,12 @@ const actionLabels={discharge:'Entladung ändern','push-test':'Testnachricht sen
 async function perform(name,data={},button=null){if(busy)return false;busy=true;pendingButton=button;showBusy(true,(actionLabels[name]||'Aktion')+' …',button);document.body.classList.add('working');const buttons=[...document.querySelectorAll('#dashboard button')];buttons.forEach(b=>b.disabled=true);$('dashboard').setAttribute('aria-busy','true');notify('');try{await api(name,data);if(['mode','planned','test','discharge'].includes(name))watchChange(name,data);if(name==='mode'||name==='planned'){modeDirty=false;chosenMode=name==='planned'?'planned':data.mode;}notify(name==='probe'||name==='test'?'':name==='settings'?'Gespeichert · laufende Steuerung übernimmt Änderungen im nächsten Zyklus.':name==='planned'?'Ladeauftrag eingeplant. Start und Ende stehen unten.':name==='mode'&&data.mode==='off'?'Stopp angefordert. Bestätigung im Gerätestatus abwarten.':'Änderung übernommen.');if(name==='settings'){settingsDirty=false;initialized=false;}await refresh();return true;}catch(e){notify(e.message,'error');return false;}finally{showBusy(false,'',pendingButton);pendingButton=null;busy=false;buttons.forEach(b=>b.disabled=false);if(lastStatus)renderUpdate(lastStatus.update,lastStatus);document.body.classList.remove('working');$('dashboard').setAttribute('aria-busy','false');}}
 
 const settingHelp={
+ ev_protection_enabled:'Sperrt in Smart während des gewählten Zeitfensters die gesamte Batterieentladung, auch für das Haus. Netz- und PV-Laden bleiben möglich. Keine automatische Autoerkennung. Die Sperre gilt nur solange Smart läuft; bei Aus verwende die separate manuelle Entladesperre.',
+ ev_start_hour:'Beginn der täglichen Autoladesperre in deiner Ortszeit, z. B. 22 oder 0. Ganze Stunden von 0 bis 23. Der Zeitraum muss die gesamte Autoladung abdecken.',
+ ev_end_hour:'Ende der täglichen Autoladesperre in deiner Ortszeit, z. B. 7. Liegt es vor dem Start, endet die Sperre am Folgetag. Ohne EVCC kennt die App das tatsächliche Ladeende nicht.',
+ morning_buffer_kwh:'Zusätzliche nutzbare Energie am Nachtende für den Morgen bis zur ausreichenden PV-Erzeugung. 0,5 kWh entsprechen bei 500 W etwa einer Stunde Puffer. Keine dauerhafte Reserve: Die Energie darf tagsüber verbraucht werden. Kaufpreis- und Leistungsgrenzen bleiben gültig; fehlende Deckung wird angezeigt.',
+ battery_floor_soc:'Trage die im Wechselrichter eingestellte Entlade-Untergrenze ein (bei deinem Screenshot 5 %). Dieser Anteil steht rechnerisch nicht für den Hausverbrauch zur Verfügung. Die App ändert diese Geräteeinstellung nicht.',
+
  pv_enabled:'Nutzt Open-Meteo-Wetterdaten für eine Dachfläche. Standort und Dachparameter werden an Open-Meteo übertragen, keine Zugangsdaten. Aktivierung benötigt kWp, Grundverbrauch und Akkukapazität. Wirkt nur auf Smart; An und Geplant behalten ihre Ziele.',
  pv_latitude:'Breitengrad deiner Anlage als Dezimalzahl, z. B. 51.2. Aus einer Karte übernehmen. Über „Gerätestandort übernehmen“ kannst du den Standort dieses Handys/PCs einmalig einsetzen (HTTPS und Browserfreigabe nötig). Der Standort wird für die Wetterprognose an Open-Meteo gesendet.',
  pv_longitude:'Längengrad deiner Anlage als Dezimalzahl, z. B. 10.0. Westliche Längen sind negativ. Erst den tatsächlichen Standort eintragen, dann die Prognose aktivieren.',
@@ -107,7 +113,7 @@ function postcodeField(){
 }
 function fillSettings(s,secrets){
  settingsBaseline={...s};const box=$('fields');box.replaceChildren();const sections={};
- const group=k=>k.startsWith('pv_')?'PV-Prognose':['host','port','unit_id','expected_serial','username','password','wifi_enabled'].includes(k)?'Wechselrichter & Verbindung':k.startsWith('tibber')?'Tibber-Zugang':['target_soc','charge_power_w','max_session_minutes','battery_capacity_kwh'].includes(k)?'Ladegrenzen':['smart_discharge_enabled','base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour'].includes(k)?'Smart-Entladung & Bedarf':['statistics_enabled','push_contact'].includes(k)?'Statistik & Benachrichtigungen':'Preise, Vergleich & Zeitzone';
+ const group=k=>k.startsWith('ev_')||['morning_buffer_kwh','battery_floor_soc'].includes(k)?'Autoladung & Morgenpuffer':k.startsWith('pv_')?'PV-Prognose':['host','port','unit_id','expected_serial','username','password','wifi_enabled'].includes(k)?'Wechselrichter & Verbindung':k.startsWith('tibber')?'Tibber-Zugang':['target_soc','charge_power_w','max_session_minutes','battery_capacity_kwh'].includes(k)?'Ladegrenzen':['smart_discharge_enabled','base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour'].includes(k)?'Smart-Entladung & Bedarf':['statistics_enabled','push_contact'].includes(k)?'Statistik & Benachrichtigungen':'Preise, Vergleich & Zeitzone';
  for(const [key,label] of Object.entries(labels)){
   const field=document.createElement('div');field.className='setting-field';
   const heading=document.createElement('div');heading.className='setting-heading';
@@ -205,13 +211,13 @@ function renderControl(d){
  const c=d.settings;
  const preview=d.smart_preview;
  const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:c.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
- $('smarttiming').textContent=preview.reason;
+ $('smarttiming').textContent=preview.joint?(preview.windows.length?'↗ '+preview.planned_kwh.toLocaleString('de-DE',{maximumFractionDigits:2})+' kWh Netzladung geplant':'☾ Keine Netzladung geplant'):preview.reason;
  const number=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
- $('smarttarget').textContent=preview.joint?`SOC jetzt ${number(preview.soc)} % · zum Nachtbeginn ca. ${number(preview.planning_soc)} % · am Nachtende ca. ${number(preview.effective_target_soc)} %. Netzladung ${number(preview.planned_kwh)} kWh · bis ${preview.power_w} W · ca. ${number(preview.duration_minutes)} Minuten.`:`${preview.projected?'SOC jetzt '+number(preview.soc)+' % · zum Nachtbeginn geschätzt '+number(preview.planning_soc):'SOC '+number(preview.soc)} → ${number(preview.effective_target_soc??preview.target_soc)} % · Kapazität ${number(preview.capacity_kwh)} kWh · Bedarf ${number(preview.needed_kwh)} kWh · Ladeleistung bis ${preview.power_w} W · reine Ladedauer ca. ${number(preview.duration_minutes)} Minuten.`;
+ $('smarttarget').textContent=preview.joint?`☾ ${fmt(preview.night_end)}: ca. ${number(preview.effective_target_soc)} % SOC${preview.planned_kwh>0?' · '+Math.round(preview.duration_minutes)+' min bei '+number(preview.power_w/1000)+' kW':''}`:`SOC ${number(preview.soc)} → ${number(preview.target_soc)} % · ${number(preview.needed_kwh)} kWh`;
  if(preview.soc===null&&$('smartslots').children.length){
   $('smarttiming').textContent='Messung wird aktualisiert · bisheriger Plan, derzeit nicht bestätigt';
  }else{
-  const texts=preview.windows.map(slot=>`${fmt(slot.start)} – ${fmt(slot.end)} · ${ct(slot.ct)}`);
+  const texts=preview.joint?phaseFacts(preview.joint,c):preview.windows.map(slot=>`${fmt(slot.start)} – ${fmt(slot.end)} · ${ct(slot.ct)}`);
   const signature=JSON.stringify(texts);
   if($('smartslots').dataset.signature!==signature){
    $('smartslots').replaceChildren(...texts.map(text=>{const row=document.createElement('li');row.textContent=text;return row;}));
@@ -258,6 +264,26 @@ function phaseInfo(d,now=Date.now()){
  }
  return [loading?'ϟ Lade …':'⌛ Warte auf Ladebestätigung',d.remaining_seconds!==null?`■ Geplanter Stopp um ${fmt(now+d.remaining_seconds*1000)}`:'Status wird aktualisiert'];
 }
+function compactPlan(d){
+ const j=d.smart_preview?.joint;
+ if(!j)return d.smart_preview?.windows?.length?'◷ Ladefenster geplant':'◷ Plan abwarten';
+ const now=Date.now(),next=j.phases?.find(p=>Date.parse(p.end)>now);
+ if(!next)return '✓ Planende';
+ const time=new Date(next.end).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'});
+ return `${next.action==='charge'?'↗ Laden':next.action==='discharge'?'↘ Frei':next.reason==='ev'?'🚗 Gesperrt':'Ⅱ Pause'} bis ${time}`;
+}
+function phaseFacts(j,c){
+ const num=n=>n.toLocaleString('de-DE',{maximumFractionDigits:2});
+ const fmt=t=>new Date(t).toLocaleString('de-DE',{timeZone:c.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+ const peak=Math.max(...(j.phases||[]).filter(p=>p.action==='discharge'&&p.kwh>0).map(p=>p.high_ct));
+ return (j.phases||[]).map(p=>{
+  const price=p.low_ct===p.high_ct?num(p.low_ct):num(p.low_ct)+'–'+num(p.high_ct);
+  const action=p.action==='charge'?'↗ Laden':p.action==='discharge'?'↘ Entladung frei':'Ⅱ Gesperrt';
+  const why=p.action==='charge'||p.action==='discharge'?`${num(p.kwh)} kWh · ${price} ct/kWh`:p.reason==='ev'?'🚗 Autoladeschutz':p.reason==='manual'?'Manuelle Sperre':`${price} ct jetzt${Number.isFinite(peak)?' · Entladung bis '+num(peak)+' ct geplant':''}`;
+  return `${fmt(p.start)} – ${fmt(p.end)} · ${action}
+${why}`;
+ });
+}
 function renderBatteryCard(d){
  renderDischarge(d);
  const t=d.telemetry,age=t.time?(Date.now()-Date.parse(t.time))/1000:Infinity;
@@ -267,12 +293,12 @@ function renderBatteryCard(d){
  $('batterystatus').classList.toggle('stale',!fresh);
  $('flowstate').textContent=!fresh?'Messwerte fehlen / veraltet':charging?'ϟ Lädt':discharging?'Entlädt':'Bereit';
  $('powerdirection').textContent=charging?'Energie fließt in den Akku':discharging?'Akku gibt Energie ab':fresh?'Kein wesentlicher Batteriefluss':'Messung abwarten';
- const target=d.mode==='planned'&&d.planned?d.planned.target_soc:d.mode==='smart'?(d.smart_preview?.effective_target_soc??d.settings.target_soc):d.settings.target_soc;
- $('cardtarget').textContent=target+' %';
+ const target=d.mode==='planned'&&d.planned?d.planned.target_soc:d.settings.target_soc;
+ $('cardtarget').textContent=Number.isFinite(target)?target.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'—';
  $('socfill').setAttribute('width',fresh?Math.min(1000,Math.max(0,t.soc*10)):0);
  $('soctarget').setAttribute('x1',target*10);$('soctarget').setAttribute('x2',target*10);
  $('socgraphic').setAttribute('aria-label',fresh?`Akkustand ${t.soc} Prozent, Ziel ${target} Prozent`:'Akkustand veraltet oder unbekannt');
- const phase=phaseInfo(d);$('cardstatus').textContent=phase[0];$('cardplan').textContent=phase[1];
+ const phase=phaseInfo(d);$('cardstatus').textContent=phase[0];$('cardplan').textContent=d.mode==='smart'?compactPlan(d):phase[1];
  $('timerlabel').textContent=d.mode==='on'?'MANUELL · RESTZEIT':'RESTZEIT';
  drawCountdown();
 }

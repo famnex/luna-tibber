@@ -7,7 +7,7 @@ import luna,smart,dispatch,joint
 class JointTests(unittest.TestCase):
     def setup_case(self, hour=0, soc=0):
         a=datetime(2026,10,24,tzinfo=timezone.utc)
-        c={**luna.DEFAULT,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
+        c={**luna.DEFAULT,'morning_buffer_kwh':0,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
            'battery_capacity_kwh':10,'target_soc':80,'base_load_w':500,
            'charge_power_w':5000,'roundtrip_efficiency':.81,'wear_ct_kwh':0,'min_saving_ct_kwh':0}
         c['_pv']={'rows':[{'start':a+timedelta(hours=i),'end':a+timedelta(hours=i+1),'kw':4 if 10<=i%24<15 else 0} for i in range(72)]}
@@ -79,3 +79,51 @@ class JointTests(unittest.TestCase):
         self.assertGreater(r['planned_kwh'],2)
         self.assertGreaterEqual(r['morning_soc'],2/.9/10*100-1e-7)
         self.assertGreater(r['economics']['saving_ct_kwh'],0)
+
+    def test_car_guard_preserves_morning_buffer_and_device_floor(self):
+        c,p,n,s=self.setup_case(hour=17,soc=45)
+        c.update(ev_protection_enabled=True,ev_start_hour=0,ev_end_hour=7,
+                 morning_buffer_kwh=.5,battery_floor_soc=5)
+        r=joint.plan(c,p,n,s)
+        self.assertGreaterEqual(r['morning_soc']+1e-7,r['bridge']['required_soc'])
+        self.assertEqual(r['bridge']['buffer_kwh'],.5)
+        self.assertAlmostEqual(r['bridge']['demand_kwh'],1.5) # 07-10, car guard until 07
+        for w in r['windows']:
+            hour=datetime.fromisoformat(w['start']).hour
+            if hour<7:self.assertEqual(w['action'],'hold')
+        self.assertEqual(r['bridge']['floor_soc'],5)
+        self.assertTrue(any(w['reason']=='ev' for w in r['phases']))
+
+    def test_unreachable_morning_minimum_is_reported(self):
+        c,p,n,s=self.setup_case()
+        c.update(morning_buffer_kwh=.5,battery_floor_soc=5,max_buy_ct_kwh=0)
+        r=joint.plan(c,p,n,s)
+        self.assertEqual(r['planned_kwh'],0)
+        self.assertGreater(r['bridge']['shortfall_kwh'],2)
+        self.assertGreater(r['bridge']['required_soc'],25)
+
+    def test_guard_survives_missing_forecast_and_disabled_discharge_optimizer(self):
+        c,p,n,s=self.setup_case(hour=1,soc=70)
+        c.update(ev_protection_enabled=True,ev_start_hour=22,ev_end_hour=7,
+                 smart_discharge_enabled=False,pv_enabled=False)
+        r=dispatch.plan(c,[],n,s)
+        self.assertTrue(r['hold'])
+        self.assertTrue(any(w.get('ev_guard') for w in r['windows']))
+        self.assertFalse(dispatch.plan(c,[],n.replace(hour=8),s)['hold'])
+
+    def test_car_guard_spans_midnight_and_repeated_dst_hour(self):
+        from protection import windows,active
+        c,p,n,s=self.setup_case()
+        c.update(ev_protection_enabled=True,ev_start_hour=22,ev_end_hour=7,timezone='Europe/Berlin')
+        a=datetime(2026,10,24,20,tzinfo=timezone.utc)
+        b=datetime(2026,10,25,6,tzinfo=timezone.utc)
+        self.assertEqual(windows(c,a,b),[(a,b)])
+        for h in (0,1):self.assertTrue(active(c,datetime(2026,10,25,h,tzinfo=timezone.utc)))
+        self.assertFalse(active(c,b))
+
+    def test_new_settings_validation(self):
+        c,p,n,s=self.setup_case();c.update(pv_enabled=False)
+        for changes in ({'ev_start_hour':24},{'ev_end_hour':0},{'ev_protection_enabled':'true'},
+                        {'morning_buffer_kwh':-1},{'battery_floor_soc':float('nan')},
+                        {'battery_floor_soc':20,'target_soc':20}):
+            with self.assertRaises(ValueError):luna.validate({**c,**changes})
