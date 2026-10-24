@@ -22,7 +22,7 @@ DEFAULT = {
     "tibber_token": "", "tibber_home_id": "", "mode": "monitor",
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
     "battery_capacity_kwh": 0.0,
-    "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 20.0,
+    "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 0.0,
     "extra_load_kwh": 0.0, "extra_load_start_hour": 17, "extra_load_end_hour": 19,
     "statistics_enabled": True, "push_contact": "",
     "max_session_minutes": 120, "wifi_enabled": False,
@@ -51,7 +51,9 @@ def write_json(path, data):
     os.chmod(path, 0o600)
 
 def validate(c):
-    for key, low, high in [("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("reserve_soc", 5, 95), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    # Legacy configuration key: no fixed application reserve remains.
+    c["reserve_soc"] = 0.0
+    for key, low, high in [("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
@@ -60,7 +62,6 @@ def validate(c):
     for key in ('statistics_enabled','smart_discharge_enabled'):
         if type(c[key]) is not bool:raise ValueError('Ungültiger Schalter: '+key)
     if c['smart_discharge_enabled'] and c['base_load_w']<=0:raise ValueError('Für Smart-Entladen Grundverbrauch größer 0 W einstellen')
-    if c['smart_discharge_enabled'] and c['reserve_soc']>c['target_soc']:raise ValueError('Reserve darf nicht über Ziel-SOC liegen')
     if c["mode"] not in ("monitor", "auto"):
         raise ValueError("mode muss monitor oder auto sein")
     for key, low, high in [("port", 1, 65535), ("unit_id", 0, 247)]:

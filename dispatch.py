@@ -36,8 +36,8 @@ def demand_rows(c,prices,start,end):
 def plan(c, prices, now, soc, hold_until=None):
     out={'enabled':bool(c.get('smart_discharge_enabled')), 'hold':False, 'complete':False,
          'windows':[], 'reason':'Smart-Entladen deaktiviert', 'available_kwh':None,
-         'reserve_soc':c.get('reserve_soc',20), 'base_load_w':c.get('base_load_w',0),
-         'stored_kwh':None,'reserve_kwh':None,'above_reserve_kwh':None,
+         'base_load_w':c.get('base_load_w',0),
+         'stored_kwh':None,'reserved_later_kwh':None,
          'extra_load_kwh':c.get('extra_load_kwh',0)}
     if not out['enabled']:return out
     capacity=c['battery_capacity_kwh']; load=c.get('base_load_w',0)
@@ -46,20 +46,19 @@ def plan(c, prices, now, soc, hold_until=None):
     if type(soc) not in (int,float) or not math.isfinite(soc) or not 0<=soc<=100:
         out['reason']='Aktuellen Akkustand abwarten';return out
     eta=math.sqrt(c['roundtrip_efficiency'])
-    usable=max(0,soc-out['reserve_soc'])/100*capacity
+    usable=soc/100*capacity
     budget=usable*eta
-    out.update(stored_kwh=soc/100*capacity,reserve_kwh=out['reserve_soc']/100*capacity,
-               above_reserve_kwh=usable,available_kwh=budget)
+    out.update(stored_kwh=usable,available_kwh=budget,reserved_later_kwh=0)
     night_a,night_b=night_bounds(c,now)
     if night_a<=now<night_b:
         # Avoid cycling the freshly charged energy back out between cheap slots.
-        out.update(hold=True,complete=True,reason='Nachtreserve halten',windows=[{
+        out.update(hold=True,complete=True,reserved_later_kwh=budget,reason='Energie bis zum Tagesplan halten',windows=[{
             'start':now.isoformat(),'end':night_b.isoformat(),'action':'hold','allocated_kwh':0}])
         return out
     end=night_a
     if budget<=1e-9:
-        out.update(hold=True,complete=True,reason='Mindestreserve erreicht',windows=[{
-            'start':now.isoformat(),'end':end.isoformat(),'action':'hold','allocated_kwh':0}])
+        out.update(hold=False,complete=True,reason='Keine Energie mehr eingeplant · normale Gerätegrenzen',windows=[{
+            'start':now.isoformat(),'end':end.isoformat(),'action':'discharge','allocated_kwh':0,'surplus_only':True}])
         return out
     if not covers(prices,now,end):
         out['reason']='Tagespreise unvollständig · normale Entladung';return out
@@ -88,6 +87,7 @@ def plan(c, prices, now, soc, hold_until=None):
         for w in out['windows']:
             if datetime.fromisoformat(w['start'])>=tail:
                 w.update(action='discharge',surplus_only=True)
+    out['reserved_later_kwh']=sum(w.get('allocated_kwh',0) for w in out['windows'] if datetime.fromisoformat(w['start'])>now)
     out['complete']=True
     out['hold']=bool(out['windows'] and out['windows'][0]['action']=='hold')
     out['reason']='Energie für teurere Stunden reservieren' if out['hold'] else 'Entladung für Hausverbrauch freigegeben'

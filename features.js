@@ -12,14 +12,14 @@ function chartPhases(d){
 }
 function phaseEntryAt(phases,time){return [...phases].reverse().find(w=>Date.parse(w.start)<=time&&time<Date.parse(w.end));}
 function phaseAt(phases,time){return phaseEntryAt(phases,time)?.action;}
-function phaseDescription(w){return (w.projected?'Vorschau · ':'')+(w.surplus_only?'↘ Restenergie frei bis Mindestreserve':phaseLabel(w.action));}
+function phaseDescription(w){return (w.projected?'Vorschau · ':'')+(w.surplus_only?'↘ Restenergie frei · Gerätegrenzen gelten':phaseLabel(w.action));}
 function renderExtras(d){
  renderUpdate(d.update,d);
  document.getElementById('referencelabel').textContent=d.settings.smart_discharge_enabled?'Erwarteter Preis bei Entladung':'Durchschnittspreis im Verbrauchsfenster';
  const q=d.dispatch_preview;
  document.getElementById('dispatchreason').textContent=q?.enabled?'✧ '+q.reason:'ⓘ Smart-Entladen in den Einstellungen aktivierbar';
  const num=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
- document.getElementById('dispatchsummary').textContent=q?.enabled?`${num(q.stored_kwh)} kWh im Akku − ${num(q.reserve_kwh)} kWh Mindestreserve (${q.reserve_soc} %)\n≈ ${num(q.available_kwh)} kWh fürs Haus nach Entladeverlusten\n⌁ ${q.base_load_w} W Grundverbrauch${q.extra_load_kwh?' + '+num(q.extra_load_kwh)+' kWh Zusatzbedarf täglich':''}${q.future_complete?'\nVorschau ab Nachtende: ca. '+num(q.future_soc)+' % SOC':q.future_reason?'\nTagesvorschau: '+q.future_reason:''}`:'';
+ document.getElementById('dispatchsummary').textContent=q?.enabled?`${num(q.stored_kwh)} kWh im Akku · keine feste App-Reserve\n≈ ${num(q.available_kwh)} kWh nach Entladeverlusten (Gerätegrenzen gelten)\nDavon ${num(q.reserved_later_kwh)} kWh für spätere Planstunden zurückgehalten\n⌁ ${q.base_load_w} W Grundverbrauch${q.extra_load_kwh?' + '+num(q.extra_load_kwh)+' kWh Zusatzbedarf täglich':''}${q.future_complete?'\nVorschau ab Nachtende: ca. '+num(q.future_soc)+' % SOC':q.future_reason?'\nTagesvorschau: '+q.future_reason:''}`:'';
  if(!window.isSecureContext)document.getElementById('pushstatus').textContent='🔒 HTTPS für Installation und Push erforderlich.';
  else if(d.push?.error)document.getElementById('pushstatus').textContent=d.push.error;
 }

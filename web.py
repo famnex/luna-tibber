@@ -505,7 +505,7 @@ class Dashboard:
     def snapshot(self):
         with self.lock:
             c = self.config()
-            settings = {k:v for k,v in c.items() if k not in SECRETS and k != 'mode'}
+            settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc')}
             missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
             prices = self.price_data
             now = datetime.now(timezone.utc)
