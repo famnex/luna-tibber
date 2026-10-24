@@ -13,6 +13,18 @@ function chartPhases(d){
 function phaseEntryAt(phases,time){return [...phases].reverse().find(w=>Date.parse(w.start)<=time&&time<Date.parse(w.end));}
 function phaseAt(phases,time){return phaseEntryAt(phases,time)?.action;}
 function phaseDescription(w){return (w.projected?'Vorschau · ':'')+(w.surplus_only?'↘ Restenergie frei · Gerätegrenzen gelten':phaseLabel(w.action));}
+function solarSeries(d){
+ if(!d.settings?.pv_enabled||!d.prices?.length)return [];
+ const first=Date.parse(d.prices[0].start),last=Date.parse(d.prices[d.prices.length-1].end);
+ return (d.pv_forecast?.series||[]).map(r=>({start:Date.parse(r.start),end:Date.parse(r.end),kw:r.kw}))
+  .filter(r=>Number.isFinite(r.start)&&Number.isFinite(r.end)&&r.end>r.start&&Number.isFinite(r.kw)&&r.kw>=0&&r.end>first&&r.start<last).sort((a,b)=>a.start-b.start);
+}
+function solarAverage(rows,start,end){
+ if(!(end>start))return null;
+ let cursor=start,energy=0;
+ for(const row of rows){const a=Math.max(cursor,row.start),b=Math.min(end,row.end);if(b<=a)continue;if(a>cursor)return null;energy+=(b-a)*row.kw;cursor=b;if(cursor>=end)return energy/(end-start);}
+ return null;
+}
 function renderExtras(d){
  renderUpdate(d.update,d);
  renderPv(d);

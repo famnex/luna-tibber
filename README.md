@@ -637,3 +637,26 @@ Die Smart-Entscheidungskarte bewertet die ausgewählten Nachtladeabschnitte
 energiegewichtet statt des Strompreises beim Seitenaufruf. Bei keinem Ladebedarf
 oder unvollständiger Planung wird der entsprechende Grund angezeigt; ein künftiger
 Plan wird weiterhin nicht vorab als statistische Ersparnis verbucht.
+
+
+### Gerätestandort und PV-Linie
+
+In den PV-Einstellungen übernimmt **Gerätestandort übernehmen** einmalig den Standort
+des Browsers (Handy/PC). Nur am tatsächlichen Anlagenstandort verwenden. Der Browser
+fragt seine Standortberechtigung ab; die App zeigt die gemeldete Genauigkeit und trägt
+die Koordinaten auf vier Nachkommastellen gerundet in das Formular ein. Erst
+**Einstellungen speichern** übernimmt sie dauerhaft. Kein laufendes Standorttracking,
+keine automatische Übernahme bei späteren Besuchen und keine IP-basierte Ersatzortung.
+
+Browser-Geolocation benötigt einen vertrauenswürdigen HTTPS-Kontext. Über eine
+LAN-Adresse mit HTTP funktioniert dies insbesondere auf dem iPhone nicht; die App
+zeigt den Grund. Manuelle Koordinaten bleiben als Alternative verfügbar. Siehe
+[Browser-Geolocation](https://developer.mozilla.org/en-US/docs/Web/API/Geolocation_API).
+
+Im Tibber-Diagramm bleibt die linke Achse **ct/kWh**, die goldene PV-Prognoselinie
+verwendet rechts **kW**. Es sind konservative stündliche Mittelwerte einschließlich
+der eingestellten Abschläge, keine gemessene Leistung und keine kWh pro Balken.
+Die Linie ist stufig, um keine feinere Zeitauflösung vorzutäuschen; Datenlücken werden
+nicht verbunden oder als Null ausgegeben. Beim Fokus/Antippen eines Preisbalkens steht
+zusätzlich die PV-Leistung des zugehörigen Intervalls. Die Linie ist bei aktivierter
+PV-Prognose auch im Modus Aus sichtbar; sie nutzt ausschließlich denselben Wettercache.

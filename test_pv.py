@@ -115,7 +115,10 @@ class PvTests(unittest.TestCase):
         import web
         self.attached();luna.write_json(self.folder/'config.json',self.c)
         app=web.Dashboard(self.folder,start_worker=False)
-        with patch('pv.fetch',side_effect=AssertionError('No HTTP in snapshot')):
+        with patch('pv.fetch',side_effect=AssertionError('No HTTP in snapshot')),patch('web.datetime',wraps=datetime) as clock:
+            clock.now.return_value=self.now
             status=app.snapshot()
         self.assertTrue(status['pv_forecast']['enabled'])
         self.assertNotIn('_pv',status['settings']);self.assertNotIn('rows',status['pv_forecast'])
+        self.assertEqual(status['pv_forecast']['series'][0]['start'],self.rows[0]['start'].isoformat())
+        self.assertEqual(status['pv_forecast']['series'][0]['kw'],self.rows[0]['kw'])

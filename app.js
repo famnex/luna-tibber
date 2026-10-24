@@ -13,7 +13,7 @@ async function perform(name,data={},button=null){if(busy)return false;busy=true;
 
 const settingHelp={
  pv_enabled:'Nutzt Open-Meteo-Wetterdaten für eine Dachfläche. Standort und Dachparameter werden an Open-Meteo übertragen, keine Zugangsdaten. Aktivierung benötigt kWp, Grundverbrauch und Akkukapazität. Wirkt nur auf Smart; An und Geplant behalten ihre Ziele.',
- pv_latitude:'Breitengrad deiner Anlage als Dezimalzahl, z. B. 51.2. Aus einer Karte übernehmen. Keine automatische Ortung. Der Standort wird für die Wetterprognose an Open-Meteo gesendet.',
+ pv_latitude:'Breitengrad deiner Anlage als Dezimalzahl, z. B. 51.2. Aus einer Karte übernehmen. Über „Gerätestandort übernehmen“ kannst du den Standort dieses Handys/PCs einmalig einsetzen (HTTPS und Browserfreigabe nötig). Der Standort wird für die Wetterprognose an Open-Meteo gesendet.',
  pv_longitude:'Längengrad deiner Anlage als Dezimalzahl, z. B. 10.0. Westliche Längen sind negativ. Erst den tatsächlichen Standort eintragen, dann die Prognose aktivieren.',
  pv_kwp:'Installierte Modulleistung in kWp für eine gemeinsame Ausrichtung und Neigung. Nicht die Akkukapazität oder Wechselrichterleistung. Mehrere unterschiedlich ausgerichtete Dachflächen werden in dieser Version noch nicht getrennt modelliert.',
  pv_tilt:'Neigung der Module gegen die Horizontale: 0 ist flach, 90 senkrecht. Der voreingestellte Wert 30 ist ein Platzhalter und muss zu deiner Anlage passen.',
@@ -51,6 +51,26 @@ const settingHelp={
  timezone:'Zeitzone für Preisdiagramm und Zeitfenster, z. B. Europe/Berlin. Zeitumstellungen werden berücksichtigt; eine Nacht kann dann länger oder kürzer sein.',
  wifi_enabled:'Prüft das separat eingerichtete Geräte-WLAN vor dem Laden. Das WLAN-Profil muss bereits über den Connector auf dem Server eingerichtet sein; dieses Feld verbindet kein beliebiges WLAN neu.'
 };
+let locating=false;
+function useDeviceLocation(button){
+ if(locating)return;
+ if(!window.isSecureContext){notify('Gerätestandort benötigt eine vertrauenswürdige HTTPS-Verbindung. Über die lokale HTTP-Adresse bitte Koordinaten manuell eintragen.','error');return;}
+ if(!navigator.geolocation){notify('Dieser Browser stellt keinen Gerätestandort bereit. Koordinaten bitte manuell eintragen.','error');return;}
+ const lat=$('setting-pv_latitude'),lon=$('setting-pv_longitude');
+ const before=[lat.value,lon.value];locating=true;button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
+ notify('Standort wird ermittelt · bitte den Browserzugriff erlauben.','info');
+ const done=()=>{locating=false;button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');};
+ const failed=error=>{done();notify(({1:'Standortzugriff nicht erlaubt. Bitte in den Browser-/Geräteeinstellungen freigeben oder Koordinaten manuell eintragen.',2:'Standort konnte nicht bestimmt werden. Bitte erneut versuchen oder Koordinaten eintragen.',3:'Standortabfrage hat zu lange gedauert. Bitte erneut versuchen oder Koordinaten eintragen.'})[error?.code]||'Standortabfrage fehlgeschlagen. Koordinaten bitte manuell eintragen.','error');};
+ try{navigator.geolocation.getCurrentPosition(position=>{
+  done();
+  if(button.isConnected===false)return;
+  if(lat.value!==before[0]||lon.value!==before[1]){notify('Standortfelder wurden inzwischen geändert. Deine Eingaben bleiben erhalten.','info');return;}
+  const {latitude,longitude,accuracy}=position.coords;
+  if(!Number.isFinite(latitude)||!Number.isFinite(longitude)||Math.abs(latitude)>90||Math.abs(longitude)>180){failed({});return;}
+  lat.value=latitude.toFixed(4);lon.value=longitude.toFixed(4);settingsDirty=true;
+  notify('Gerätestandort übernommen'+(Number.isFinite(accuracy)?' · Genauigkeit ca. '+Math.round(accuracy)+' m':'')+'. Nur am Anlagenstandort verwenden. Bitte Einstellungen speichern.','info');
+ },failed,{enableHighAccuracy:true,timeout:15000,maximumAge:60000});}catch(error){failed(error);}
+}
 function fillSettings(s,secrets){
  settingsBaseline={...s};const box=$('fields');box.replaceChildren();const sections={};
  const group=k=>k.startsWith('pv_')?'PV-Prognose':['host','port','unit_id','expected_serial','username','password','wifi_enabled'].includes(k)?'Wechselrichter & Verbindung':k.startsWith('tibber')?'Tibber-Zugang':['target_soc','charge_power_w','max_session_minutes','battery_capacity_kwh'].includes(k)?'Ladegrenzen':['smart_discharge_enabled','base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour'].includes(k)?'Smart-Entladung & Bedarf':['statistics_enabled','push_contact'].includes(k)?'Statistik & Benachrichtigungen':'Preise, Vergleich & Zeitzone';
@@ -67,6 +87,7 @@ function fillSettings(s,secrets){
   if(i.type==='checkbox')i.checked=s[key];else i.value=s[key]??'';
   if(key==='password'||key==='tibber_token')i.placeholder=secrets[key]?'Gespeichert – leer lassen zum Behalten':'Noch nicht gespeichert';
   field.append(i,description);
+  if(key==='pv_latitude'){const b=document.createElement('button');b.type='button';b.textContent='⌖ Gerätestandort übernehmen';b.onclick=()=>useDeviceLocation(b);field.append(b);}
   if(key==='password'||key==='tibber_token'){const b=document.createElement('button');b.type='button';b.textContent='Anzeigen / verbergen';b.onclick=()=>i.type=i.type==='password'?'text':'password';field.append(b);}
   const g=group(key);if(!sections[g]){const section=document.createElement('section');section.className='card';const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='fields';section.append(h,grid);box.append(section);sections[g]=grid;}
   sections[g].append(field);
@@ -113,13 +134,28 @@ function renderPrices(d){
  $('comparedate').textContent='Vergleichstag: '+comp.date+' · Nachtfenster '+fmt(comp.night_start)+' bis '+fmt(comp.night_end);
  $('dayaverage').textContent=ct(comp.day_ct);$('nightaverage').textContent=ct(comp.night_ct);$('nightsaving').textContent=ct(comp.saving_ct);
  $('comparereason').textContent=!comp.complete?'Für den ausgewählten Vergleichstag fehlen vollständige Preise. Anderen Tag auswählen oder Veröffentlichung abwarten.':`Effektiver Speicherstrompreis: ${ct(comp.effective_ct)}. ${comp.saving_ct>0?'Rechnerisch günstiger als der Tagesdurchschnitt.':'Gegenüber dem Tagesdurchschnitt kein Preisvorteil.'}`;
- const rows=d.prices||[];const chart=$('pricechart');$('chartinfo').textContent=d.price_error||(!rows.length?'Noch keine Preise verfügbar. Tibber-Zugang in den Einstellungen prüfen.':`${rows.length} Preisintervalle · ${d.settings.timezone} · ct/kWh · Stand vor ${d.price_age_seconds??0} s. Markierung: aktueller Preis.`);const phases=chartPhases(d);const signature=JSON.stringify([rows,phases,d.settings.timezone,Math.floor(Date.now()/900000)]);if(signature===chartSignature)return;chartSignature=signature;chart.replaceChildren();if(!rows.length)return;
+ const rows=d.prices||[];const chart=$('pricechart');$('chartinfo').textContent=d.price_error||(!rows.length?'Noch keine Preise verfügbar. Tibber-Zugang in den Einstellungen prüfen.':`${rows.length} Preisintervalle · ${d.settings.timezone} · ct/kWh · Stand vor ${d.price_age_seconds??0} s. Markierung: aktueller Preis.`);const phases=chartPhases(d);const solar=solarSeries(d);const signature=JSON.stringify([rows,phases,solar,d.settings.pv_enabled,d.settings.timezone,Math.floor(Date.now()/900000)]);if(signature===chartSignature)return;chartSignature=signature;chart.replaceChildren();if($('pvlegend'))$('pvlegend').hidden=!solar.length;if(!rows.length)return;
  const ns='http://www.w3.org/2000/svg';const el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;return n;};
- const svg=el('svg',{viewBox:'0 0 1000 280',role:'group','aria-label':'Tibber-Preise, einzelne Balken auswählbar'});const min=Math.min(0,...rows.map(p=>p.ct)),max=Math.max(1,...rows.map(p=>p.ct)),span=max-min||1;const first=Date.parse(rows[0].start),last=Date.parse(rows[rows.length-1].end);const x=t=>55+(Date.parse(t)-first)/(last-first)*925;const y=v=>235-(v-min)/span*205;
- for(let i=0;i<=4;i++){const v=min+span*i/4;svg.append(el('line',{x1:55,x2:980,y1:y(v),y2:y(v),stroke:'#dce5dd'}),el('text',{x:46,y:y(v)+4,'text-anchor':'end'},v.toFixed(1)));}
- svg.append(el('line',{x1:55,x2:980,y1:y(0),y2:y(0),stroke:'#728779'}));
- rows.forEach((p,i)=>{const current=Date.parse(p.start)<=Date.now()&&Date.now()<Date.parse(p.end);const entry=phaseEntryAt(phases,Date.parse(p.start));const phase=entry?.action;const label=(entry?phaseDescription(entry)+' · ':'')+fmt(p.start)+' – '+fmt(p.end)+': '+ct(p.ct);const bar=el('rect',{x:x(p.start),y:Math.min(y(0),y(p.ct)),width:Math.max(1,x(p.end)-x(p.start)-1),height:Math.max(2,Math.abs(y(p.ct)-y(0))),fill:phase?phaseColor(phase):'#91af83',stroke:current?'#172b25':'none','stroke-width':current?2:0,tabindex:0,role:'img','aria-label':label});bar.append(el('title',{},label));for(const event of ['pointerenter','focus','click'])bar.addEventListener(event,()=>{$('chartdetail').textContent=label;});svg.append(bar);if(i%Math.ceil(rows.length/6)===0)svg.append(el('text',{x:x(p.start),y:263,'text-anchor':'start'},fmt(p.start)));});
+ const svg=el('svg',{viewBox:'0 0 1000 280',role:'group','aria-label':solar.length?'Tibber-Preise links in ct/kWh und PV-Prognose rechts in kW; Balken auswählbar':'Tibber-Preise, einzelne Balken auswählbar'});const min=Math.min(0,...rows.map(p=>p.ct)),max=Math.max(1,...rows.map(p=>p.ct)),span=max-min||1;const first=Date.parse(rows[0].start),last=Date.parse(rows[rows.length-1].end);const right=solar.length?925:980;const x=t=>55+(Date.parse(t)-first)/(last-first)*(right-55);const y=v=>235-(v-min)/span*205;
+ for(let i=0;i<=4;i++){const v=min+span*i/4;svg.append(el('line',{x1:55,x2:right,y1:y(v),y2:y(v),stroke:'#dce5dd'}),el('text',{x:46,y:y(v)+4,'text-anchor':'end'},v.toFixed(1)));}
+ svg.append(el('line',{x1:55,x2:right,y1:y(0),y2:y(0),stroke:'#728779'}));
+ rows.forEach((p,i)=>{const current=Date.parse(p.start)<=Date.now()&&Date.now()<Date.parse(p.end);const entry=phaseEntryAt(phases,Date.parse(p.start));const phase=entry?.action;const pvValue=solarAverage(solar,Date.parse(p.start),Date.parse(p.end));const label=(entry?phaseDescription(entry)+' · ':'')+fmt(p.start)+' – '+fmt(p.end)+': '+ct(p.ct)+(d.settings.pv_enabled?' · PV-Prognose: '+(pvValue===null?'keine Daten':pvValue.toLocaleString('de-DE',{maximumFractionDigits:2})+' kW (Stundenmittel)'):'');const bar=el('rect',{x:x(p.start),y:Math.min(y(0),y(p.ct)),width:Math.max(1,x(p.end)-x(p.start)-1),height:Math.max(2,Math.abs(y(p.ct)-y(0))),fill:phase?phaseColor(phase):'#91af83',stroke:current?'#172b25':'none','stroke-width':current?2:0,tabindex:0,role:'img','aria-label':label});bar.append(el('title',{},label));for(const event of ['pointerenter','focus','click'])bar.addEventListener(event,()=>{$('chartdetail').textContent=label;});svg.append(bar);if(i%Math.ceil(rows.length/6)===0)svg.append(el('text',{x:x(p.start),y:263,'text-anchor':'start'},fmt(p.start)));});
  for(const phase of phases){const left=Math.max(first,Date.parse(phase.start)),right=Math.min(last,Date.parse(phase.end));if(right<=left)continue;const band=el('rect',{x:x(new Date(left).toISOString()),y:239,width:Math.max(1,x(new Date(right).toISOString())-x(new Date(left).toISOString())),height:7,fill:phaseColor(phase.action)});band.append(el('title',{},phaseDescription(phase)+' · '+fmt(left)+' – '+fmt(right)));svg.append(band);}
+ svg.append(el('text',{x:55,y:16},'ct/kWh'));
+ if(solar.length){
+  const peak=Math.max(.5,Math.ceil(Math.max(...solar.map(r=>r.kw))*2)/2),sy=v=>235-v/peak*205;
+  svg.append(el('text',{x:right+12,y:16,class:'pv-axis'},'PV · kW'),el('line',{x1:right,x2:right,y1:30,y2:235,stroke:'#a56808'}));
+  for(let i=0;i<=4;i++){const v=peak*i/4;svg.append(el('text',{x:right+12,y:sy(v)+4,class:'pv-axis'},v.toLocaleString('de-DE',{maximumFractionDigits:2})));}
+  let path='',previous=null;
+  for(const r of solar){const a=Math.max(first,r.start),b=Math.min(last,r.end);if(b<=a)continue;
+   const left=x(new Date(a).toISOString()),end=x(new Date(b).toISOString());
+   path+=(previous===a?' L':' M')+left+' '+sy(r.kw)+' L'+end+' '+sy(r.kw);previous=b;
+  }
+  svg.append(el('path',{d:path,fill:'none',stroke:'#fff','stroke-width':6,'stroke-opacity':.85,'vector-effect':'non-scaling-stroke','pointer-events':'none','aria-hidden':'true'}));
+  const line=el('path',{d:path,fill:'none',stroke:'#a56808','stroke-width':3,'vector-effect':'non-scaling-stroke','pointer-events':'none',class:'pv-line'});
+  line.append(el('title',{},'Konservative PV-Prognose · stündliche mittlere Leistung in kW · rechte Achse'));svg.append(line);
+ }
+ const legend=$('pvlegend');if(legend)legend.hidden=!solar.length;
  chart.append(svg);
 }
 
