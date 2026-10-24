@@ -52,6 +52,14 @@ def plan(c, prices, now, soc, hold_until=None):
     usable=soc/100*capacity
     budget=usable*eta
     out.update(stored_kwh=usable,available_kwh=budget,reserved_later_kwh=0)
+    if not c.get('_legacy_dispatch'):
+        from joint import plan as joint_plan
+        joint=joint_plan(c,prices,now,soc,hold_until=hold_until)
+        if joint is not None:
+            out.update(windows=joint['windows'],hold=joint['windows'][0]['action']=='hold',
+                       complete=True,reason=joint['reason'],joint=True,
+                       reserved_later_kwh=None)
+            return out
     night_a,night_b=night_bounds(c,now)
     if night_a<=now<night_b:
         # Avoid cycling the freshly charged energy back out between cheap slots.
@@ -110,6 +118,14 @@ def projected_soc(c,prices,now,soc,until,hold_until=None):
 
 def timeline(c,prices,now,soc,charge_preview,hold_until=None):
     """UI forecast; future SOC is an estimate, never sent as a control measurement."""
+    if charge_preview.get('joint'):
+        joint=charge_preview['joint']
+        return {'enabled':True,'hold':joint['windows'][0]['action']=='hold','complete':True,
+                'windows':joint['windows'],'reason':joint['reason'],'joint':True,
+                'stored_kwh':soc/100*c['battery_capacity_kwh'],
+                'available_kwh':soc/100*c['battery_capacity_kwh']*math.sqrt(c['roundtrip_efficiency']),
+                'reserved_later_kwh':None,'base_load_w':c['base_load_w'],'extra_load_kwh':c['extra_load_kwh'],'future_complete':True,
+                'future_soc':joint['morning_soc'],'future_start':joint['night_end']}
     result=plan(c,prices,now,soc,hold_until)
     rows=list(result['windows'])
     if not result['enabled'] or result['available_kwh'] is None:return result
@@ -132,7 +148,7 @@ def economics(c,prices,now):
     start=local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(hours=c['night_end_hour'])
     if local>=start:start+=timedelta(days=1)
     start=start.astimezone(timezone.utc)
-    forecast=plan(c,prices,start,c['target_soc'])
+    forecast=plan({**c,'_legacy_dispatch':True},prices,start,c['target_soc'])
     if not forecast['complete']:return {'ok':False,'reason':forecast['reason']}
     slots=[w for w in forecast['windows'] if w['action']=='discharge']
     energy=sum(w.get('allocated_kwh',0) for w in slots)

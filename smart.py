@@ -20,6 +20,16 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     if type(power) not in (int, float) or not math.isfinite(power) or power < 200:
         return finish('Keine nutzbare Ladeleistung verfügbar')
     out['power_w'] = power
+    from joint import plan as joint_plan
+    joint=joint_plan(c,prices,now,soc,power,hold_until)
+    if joint is not None:
+        out.update(windows=joint['charges'],needed_kwh=joint['planned_kwh'],
+                   duration_minutes=joint['planned_kwh']/(power/1000)*60,
+                   planned_kwh=joint['planned_kwh'],complete=True,projected=True,
+                   projection_complete=True,planning_soc=joint['planning_soc'],
+                   effective_target_soc=joint['morning_soc'],joint=joint,
+                   night_start=joint['night_start'],night_end=joint['night_end'])
+        return finish(joint['reason'] if joint['charges'] else 'Gemeinsamer Energieplan: keine wirtschaftliche Netzladung erforderlich')
     from dispatch import night_bounds,projected_soc
     start,end=night_bounds(c,now)
     a,b=max(now,start),end
@@ -73,6 +83,8 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
 
 def planned_economics(c,prices,preview):
     """UI evaluates the selected future purchases, not the price at page-open time."""
+    if preview.get('joint'):
+        return preview['joint'].get('economics') or {'ok':False,'reason':preview['reason']}
     from datetime import datetime
     from luna import economics_plan
     values=[]

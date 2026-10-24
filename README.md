@@ -609,21 +609,31 @@ PV-Ausgangsleistung, anschließend multipliziert mit dem konfigurierten Prognose
 Standard 0,7 bedeutet zusätzlich 30 % Sicherheitsabschlag. Kein Verschattungs-,
 Schnee-, Temperatur- oder individuelles Modulmodell; keine Ertragsgarantie.
 
-Zuerst wird zeitgleich erwarteter Hausverbrauch (Grundlast + Zusatzbedarf) direkt
-von PV gedeckt. Nur verbleibender Überschuss darf nach Ladeverlusten und Begrenzung
-der Ladeleistung das Nachtziel senken. Die Rückwärtsrechnung über den folgenden Tag
-berücksichtigt, dass Morgenverbrauch **vor** dem Solarertrag gedeckt werden muss.
-Das eingegebene Ziel bleibt eine Obergrenze. Kann der vollständige erwartete Tagesbedarf
-zeitlich nicht innerhalb dieses Energiebudgets gedeckt werden, bleibt konservativ
-das ursprüngliche Nachtziel; es wird kein voller gemeinsamer PV-/Preisoptimierer behauptet.
-Normale Kaufpreis-/Vorteilsgrenzen gelten weiter. An und Geplant behalten ihre Ziele.
+Bei aktivierter Smart-Entladung und vollständiger Preis-/PV-Prognose planen Laden
+und Entladen gemeinsam vom aktuellen SOC bis zum Ende des Folgetags. Der Plan
+minimiert erwartete Bezugskosten einschließlich Lade-/Entladeverlusten und Verschleiß;
+der Mindestvorteil wird als zusätzlicher Kostenaufschlag für Netzladung berücksichtigt.
+Netzladung bleibt auf das Nachtfenster und die Kaufpreisgrenze beschränkt.
+PV deckt zuerst den zeitgleichen Hausbedarf; Überschüsse erreichen den Akku erst im
+jeweiligen Erzeugungsintervall, begrenzt durch Ladeleistung und SOC-Obergrenze.
+Dadurch kann Nachtladung den Morgen vor ausreichender Sonne überbrücken, ohne den
+Speicher unnötig für den späteren Solarertrag vollzuladen. Nachts gibt es in diesem
+Plan keine pauschale Entladesperre: Bestand darf verbraucht werden, wenn es im
+Gesamtplan günstiger ist. Manuelle Entladesperren bleiben vorrangig.
 
-Tagsüber berücksichtigt die Entladeplanung direkte PV-Deckung. Zukünftiger
-Solarüberschuss wird nicht schon als vorhandene Batterieenergie ausgegeben;
-der normale Steuerungszyklus plant mit dem dann tatsächlich vorhandenen SOC neu.
-Die SOC-Projektion bis zum nächsten Nachtbeginn rechnet zukünftige PV-Speicherung
-noch nicht hoch und kann dadurch vorsichtig zu viel Nachtbedarf vorschlagen.
-Keine feste zusätzliche SOC-Reserve; geräteeigene Grenzen gelten unverändert.
+Die Berechnung verwendet 81 SOC-Stützstellen mit kontinuierlichen Energiebilanzen
+und ist eine Näherung, keine Garantie eines mathematisch exakten Optimums. Es gibt
+keine zusätzlichen Wechselrichterabfragen. Fehlende/veraltete Wetterdaten oder
+unvollständige Preise führen zur bisherigen konservativen Planung zurück; dann
+bleibt insbesondere die bisherige nächtliche Entladesperre bestehen. Ohne aktivierte
+Smart-Entladung bleibt die bisherige Ladezielberechnung erhalten.
+
+Die Übersicht, die farbigen Diagrammabschnitte und die Steuerung verwenden denselben
+Plan. Der Preisvorteil dieses Plans vergleicht mit einer Planung ohne zusätzliche
+Netzladung bei gleichem Anfangsakku, Wetter und Verbrauch. Die bestehende Statistik
+bleibt eine Schätzung aus angeforderten Ladebefehlen. An und Geplant bleiben unverändert.
+Keine feste zusätzliche SOC-Reserve; geräteeigene Grenzen gelten unverändert und
+werden weiterhin nicht automatisch vom rechnerischen SOC-Energiebudget abgezogen.
 
 Der gemeinsame Cache `pv-forecast.json` wird alle 3 Stunden erneuert, bei Fehlern
 frühestens nach 15 Minuten erneut versucht. Nach 6 Stunden oder bei unpassenden

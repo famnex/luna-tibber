@@ -207,7 +207,7 @@ function renderControl(d){
  const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:c.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
  $('smarttiming').textContent=preview.reason;
  const number=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
- $('smarttarget').textContent=`${preview.projected?'SOC jetzt '+number(preview.soc)+' % · zum Nachtbeginn geschätzt '+number(preview.planning_soc):'SOC '+number(preview.soc)} → ${number(preview.effective_target_soc??preview.target_soc)} % · Kapazität ${number(preview.capacity_kwh)} kWh · Bedarf ${number(preview.needed_kwh)} kWh · Ladeleistung bis ${preview.power_w} W · reine Ladedauer ca. ${number(preview.duration_minutes)} Minuten.`;
+ $('smarttarget').textContent=preview.joint?`SOC jetzt ${number(preview.soc)} % · zum Nachtbeginn ca. ${number(preview.planning_soc)} % · am Nachtende ca. ${number(preview.effective_target_soc)} %. Netzladung ${number(preview.planned_kwh)} kWh · bis ${preview.power_w} W · ca. ${number(preview.duration_minutes)} Minuten.`:`${preview.projected?'SOC jetzt '+number(preview.soc)+' % · zum Nachtbeginn geschätzt '+number(preview.planning_soc):'SOC '+number(preview.soc)} → ${number(preview.effective_target_soc??preview.target_soc)} % · Kapazität ${number(preview.capacity_kwh)} kWh · Bedarf ${number(preview.needed_kwh)} kWh · Ladeleistung bis ${preview.power_w} W · reine Ladedauer ca. ${number(preview.duration_minutes)} Minuten.`;
  if(preview.soc===null&&$('smartslots').children.length){
   $('smarttiming').textContent='Messung wird aktualisiert · bisheriger Plan, derzeit nicht bestätigt';
  }else{

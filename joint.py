@@ -1,0 +1,129 @@
+"""Chronological PV/battery dispatch; pure computation, no device requests.
+
+Piecewise-linear dynamic programming (81 SOC knots). Energy transitions remain
+continuous: interpolation never rounds away household demand or creates energy.
+Only self-consumption is discharged; grid charging is restricted to the night.
+"""
+import math
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
+from functools import lru_cache
+from price_cache import covers
+
+
+def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
+    if not (c.get('smart_discharge_enabled') and c.get('pv_enabled')):
+        return None
+    if type(soc) not in (int,float) or not math.isfinite(soc) or not 0<=soc<=100:
+        return None
+    capacity=c['battery_capacity_kwh'];power=min(c['charge_power_w'],max_power_w or c['charge_power_w'])/1000
+    if capacity<=0 or power<.2 or c['base_load_w']<=0:return None
+    from dispatch import night_bounds,demand_rows
+    from pv import rows_for
+    night_a,night_b=night_bounds(c,now)
+    end,_=night_bounds(c,night_b)
+    if not covers(prices,now,end) or not rows_for(c,now,end):return None
+    # Split at midnight as extra household demand repeats on each local date.
+    rows=[];cursor=now;zone=ZoneInfo(c['timezone'])
+    while cursor<end:
+        local=cursor.astimezone(zone)
+        midnight=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
+        right=min(end,midnight)
+        rows.extend(demand_rows(c,prices,cursor,right));cursor=right
+    # Also split at charging/hold boundaries, even for hourly tariff data.
+    split=[]
+    for r in rows:
+        edges=sorted({r['start'],r['end'],*[t for t in (night_a,night_b,hold_until) if t and r['start']<t<r['end']]})
+        for a,b in zip(edges,edges[1:]):split.append({**r,'start':a,'end':b})
+    rows=split;eta=math.sqrt(c['roundtrip_efficiency'])
+    limit=capacity*c['target_soc']/100
+    initial=capacity*soc/100
+    ceiling=max(limit,initial) # An existing SOC above the configured target is usable.
+    specs=[]
+    for r in rows:
+        seconds=(r['end']-r['start']).total_seconds();hours=seconds/3600
+        load=r['load_kw']*hours
+        solar=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)*hours
+        can_charge=night_a<=r['start']<night_b and r['ct']<=c['max_buy_ct_kwh'] and seconds>=190
+        charge=power*max(0,seconds-130)/3600 if can_charge else 0
+        specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),power/60))
+    wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
+    values=_values(tuple(specs),ceiling,limit,eta,wear,margin)
+    energy=initial;windows=[];charges=[];trace=[];actual_cost=0
+    at_night=initial;at_morning=initial
+    for i,(r,spec) in enumerate(zip(rows,specs)):
+        if r['start']<=night_a:at_night=energy
+        if r['start']<=night_b:at_morning=energy
+        _,after,charge,used=_choose(energy,spec,values[i+1],ceiling,limit,eta,wear,margin)
+        trace.append({'start':r['start'].isoformat(),'end':r['end'].isoformat(),'start_kwh':energy,'end_kwh':after,'grid_charge_kwh':charge,'discharge_kwh':used})
+        actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
+        a,b=r['start'],r['end']
+        if charge>1e-7:
+            stop=min(b,a+timedelta(seconds=charge/power*3600+130))
+            charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge})
+            windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
+        elif used>1e-7:
+            stop=min(b,a+timedelta(hours=used/r['load_kw']))
+            windows.append({'start':a.isoformat(),'end':stop.isoformat(),'action':'discharge','allocated_kwh':used,'ct':r['ct']})
+            if stop<b:windows.append({'start':stop.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
+        else:
+            # With no stored energy or no residual demand there is nothing to reserve.
+            action='hold' if spec[4] or (energy>1e-7 and spec[0]>0) else 'discharge'
+            windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':action,'allocated_kwh':0,'ct':r['ct']})
+        energy=after
+    total=sum(w['battery_kwh'] for w in charges)
+    economics=None
+    if total>0:
+        baseline=tuple((load,solar,price,0,blocked,minimum) for load,solar,price,charge,blocked,minimum in specs)
+        base_values=_values(baseline,ceiling,limit,eta,wear,margin)
+        base_cost=_choose(initial,baseline[0],base_values[1],ceiling,limit,eta,wear,margin)[0]
+        useful=total*eta
+        effective=sum(w['battery_kwh']/eta*w['ct'] for w in charges)/useful+wear
+        saving=(base_cost-actual_cost)/useful
+        economics=dict(ok=saving>0,reason='Gemeinsamer Plan gegenüber gleicher Planung ohne Netzladung',
+                       effective_ct_kwh=effective,reference_ct_kwh=effective+saving,saving_ct_kwh=saving,
+                       window_start=now.isoformat(),window_end=end.isoformat())
+    return dict(economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
+                planning_soc=at_night/capacity*100,morning_soc=at_morning/capacity*100,
+                power_w=power*1000,night_start=max(now,night_a).isoformat(),night_end=night_b.isoformat(),
+                reason='Gemeinsamer Energieplan: Verbrauch, Nachtpreise und zeitliche PV-Erzeugung')
+
+
+def _interpolate(values,energy,ceiling):
+    if ceiling<=0:return values[0]
+    x=max(0,min(len(values)-1,energy/ceiling*(len(values)-1)))
+    i=min(len(values)-2,int(x));f=x-i
+    return values[i]*(1-f)+values[i+1]*f
+
+
+def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin):
+    load,solar,price,max_charge,blocked,min_charge=spec
+    stored=min(ceiling,energy+solar)
+    # Holding avoids needless cycling on equal costs. PV first supplies the house.
+    best=(load*price+_interpolate(next_values,stored,ceiling),stored,0.,0.)
+    step=ceiling/(len(next_values)-1) if ceiling else 1
+    if not blocked and load>0:
+        minimum=max(0,stored-load/eta)
+        targets=[minimum]+[j*step for j in range(math.ceil(minimum/step),math.ceil(stored/step))]
+        for after in targets:
+            used=(stored-after)*eta
+            cost=(load-used)*price+used*wear+_interpolate(next_values,after,ceiling)
+            if cost<best[0]-1e-8:best=(cost,after,0.,used)
+    maximum=min(limit,stored+max_charge)
+    if max_charge>0 and maximum>stored:
+        targets=[maximum]+[j*step for j in range(math.floor(stored/step)+1,math.ceil(maximum/step))]
+        for after in targets:
+            charge=after-stored
+            if charge<min_charge-1e-9:continue
+            cost=load*price+charge/eta*price+charge*eta*margin+_interpolate(next_values,after,ceiling)
+            if cost<best[0]-1e-8:best=(cost,after,charge,0.)
+    return best
+
+
+@lru_cache(maxsize=4)
+def _values(specs,ceiling,limit,eta,wear,margin):
+    # About 81*81*200 simple operations, no scipy/numpy on the Raspberry Pi.
+    values=[[0.]*81 for _ in range(len(specs)+1)]
+    for i in range(len(specs)-1,-1,-1):
+        values[i]=[_choose(ceiling*j/80,specs[i],values[i+1],ceiling,limit,eta,wear,margin)[0] for j in range(81)]
+    return values

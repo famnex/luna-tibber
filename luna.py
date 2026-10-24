@@ -195,7 +195,7 @@ def decide(c, snapshot, prices, now):
     if (slot["end"] - now).total_seconds() < 130:
         return False, "Preisintervall endet in weniger als 130 Sekunden", slot
     from smart import plan as smart_plan
-    plan = smart_plan(c, prices, now, snapshot['soc'], snapshot.get('max_charge_power_w'))
+    plan = smart_plan(c, prices, now, snapshot['soc'], snapshot.get('max_charge_power_w'),c.get('_hold_until'))
     for window in plan['windows']:
         start,end=datetime.fromisoformat(window['start']),datetime.fromisoformat(window['end'])
         if start <= now < end and (end-now).total_seconds() >= 130:
@@ -388,9 +388,12 @@ async def operate(args, c, folder):
             now = datetime.now(timezone.utc)
             from pv import attach as attach_pv
             if not c.get("_manual"):c=attach_pv(c,folder,now)
+            from discharge import read as read_discharge
+            request=read_discharge(folder/'discharge-request.json')
+            c['_hold_until']=datetime.fromisoformat(request['until']) if request.get('until') else None
             eligible, reason, slot = decide(c, snapshot, prices, now)
             from dispatch import plan as discharge_plan
-            dispatch=discharge_plan(c,prices,now,snapshot['soc']) if not c.get('_manual') else None
+            dispatch=discharge_plan({**c,'charge_power_w':min(c['charge_power_w'],snapshot.get('max_charge_power_w',c['charge_power_w']))},prices,now,snapshot['soc'],c.get('_hold_until')) if not c.get('_manual') else None
             if live:
                 from discharge import sync
                 await asyncio.wait_for(sync(hw,folder,smart_hold=bool(dispatch and dispatch['hold'])),60)
