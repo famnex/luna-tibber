@@ -33,20 +33,25 @@ async function loadHistory(force=false){
 }
 function renderHistory(){
  if(!historyData)return;
- const d=historyData,eur=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'}),num=n=>n.toLocaleString('de-DE',{maximumFractionDigits:2});
- document.getElementById('historyinfo').textContent=(d.started?'≈ Preisvorteil laut Ladeplan · seit '+d.started:'Noch keine bewertbaren Ladeaufträge')+(d.enabled?'':' · Erfassung pausiert');
+ const d=historyData,eur=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
+ const valued=v=>v.valued>0,empty=v=>!(v.seconds>0);
+ const money=(v,key)=>valued(v)?'≈ '+eur(v[key]):empty(v)?eur(0):'—';
+ const partial=v=>valued(v)&&v.discharge-v.valued>0.000001;
+ document.getElementById('historyinfo').textContent=(d.started?'≈ Geschätzte Ersparnis aus ausgeführten Ladeaufträgen · seit '+d.started:'Noch keine Ladeaufträge erfasst. Ein zukünftiger Smart-Plan zählt erst, sobald die App lädt.')+(d.enabled?'':' · Erfassung deaktiviert: in den Einstellungen einschalten.');
  const box=document.getElementById('periodstats');box.replaceChildren();
  for(const [key,title] of [['today','Heute'],['yesterday','Gestern'],['last30','Letzte 30 Tage'],['last365','Letzte 365 Tage']]){
   const v=d.periods[key],card=document.createElement('article');card.className='card statcard';
   const h=document.createElement('p');h.className='eyebrow';h.textContent=title;
-  const amount=document.createElement('strong');amount.className='big';amount.textContent=v.valued>0?'≈ '+eur(v.saving):'—';
-  const detail=document.createElement('p');detail.className='muted';detail.textContent=`${num(v.valued)} kWh laut Plan · ${num(v.seconds/3600)} h Ladeauftrag`;
-  card.append(h,amount,detail);box.append(card);
+  const amount=document.createElement('strong');amount.className='big';amount.textContent=money(v,'saving');
+  const label=document.createElement('p');label.textContent=valued(v)&&v.saving<0?'Mehrkosten laut Plan':'Ersparnis laut Plan';
+  const detail=document.createElement('p');detail.className='muted';
+  detail.textContent=empty(v)?'Keine Ladeaufträge in diesem Zeitraum.':!valued(v)?'Ladeaufträge vorhanden, aber Preise fehlen für die Geldberechnung.':`Vermiedene Stromkosten: ${eur(v.avoided)} · Ladekosten: ${eur(v.cost)} · Verschleiß: ${eur(Math.max(0,v.avoided-v.cost-v.saving))}${partial(v)?' · Teilbetrag: Für weitere Ladeaufträge fehlen Preise.':''}`;
+  card.append(h,amount,label,detail);box.append(card);
  }
  const tbody=document.getElementById('historyrows');tbody.replaceChildren();
  const rows=d[document.getElementById('historygroup').value];
- for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,v.valued>0?eur(v.saving):'—',num(v.valued)+' kWh',num(v.seconds/3600)+' h']){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
- if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='Noch keine Daten. Die Erfassung beginnt ab jetzt.';row.append(cell);tbody.append(row);}
+ for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,money(v,'saving')+(partial(v)?' (Teilbetrag)':''),money(v,'cost'),money(v,'avoided')]){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
+ if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='Noch keine Ladeaufträge erfasst. Frühere Ladungen werden nicht rückwirkend übernommen.';row.append(cell);tbody.append(row);}
 }
 let installPrompt=null,pwaRegistration=null;
 window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;});
