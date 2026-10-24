@@ -22,6 +22,8 @@ DEFAULT = {
     "tibber_token": "", "tibber_home_id": "", "mode": "monitor",
     "max_buy_ct_kwh": 20.0, "target_soc": 80.0, "charge_power_w": 1000,
     "battery_capacity_kwh": 0.0,
+    "smart_discharge_enabled": False, "base_load_w": 0, "reserve_soc": 20.0,
+    "statistics_enabled": True, "push_contact": "",
     "max_session_minutes": 120, "wifi_enabled": False,
     "roundtrip_efficiency": 0.85, "wear_ct_kwh": 0.0, "min_saving_ct_kwh": 2.0,
     "night_start_hour": 0, "night_end_hour": 6,
@@ -48,12 +50,16 @@ def write_json(path, data):
     os.chmod(path, 0o600)
 
 def validate(c):
-    for key, low, high in [("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("base_load_w", 0, 10000), ("reserve_soc", 5, 95), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
         if isinstance(value, bool) or not isinstance(value, (float, int)) or not math.isfinite(value) or not low <= value <= high:
             raise ValueError(f"Ungültiger Wert: {key} (Bereich {low} bis {high})")
+    for key in ('statistics_enabled','smart_discharge_enabled'):
+        if type(c[key]) is not bool:raise ValueError('Ungültiger Schalter: '+key)
+    if c['smart_discharge_enabled'] and c['base_load_w']<=0:raise ValueError('Für Smart-Entladen Grundverbrauch größer 0 W einstellen')
+    if c['smart_discharge_enabled'] and c['reserve_soc']>c['target_soc']:raise ValueError('Reserve darf nicht über Ziel-SOC liegen')
     if c["mode"] not in ("monitor", "auto"):
         raise ValueError("mode muss monitor oder auto sein")
     for key, low, high in [("port", 1, 65535), ("unit_id", 0, 247)]:
@@ -61,6 +67,8 @@ def validate(c):
             raise ValueError(f"Ungültig: {key}")
     if type(c["charge_power_w"]) is not int:
         raise ValueError("charge_power_w muss ganzzahlig sein")
+    if c['push_contact'] and ('@' not in c['push_contact'] or len(c['push_contact'])>240 or any(x.isspace() for x in c['push_contact'])):
+        raise ValueError('Ungültige Push-Kontakt-E-Mail')
     ZoneInfo(c["timezone"])
     if not (type(c["use_start_hour"]) is int and type(c["use_end_hour"]) is int
             and 0 <= c["use_start_hour"] < c["use_end_hour"] <= 24):
@@ -110,7 +118,10 @@ def fetch_prices(c):
     return sorted(prices.values(), key=lambda p: p["start"])
 
 def economics_plan(c, prices, now):
-    """Time-weighted mean price filter; assumes uniform consumption in the window."""
+    """Price filter based on the configured consumption/discharge forecast."""
+    if c.get('smart_discharge_enabled'):
+        from dispatch import economics
+        return economics(c,prices,now)
     local = now.astimezone(ZoneInfo(c["timezone"]))
     midnight = local.replace(hour=0, minute=0, second=0, microsecond=0)
     start = midnight + timedelta(hours=c["use_start_hour"])
@@ -196,6 +207,13 @@ class Huawei:
             raise ValueError("SOC außerhalb 0–100")
         result["battery_status"] = int(result["battery_status"])
         result["ac_charge_enabled"] = bool(result["ac_charge_enabled"])
+        # Optional PV reading for conservative grid-charge accounting.
+        try:
+            pv=await asyncio.wait_for(self.device.batch_update([rn.INPUT_POWER]),10)
+            v=pv[rn.INPUT_POWER].value
+            result['pv_input_w']=v if isinstance(v,(int,float)) and math.isfinite(v) else None
+        except Exception:
+            result['pv_input_w']=None
         return result
     async def login(self):
         missing = [label for key, label in (("expected_serial", "Wechselrichter-Seriennummer"), ("password", "Huawei-Installateurpasswort")) if not self.c[key]]
@@ -334,13 +352,16 @@ async def operate(args, c, folder):
                     emit("price_error", error_type=type(exc).__name__)
             if c.get("wifi_enabled"):
                 await asyncio.to_thread(check_app, c["host"])
-            if live:
-                from discharge import sync
-                await asyncio.wait_for(sync(hw,folder),60)
             snapshot = await hw.snapshot()
             now = datetime.now(timezone.utc)
             eligible, reason, slot = decide(c, snapshot, prices, now)
+            from dispatch import plan as discharge_plan
+            dispatch=discharge_plan(c,prices,now,snapshot['soc']) if not c.get('_manual') else None
+            if live:
+                from discharge import sync
+                await asyncio.wait_for(sync(hw,folder,smart_hold=bool(dispatch and dispatch['hold'])),60)
             state = {"time": now.isoformat(), "live": live, **snapshot,
+                     "app_charging": bool(live and own_charge), "dispatch": dispatch,
                      "economics": economics_plan(c, prices, now),
                      "price_ct_kwh": slot["ct"] if slot else None, "eligible": eligible, "reason": reason}
             write_json(status_path, state)
@@ -386,6 +407,12 @@ async def operate(args, c, folder):
                 emit("stopped_on_exit")
             except Exception:
                 emit("stop_unconfirmed", note="Lokal prüfen; letzter Auftrag war auf maximal zwei Minuten begrenzt")
+        if live and args.command == 'run' and (folder/'discharge-restore.json').exists():
+            try:
+                from discharge import sync
+                await asyncio.wait_for(sync(hw,folder,smart_hold=False),60)
+            except Exception:
+                emit('stop_unconfirmed',note='Entladesperre: Wiederherstellung ausstehend')
         await hw.close()
 
 def main():

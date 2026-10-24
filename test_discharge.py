@@ -42,3 +42,17 @@ class DischargeTests(unittest.IsolatedAsyncioTestCase):
             hw=SimpleNamespace(device=SimpleNamespace(serial_number='test',batch_update=AsyncMock(return_value={rn.STORAGE_MAXIMUM_DISCHARGING_POWER:SimpleNamespace(value=2000)})),write=AsyncMock())
             with self.assertRaises(ValueError):await sync(hw,folder)
             hw.write.assert_not_called()
+    async def test_manual_hold_takes_priority_over_smart_release(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            folder=Path(tmp);now=datetime.now(timezone.utc);power=[4000]
+            async def read_power(names):return {rn.STORAGE_MAXIMUM_DISCHARGING_POWER:SimpleNamespace(value=power[0])}
+            async def write(name,v):power[0]=v
+            hw=SimpleNamespace(device=SimpleNamespace(serial_number='test',batch_update=read_power),write=AsyncMock(side_effect=write))
+            await sync(hw,folder,now,smart_hold=True)
+            self.assertEqual(read(folder/'discharge-status.json')['source'],'smart')
+            write_json(folder/'discharge-request.json',{'serial':'test','until':(now+timedelta(hours=1)).isoformat()})
+            await sync(hw,folder,now,smart_hold=False)
+            self.assertEqual(power[0],0)
+            self.assertEqual(read(folder/'discharge-status.json')['source'],'manual')
+            await sync(hw,folder,now+timedelta(hours=2),smart_hold=False)
+            self.assertEqual(power[0],4000)

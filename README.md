@@ -322,7 +322,7 @@ Nach erfolgreichem Test und Prüfung des Nutzens `mode` auf `auto` ändern und s
 Es müssen **beide** Bedingungen gesetzt sein: `mode=auto` und `--execute`. Im Monitor-Modus
 wird auch mit `--execute` nicht geladen. Änderungen an config.json werden beim Neustart gelesen.
 
-Alle 20 Sekunden werden SOC/Status geprüft; Preise werden alle fünf Minuten abgefragt.
+Der Controller prüft SOC/Status etwa alle zehn Sekunden; Preisabrufe verwenden den gemeinsamen Cache.
 Bei Preisfehlern wird kein neuer Ladevorgang gestartet und ein eigener laufender Auftrag gestoppt.
 Jeder Ladeauftrag im Gerät läuft maximal zwei Minuten. Der Dienst erneuert ihn bei Bedarf.
 Vor Tarifwechseln bleibt eine kurze Pause für Befehl-/Netzwerklatenz. Bei verlorener Verbindung
@@ -521,3 +521,32 @@ Die Wiederherstellung benötigt den laufenden Server und eine Verbindung zum Wec
 ### Stabile Preisanzeige
 
 Vollständig vorhandene Preise für die nächsten zwölf Stunden werden ohne erneuten API-Abruf verwendet. Ab 13 Uhr lokaler Zeit wird zusätzlich nach dem vollständigen Folgetag gesucht; die Veröffentlichung muss nicht genau um 13 Uhr erfolgt sein. Fehlende Daten werden frühestens alle fünf Minuten nachgefragt. Bereits bekannte Intervalle bleiben erhalten, auch während eines Abrufs und beim Wechsel des Lademodus. Erst geänderte Tibber-Zugangsdaten leeren den aktuellen Preisbestand. Unveränderte Smart-Slotlisten werden nicht neu aufgebaut; ein bisheriger Plan bei fehlender aktueller SOC-Messung wird ausdrücklich als unbestätigt gekennzeichnet. Die Steuerung selbst verlangt weiterhin aktuelle Messwerte.
+
+
+## Smart-Entladen, Statistik und App-Installation
+
+Die neue Menüleiste bleibt unten sichtbar: Übersicht, Statistik, Verbindung, Einstellungen.
+
+### Smart für den ganzen Tag
+
+Unter Einstellungen zuerst **Grundverbrauch (W)** und **Mindestreserve (%)** eintragen, dann **Smart: Entladung optimieren** aktivieren. Die Funktion ist für bestehende Installationen zunächst ausgeschaltet. Grundverbrauch meint den erwarteten durchschnittlichen Hausverbrauch während der geplanten Entladezeit, ohne das separat geladene Auto. Beispiel: 500 W über zwei Stunden entsprechen 1 kWh. Die Kapazität bleibt die nutzbare Akkukapazität in kWh.
+
+Der Controller verteilt die aktuell oberhalb der Reserve verfügbare Energie auf die teuersten verbleibenden Preisintervalle bis zum nächsten Nachtfenster. Dabei berücksichtigt er den eingestellten Wirkungsgrad und den Grundverbrauch. Aktueller SOC und Preise führen laufend zu einer neuen Planung. In günstigen Abschnitten wird die normale Entladung gesperrt, in teuren wieder freigegeben. Es wird **keine Zwangsentladung und keine Netzeinspeisung** angefordert. Tatsächlicher Verbrauch und Enpal/Huawei-Regelung bestimmen die Leistung. Auch während nächtlicher Ladepausen bleibt die Energie bei aktivierter Smart-Entladung reserviert. Die manuelle zeitliche Entladesperre hat Vorrang.
+
+Der Nachtpreisvergleich nutzt bei aktivierter Smart-Entladung den gewichteten Preis der vorgesehenen Entladestunden. Die separate Tagesmittel-Anzeige bleibt ein Tagesmittel. Ladeziel und Leistung bleiben in deinen Einstellungen; eine PV-Prognose und ein gelerntes Verbrauchsprofil sind noch nicht enthalten. Bei unvollständigen Tagespreisen wird die automatische Entladesperre freigegeben. Die Reserve ist eine Planungsgrenze, kein geänderter BMS-Schutzwert. Starke Lastsprünge, Preis-/Messlücken und Kommunikationsausfälle begrenzen die Genauigkeit. Einmalige Ladungen und normale PV-Ladung bleiben getrennt.
+
+Im Diagramm: **Grün ↗ Laden**, **Orange ↘ Entladung freigegeben**, **Violett Ⅱ Entladung pausiert**. Das sind geplante Aktionen, keine aufgezeichneten Schaltbestätigungen. Der schmale Zeitstreifen zeigt Teilintervalle. Eine Tagesvorschau nach nächtlicher Ladung verwendet den prognostizierten SOC und kann sich ändern.
+
+### Statistik
+
+Heute, gestern, letzte 30 und 365 Kalendertage einschließlich heute, Monats- und Jahresübersichten. Erfassung beginnt nach dem Update; keine erfundene Rückrechnung. Der Backend-Dienst liest bei aktivierter Statistik auch ohne sichtbare Webseite ungefähr einmal pro Minute. Laufende Controller-Messungen werden wiederverwendet; die Bildschirmaktualisierung bleibt bei geschlossenem/verdecktem Browser pausiert. Die Statistik lässt sich abschalten.
+
+`history.sqlite3` enthält lokale Tagesaggregate, Messwerte der letzten 30 Tage und einen bewerteten Energiebestand. Tagesaggregate bleiben für Jahresvergleiche erhalten. Batterieenergie wird aus Leistung und Messdauer integriert. Messlücken über 150 Sekunden werden nicht aufgefüllt; der bewertete Bestand wird dann vorsichtig verworfen. Die angezeigten Euro-Beträge sind **geschätzter Preisvorteil** gegenüber Netzbezug zum späteren Entladepreis. Bewertet werden nur erfasste App-Ladungen mit höchstens 50 W gemessener PV-Eingangsleistung und anschließend gemessener Entladung. Unbekannter Anfangsbestand und PV-Ladung erhalten keinen erfundenen Einkaufspreis. Gemischte Bestände werden anteilig bewertet. Auch negative Ergebnisse bleiben sichtbar.
+
+Das Modell verteilt den Gesamtwirkungsgrad gleichmäßig auf Lade- und Entladeverluste (`sqrt(eta)` je Richtung), berücksichtigt die Verschleißreserve und nimmt an, dass normale Entladung Hausverbrauch ersetzt. Es ist kein geeichter Netzenergie- oder Rechnungsnachweis. Einstellungen zum Modell gelten ab Änderung; bestehende Tageswerte werden nicht nachträglich umgerechnet. Erfasste Stunden und bewertete kWh zeigen die Datengrundlage. Datenbank und Zugangsdaten lokal sichern, nicht ins Git laden.
+
+### PWA und Push
+
+Siehe [PWA.md](PWA.md). PWA-Manifest, App-Symbole, Service Worker und Web Push sind enthalten. Für iPhone-Push ist eine installierte Home-Screen-App über vertrauenswürdiges HTTPS erforderlich. Eine gewöhnliche HTTP-LAN-IP bietet diese Möglichkeit nicht. Ohne HTTPS bleibt die bisherige Weboberfläche verwendbar.
+
+Push ist pro Browser ausdrücklich opt-in. Wichtige Ereignisse: Steuerungsfehler, unbestätigter Stopp/Freigabe, länger fehlende Messwerte/Preise und Abschluss eines einmaligen Ladeauftrags. Normale Smart-Ein/Aus-Wechsel bleiben still. Wiederholte Fehlermeldungen werden 30 Minuten unterdrückt; Abonnements und Zeitpunkte bleiben nach Neustart erhalten. Der Dienst sendet an die Push-Infrastruktur des Browsers, keine Tibber- oder Huawei-Zugangsdaten. Zustellung ist best effort und ersetzt die Statusprüfung nicht.

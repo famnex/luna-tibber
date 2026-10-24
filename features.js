@@ -1,0 +1,94 @@
+'use strict';
+const phaseColor=action=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#6875bb'}[action]||'#91af83');
+const phaseLabel=action=>({charge:'↗ Laden',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
+function chartPhases(d){
+ if(d.mode!=='smart')return [];
+ const rows=(d.dispatch_preview?.windows||[]).map(w=>({...w}));
+ const until=d.discharge?.request?.until;
+ if(until&&Date.parse(until)>Date.now())rows.push({start:new Date(Date.now()).toISOString(),end:until,action:'hold'});
+ // Charge rows are drawn last and take precedence over hold rows.
+ for(const w of d.smart_preview?.windows||[]){const end=Date.parse(w.end)-130000;if(end>Date.parse(w.start))rows.push({...w,end:new Date(end).toISOString(),action:'charge'});}
+ return rows;
+}
+function phaseAt(phases,time){return [...phases].reverse().find(w=>Date.parse(w.start)<=time&&time<Date.parse(w.end))?.action;}
+function renderExtras(d){
+ document.getElementById('referencelabel').textContent=d.settings.smart_discharge_enabled?'Erwarteter Preis bei Entladung':'Durchschnittspreis im Verbrauchsfenster';
+ const q=d.dispatch_preview;
+ document.getElementById('dispatchreason').textContent=q?.enabled?'✧ '+q.reason:'ⓘ Smart-Entladen in den Einstellungen aktivierbar';
+ document.getElementById('dispatchsummary').textContent=q?.enabled?`⌁ ${q.base_load_w} W Grundverbrauch · ◒ ${q.reserve_soc} % Reserve${q.available_kwh!==null?' · '+q.available_kwh.toLocaleString('de-DE',{maximumFractionDigits:2})+' kWh verfügbar':''}`:'';
+ if(!window.isSecureContext)document.getElementById('pushstatus').textContent='🔒 HTTPS für Installation und Push erforderlich.';
+ else if(d.push?.error)document.getElementById('pushstatus').textContent=d.push.error;
+}
+let historyData=null,historyLoading=false,historyAt=0;
+async function loadHistory(force=false){
+ if(document.hidden||document.getElementById('statistics').hidden||historyLoading||(!force&&Date.now()-historyAt<60000))return;
+ historyLoading=true;const info=document.getElementById('historyinfo');info.textContent='◌ Statistik wird geladen …';
+ try{const r=await fetch('/api/history');if(!r.ok)throw Error('Statistik nicht erreichbar');historyData=await r.json();historyAt=Date.now();if(!document.hidden)renderHistory();}
+ catch(e){info.textContent='⚠ '+e.message;}
+ finally{historyLoading=false;}
+}
+function renderHistory(){
+ if(!historyData)return;
+ const d=historyData,eur=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'}),num=n=>n.toLocaleString('de-DE',{maximumFractionDigits:2});
+ document.getElementById('historyinfo').textContent=(d.started?'≈ Geschätzter Preisvorteil · Erfassung seit '+d.started:'Noch keine bewertbaren Messungen')+(d.enabled?'':' · Erfassung pausiert');
+ const box=document.getElementById('periodstats');box.replaceChildren();
+ for(const [key,title] of [['today','Heute'],['yesterday','Gestern'],['last30','Letzte 30 Tage'],['last365','Letzte 365 Tage']]){
+  const v=d.periods[key],card=document.createElement('article');card.className='card statcard';
+  const h=document.createElement('p');h.className='eyebrow';h.textContent=title;
+  const amount=document.createElement('strong');amount.className='big';amount.textContent=v.seconds>0?'≈ '+eur(v.saving):'—';
+  const detail=document.createElement('p');detail.className='muted';detail.textContent=`${num(v.valued)} kWh bewertet · ${num(v.seconds/3600)} h erfasst`;
+  card.append(h,amount,detail);box.append(card);
+ }
+ const tbody=document.getElementById('historyrows');tbody.replaceChildren();
+ const rows=d[document.getElementById('historygroup').value];
+ for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,eur(v.saving),num(v.valued)+' kWh',num(v.seconds/3600)+' h']){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
+ if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='Noch keine Daten. Die Erfassung beginnt ab jetzt.';row.append(cell);tbody.append(row);}
+}
+let installPrompt=null,pwaRegistration=null;
+window.addEventListener('beforeinstallprompt',e=>{e.preventDefault();installPrompt=e;});
+function setPushButtons(active){document.getElementById('pushenable').hidden=active;document.getElementById('pushdisable').hidden=!active;document.getElementById('pushtest').hidden=!active;}
+async function initializePwa(){
+ const status=document.getElementById('pwastatus');
+ if(!window.isSecureContext||!('serviceWorker' in navigator)){status.textContent='🔒 Eine vertrauenswürdige HTTPS-Adresse ist erforderlich.';return;}
+ try{
+  pwaRegistration=await navigator.serviceWorker.register('/sw.js');
+  const standalone=window.matchMedia('(display-mode: standalone)').matches||navigator.standalone;
+  status.textContent=standalone?'✓ LUNA ist als App geöffnet':'⊕ Installieren oder auf dem iPhone: Teilen → Zum Home-Bildschirm';
+  if('PushManager' in window){const sub=await pwaRegistration.pushManager.getSubscription();setPushButtons(!!sub);}
+  else document.getElementById('pushstatus').textContent='Push hier nicht verfügbar. Auf dem iPhone die installierte App öffnen.';
+ }catch(e){status.textContent='⚠ App-Registrierung fehlgeschlagen. HTTPS und Browser prüfen.';}
+}
+async function pushAction(button,callback){
+ button.disabled=true;button.classList.add('button-loading');
+ try{await callback();}catch(e){document.getElementById('pushstatus').textContent='⚠ '+e.message;}
+ finally{button.disabled=false;button.classList.remove('button-loading');}
+}
+document.addEventListener('DOMContentLoaded',()=>{
+ document.querySelector('[data-tab="statistics"]').addEventListener('click',()=>loadHistory());
+ document.getElementById('historygroup').onchange=renderHistory;
+ document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadHistory();});
+ setInterval(()=>loadHistory(),60000);
+ document.getElementById('installapp').onclick=async()=>{
+  if(installPrompt){await installPrompt.prompt();installPrompt=null;}
+  else document.getElementById('pwastatus').textContent=window.isSecureContext?'Auf dem iPhone: Teilen → Zum Home-Bildschirm. Sonst das Installationssymbol im Browser verwenden.':'Zuerst HTTPS einrichten; Anleitung im Repository unter PWA.';
+ };
+ document.getElementById('pushenable').onclick=e=>pushAction(e.currentTarget,async()=>{
+  if(!pwaRegistration||!('PushManager' in window)||!window.isSecureContext)throw Error('HTTPS und einen Push-fähigen Browser bzw. die installierte iPhone-App verwenden.');
+  if(!lastStatus?.push?.available)throw Error('Zuerst das Push-Paket auf dem Server installieren.');
+  if(!lastStatus.settings.push_contact)throw Error('Zuerst Kontakt-E-Mail für Push speichern.');
+  const permission=await Notification.requestPermission();
+  if(permission!=='granted')throw Error('Benachrichtigungen wurden nicht erlaubt.');
+  await Promise.race([navigator.serviceWorker.ready,new Promise((_,reject)=>setTimeout(()=>reject(Error('App noch nicht bereit; erneut versuchen.')),10000))]);
+  const key=lastStatus.push.public_key;const bytes=Uint8Array.from(atob(key.replace(/-/g,'+').replace(/_/g,'/')+'='.repeat((4-key.length%4)%4)),x=>x.charCodeAt(0));
+  const sub=await pwaRegistration.pushManager.subscribe({userVisibleOnly:true,applicationServerKey:bytes});
+  try{await api('push-subscribe',{subscription:sub.toJSON()});}catch(e){await sub.unsubscribe();throw e;}
+  setPushButtons(true);document.getElementById('pushstatus').textContent='✓ Wichtige Meldungen aktiviert.';
+ });
+ document.getElementById('pushdisable').onclick=e=>pushAction(e.currentTarget,async()=>{
+  const sub=await pwaRegistration?.pushManager.getSubscription();
+  if(sub){await api('push-unsubscribe',{endpoint:sub.endpoint});await sub.unsubscribe();}
+  setPushButtons(false);document.getElementById('pushstatus').textContent='Benachrichtigungen für dieses Gerät ausgeschaltet.';
+ });
+ document.getElementById('pushtest').onclick=e=>pushAction(e.currentTarget,async()=>{await api('push-test',{});document.getElementById('pushstatus').textContent='Testnachricht angefordert.';});
+ initializePwa();
+});

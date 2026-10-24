@@ -116,6 +116,14 @@ class HTTPTests(unittest.TestCase):
         r=conn.getresponse();self.assertEqual(r.status,200);self.assertEqual(json.loads(r.read()),{'mode':'off'})
         self.server.app.action.assert_not_called()
         conn.close()
+    def test_pwa_assets_and_private_statistics(self):
+        import http.client
+        conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        for path,kind in [('/manifest.webmanifest','application/manifest+json'),('/sw.js','application/javascript'),('/icon-192.png','image/png')]:
+            conn.request('GET',path);r=conn.getresponse()
+            self.assertEqual(r.status,200);self.assertIn(kind,r.getheader('Content-Type'));self.assertTrue(r.read())
+        conn.request('GET','/api/history');r=conn.getresponse();self.assertEqual(r.status,401);r.read();conn.close()
+
     def test_unknown_host_rejected(self):
         import http.client
         conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)

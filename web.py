@@ -18,6 +18,7 @@ import signal
 import subprocess
 import sys
 import threading
+from urllib.parse import urlsplit
 import time
 from zoneinfo import ZoneInfo
 import luna
@@ -154,6 +155,12 @@ class Dashboard:
         self.sample_at = -60
         self.discharge_at = -30
         self.closed = threading.Event()
+        from history import History
+        from notifications import Notifications
+        self.history=History(folder)
+        self.notifications=Notifications(folder,start_worker=start_worker)
+        self.sample_failures=0
+        self.price_failed_since=None
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
@@ -194,15 +201,26 @@ class Dashboard:
                 self.events.append(event)
                 if event.get('event') in ('snapshot','test_sample','decision'):
                     self.telemetry = event
+                    try:self.history.record(self.config(),event,self.price_data)
+                    except Exception:
+                        self.events.append({'event':'statistics_error','message':'Statistik konnte nicht gespeichert werden'})
                 if event.get('event') == 'connected':
                     self.device = event
+                if event.get('event') == 'stop_unconfirmed':
+                    self.alert('restore','⚠ LUNA · Freigabe prüfen','Stopp oder Entladefreigabe nicht bestätigt. Gerät und Verbindung prüfen.')
+                if event.get('event') == 'target_reached' and job=='charge':
+                    self.alert('completed','✓ LUNA · Ladeziel erreicht','Der einmalige Ladeauftrag ist abgeschlossen.',cooldown=60)
                 if event.get('event') == 'error' and job != 'sample':
                     self.fault = event.get('message','Vorgang fehlgeschlagen')
+                    self.alert('controller-error','⚠ LUNA · Steuerung prüfen','Ein Steuerungsfehler ist aufgetreten. Details stehen in der App.')
         rc = proc.wait()
         with self.lock:
             if gen == self.generation:
                 self.proc = None
                 self.job = None
+                if job=='sample':
+                    self.sample_failures=self.sample_failures+1 if rc else 0
+                    if self.sample_failures>=5:self.alert('offline','⚠ LUNA · Verbindung fehlt','Seit mehreren Minuten keine Messwerte. Automatik und Verbindung prüfen.')
                 if rc and job != 'sample':
                     self.fault = self.fault or f'Vorgang beendet (Code {rc})'
                     self.mode = 'off'
@@ -217,6 +235,10 @@ class Dashboard:
                 if rc == 0 and job == 'probe':
                     self.device = read(self.folder/'device.json',{})
                     self.last_probe_serial = self.device.get('serial')
+    def alert(self,key,title,body,cooldown=1800):
+        contact=self.config().get('push_contact','')
+        self.notifications.emit(key,title,body,'mailto:'+contact if contact else '',cooldown)
+
     def stop(self):
         # Called with lock held; collector needs lock, so poll process directly.
         self.mode = 'off'
@@ -269,7 +291,14 @@ class Dashboard:
             self.price_data = []
     def action(self, name, data):
         with self.lock:
-            if name == 'discharge':
+            if name == 'push-subscribe':
+                contact=self.config().get('push_contact','')
+                self.notifications.subscribe(data['subscription'],'mailto:'+contact if contact else '')
+            elif name == 'push-unsubscribe':
+                self.notifications.unsubscribe(data['endpoint'])
+            elif name == 'push-test':
+                self.alert('test','✓ LUNA · Push bereit','Wichtige Meldungen erreichen dieses Gerät.',cooldown=60)
+            elif name == 'discharge':
                 c=self.config()
                 self.preflight(c)
                 until=None
@@ -367,6 +396,10 @@ class Dashboard:
                     if self.job == 'discharge-sync':
                         continue
                     if self.mode == 'off':
+                        if self.config().get('statistics_enabled'):
+                            self.request_sample()
+                        continue
+                    if self.job in ('sample','probe','charge-test','stop'):
                         continue
                     if self.expire_order():
                         continue
@@ -394,6 +427,7 @@ class Dashboard:
     def expire_order(self):
         if self.until is not None and time.monotonic() >= self.until:
             self.stop()
+            self.alert('completed','✓ LUNA · Ladeauftrag beendet','Das eingestellte Zeitfenster ist abgelaufen.',cooldown=60)
             return True
         return False
 
@@ -406,6 +440,7 @@ class Dashboard:
         end = datetime.fromisoformat(order['end'])
         if now >= end:
             self.stop()
+            self.alert('completed','✓ LUNA · Ladefenster beendet','Der geplante Auftrag ist abgelaufen.',cooldown=60)
             return
         if now < datetime.fromisoformat(order['start']):
             return
@@ -435,6 +470,11 @@ class Dashboard:
                     if all(self.config().get(k)==c[k] for k in ('tibber_token','tibber_home_id')):
                         self.price_data,self.price_error,self.price_at = prices,error,time.monotonic()
                         self.price_fetched_at = stamp
+                        if not prices:
+                            self.price_failed_since=self.price_failed_since or time.monotonic()
+                            if time.monotonic()-self.price_failed_since>=1800:
+                                self.alert('prices','⚠ LUNA · Preise fehlen','Tibber-Preise sind länger nicht verfügbar. Smart kann nicht vollständig planen.')
+                        else:self.price_failed_since=None
             self.closed.wait(10)
     def request_sample(self, fast=False):
         # Called only by a visible browser. Reuse ongoing controller measurements.
@@ -452,12 +492,15 @@ class Dashboard:
             prices = self.price_data
             now = datetime.now(timezone.utc)
             plan = luna.economics_plan(c,prices,now)
+            preview=smart_preview(c,prices,now,self.telemetry)
+            from dispatch import timeline
+            dispatch=timeline(c,prices,now,preview['soc'],preview)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
             return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'smart_preview':smart_preview(c,prices,now,self.telemetry),
+                    'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
@@ -469,6 +512,7 @@ class Dashboard:
                     'events':list(self.events)[-12:]}
     def close(self):
         self.closed.set()
+        self.notifications.closed.set()
         with self.lock:
             self.stop()
 
@@ -501,11 +545,13 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Frame-Options','DENY')
         self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'")
         if cookie:
+            if getattr(self.server,'secure_cookies',False):cookie+='; Secure'
             self.send_header('Set-Cookie',cookie)
         self.end_headers()
         self.wfile.write(body)
     def host_ok(self):
-        return self.headers.get('Host','').split(':')[0] in self.server.allowed_hosts
+        try:return urlsplit('//'+self.headers.get('Host','')).hostname in self.server.allowed_hosts
+        except ValueError:return False
     def authenticated(self):
         try:
             cookie = SimpleCookie(self.headers.get('Cookie',''))
@@ -518,12 +564,19 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
+        static.update({
+            '/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
+            '/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),
+            '/offline.html':('offline.html','text/html; charset=utf-8'),'/icon.svg':('icon.svg','image/svg+xml'),
+            **{f'/icon-{n}.png':(f'icon-{n}.png','image/png') for n in (180,192,512)}})
         asset_path = self.path.split('?',1)[0]
         if asset_path in static:
             filename,kind = static[asset_path]
             return self.send(200,(BASE/filename).read_bytes(),kind)
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
+        if self.path=='/api/history':
+            return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):
             self.server.app.request_sample(fast=self.path.endswith('?fast=1'))
             return self.send(200,self.server.app.snapshot())
@@ -578,6 +631,9 @@ def main():
     p.add_argument('command',choices=['setup','serve'])
     p.add_argument('--host',default='127.0.0.1')
     p.add_argument('--port',type=int,default=8099)
+    p.add_argument('--public-origin',default=os.environ.get('LUNA_PUBLIC_ORIGIN',''))
+    p.add_argument('--tls-cert',default=os.environ.get('LUNA_TLS_CERT',''))
+    p.add_argument('--tls-key',default=os.environ.get('LUNA_TLS_KEY',''))
     args=p.parse_args()
     os.umask(0o077)
     auth_path=BASE/'web-auth.json'
@@ -596,6 +652,13 @@ def main():
         fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
         app=Dashboard()
         server=ThreadingHTTPServer((args.host,args.port),Handler)
+        server.secure_cookies=bool(args.tls_cert or args.public_origin)
+        if bool(args.tls_cert)!=bool(args.tls_key):raise ValueError('TLS-Zertifikat und Schlüssel gemeinsam angeben')
+        if args.tls_cert:
+            import ssl
+            context=ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(args.tls_cert,args.tls_key)
+            server.socket=context.wrap_socket(server.socket,server_side=True)
         server.daemon_threads=True
         server.app,server.auth=app,auth
         server.session_path=BASE/'web-sessions.json'
@@ -603,6 +666,11 @@ def main():
         server.attempts=deque()
         server.auth_lock=threading.Lock()
         server.allowed_hosts={'localhost','127.0.0.1',args.host}
+        if args.public_origin:
+            origin=urlsplit(args.public_origin)
+            if origin.scheme!='https' or not origin.hostname or origin.username or origin.path not in ('','/') or origin.query or origin.fragment:
+                raise ValueError('Öffentliche Adresse muss eine HTTPS-Origin ohne Pfad sein')
+            server.allowed_hosts.add(origin.hostname)
         for addr in json.loads(subprocess.check_output(['ip','-j','-4','addr','show'],text=True)):
             server.allowed_hosts.update(x['local'] for x in addr.get('addr_info',[]) if 'local' in x)
         def shutdown(*_):

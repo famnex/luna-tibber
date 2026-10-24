@@ -29,3 +29,8 @@ tibber-prices.lock
 .tibber-*
 
 discharge-*.json
+
+history.sqlite3*
+push-*.json
+push-key.pem
+*.pem
