@@ -180,6 +180,7 @@ def economics_plan(c, prices, now):
             "saving_ct_kwh": saving, "assumption": "Strom ersetzt Netzbezug im konfigurierten Verbrauchsfenster"}
 
 def decide(c, snapshot, prices, now):
+    c.pop("_diagnostic_plan",None)
     slot = next((p for p in prices if p["start"] <= now < p["end"]), None)
     if c.get("_manual"):
         slot = {"start": now, "end": now + timedelta(minutes=15), "ct": None}
@@ -199,6 +200,7 @@ def decide(c, snapshot, prices, now):
         return False, "Preisintervall endet in weniger als 130 Sekunden", slot
     from smart import plan as smart_plan
     plan = smart_plan(c, prices, now, snapshot['soc'], snapshot.get('max_charge_power_w'),c.get('_hold_until'))
+    c['_diagnostic_plan']=plan
     for window in plan['windows']:
         start,end=datetime.fromisoformat(window['start']),datetime.fromisoformat(window['end'])
         if start <= now < end and (end-now).total_seconds() >= 130:
@@ -301,7 +303,8 @@ async def operate(args, c, folder):
             from discharge import sync
             await hw.login()
             await asyncio.wait_for(sync(hw,folder),60)
-            emit("discharge_synced")
+            from discharge import read as read_discharge
+            emit("discharge_synced",discharge_confirmation=read_discharge(folder/"discharge-status.json"))
             return
         if args.command == "stop":
             await hw.login()
@@ -407,7 +410,10 @@ async def operate(args, c, folder):
                      "economics": economics_plan(c, prices, now),
                      "price_ct_kwh": slot["ct"] if slot else None, "eligible": eligible, "reason": reason}
             write_json(status_path, state)
-            emit("decision", **state)
+            from audit import CONFIG_KEYS
+            emit("decision", **state, diagnostic_inputs={k:c.get(k) for k in CONFIG_KEYS}, diagnostic_plan=c.get('_diagnostic_plan',{}),
+                 diagnostic_pv=c.get('_pv',{}),
+                 discharge_confirmation=read_discharge(folder/'discharge-status.json') if live else {})
             if c.get("_manual") and snapshot["soc"] >= c["target_soc"]:
                 emit("target_reached", soc=snapshot["soc"])
                 break

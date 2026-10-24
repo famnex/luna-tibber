@@ -185,11 +185,26 @@ class HTTPTests(unittest.TestCase):
         for path,kind in [('/manifest.webmanifest','application/manifest+json'),('/sw.js','application/javascript'),('/icon-192.png','image/png')]:
             conn.request('GET',path);r=conn.getresponse()
             self.assertEqual(r.status,200);self.assertIn(kind,r.getheader('Content-Type'));self.assertTrue(r.read())
-        for path in ('/api/history','/api/update'):
+        for path in ('/api/history','/api/update','/api/journal','/api/journal/export','/api/journal/text','/api/journal/plan?id=1'):
             conn.request('GET',path);r=conn.getresponse();self.assertEqual(r.status,401);r.read()
         conn.request('GET','/healthz');r=conn.getresponse();self.assertEqual(r.status,200)
         self.assertEqual(set(json.loads(r.read())),{'ok','pid','revision'})
         self.server.app.request_sample.assert_not_called();conn.close()
+
+    def test_journal_reads_exports_and_validation_without_measurements(self):
+        import http.client,gzip
+        conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        conn.request('POST','/api/login',body='{"password":"test-password"}',headers={'Content-Type':'application/json','X-Luna':'1'})
+        r=conn.getresponse();cookie=r.getheader('Set-Cookie').split(';')[0];r.read()
+        self.server.app.journal.entries.return_value={'events':[]}
+        self.server.app.journal.export.return_value={'plans':{},'events':[]}
+        self.server.app.journal.plan.return_value={'config':{}}
+        for path in ('/api/journal?hours=12','/api/journal/plan?id=1'):
+            conn.request('GET',path,headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,200);r.read()
+        conn.request('GET','/api/journal/export?hours=24',headers={'Cookie':cookie})
+        r=conn.getresponse();self.assertEqual(r.status,200);self.assertEqual(json.loads(gzip.decompress(r.read())),{'plans':{},'events':[]})
+        conn.request('GET','/api/journal?hours=999',headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,400);r.read()
+        self.server.app.request_sample.assert_not_called();self.server.app.action.assert_not_called();conn.close()
 
     def test_postcode_lookup_requires_login_and_does_not_touch_controller(self):
         import http.client

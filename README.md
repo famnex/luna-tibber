@@ -731,3 +731,38 @@ kann dafür lokales HTTP sein. Keine Standortfreigabe und kein API-Schlüssel n�
 Antworten werden im Serverprozess zwischengespeichert. Ergebnisse werden zusätzlich
 auf das Land und die exakte PLZ geprüft. Suchfehler oder mehrere Treffer übernehmen
 keine Koordinaten automatisch; die normalen Speicherabfragen werden nicht beeinflusst.
+
+
+## Diagnoseverlauf
+Der Hauptmenüpunkt **Verlauf** speichert vorhandene Geräteereignisse dauerhaft in
+`diagnostics.sqlite3` im App-Verzeichnis (Dateirechte 0600, in Git ignoriert).
+Keine zusätzlichen Messabfragen. Die Sammlung erfolgt auch bei geschlossener
+Webseite, solange der Webdienst die laufende Steuerung betreut. Ein separat ohne
+Webdienst gestarteter CLI-Prozess wird dort nicht gesammelt.
+
+Jeder vorhandene Prüfzyklus enthält SOC, Batterieleistung, Ladeentscheidung,
+Begründung, Preis, Schutzgrenze, vorgesehenen Entladezustand und die letzte bekannte
+Gerätebestätigung mit deren Zeitstempel. Ladebefehle, Stopps, Zielerreichung,
+Fehler, übernommene Bedienaktionen und Einstellungen sowie Prozess-/Dienststarts
+werden ebenfalls gespeichert. Messwert, Entscheidung und Befehl sind ausdrücklich
+unterschieden; ein Befehl beweist noch keinen tatsächlichen Energiefluss.
+
+Jeder unterschiedliche vollständige Planstand wird verlustfrei komprimiert
+abgelegt und per Plan-ID mit der Entscheidung verbunden. Enthalten sind relevante
+Rechenparameter, Lade-/Entladefenster, Prognosewerte, Tibber-Preise und PV-Daten.
+Passwörter, Tokens, Seriennummer, IP, Standortkoordinaten und Zuhause-ID werden
+nicht exportiert. Die verbleibenden Verbrauchs-/Preisdaten sind dennoch persönlich.
+
+Standardmäßig zeigt die Seite wichtige Ereignisse; **Auch unveränderte Prüfungen**
+zeigt alle gespeicherten Zyklen. Es gibt Seiten mit je 200 Einträgen und Bereiche
+von 6/12/24/48 Stunden. Zeitstempel enthalten den UTC-Versatz, sodass die doppelte
+Stunde bei Zeitumstellung unterscheidbar bleibt. Prosa-TXT dient dem Lesen;
+**JSON.GZ** enthält alle Detail- und Planstände für die gemeinsame Diagnose.
+Der Export umfasst maximal 20.000 Einträge und meldet ein erreichtes Limit.
+
+Aufbewahrung: sieben Tage bzw. höchstens 70.000 Einträge (stündliche Bereinigung),
+danach automatische Löschung alter Ereignisse und nicht mehr referenzierter Pläne.
+Einträge beginnen mit diesem Update; frühere Abläufe werden nicht erfunden.
+Lücken durch Aus, fehlende Abfragen, Fehler oder einen gestoppten Dienst bleiben
+Lücken. Sie bedeuten nicht automatisch Batterie-Stillstand. Die Browseranzeige
+aktualisiert sich nur bei sichtbarer Verlaufsseite etwa einmal pro Minute.

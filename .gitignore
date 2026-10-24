@@ -44,3 +44,5 @@ update.log
 pv-forecast.json
 pv-forecast.json.tmp
 pv-forecast.lock
+
+diagnostics.sqlite3*

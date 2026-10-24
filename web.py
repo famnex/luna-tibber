@@ -159,14 +159,21 @@ class Dashboard:
         from history import History
         from notifications import Notifications
         self.history=History(folder)
+        from audit import Journal
+        self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
         self.sample_failures=0
         self.price_failed_since=None
         self.revision=updater.revision(folder)
         self.update_settings={"port":8099,"tls":False,"old_pid":os.getpid()}
+        self.audit_event({'event':'service_started'})
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
+    def audit_event(self,event,job=None,mode=None):
+        try:self.journal.record(self.config(),event,mode or self.mode,job or self.job,self.revision,self.price_data)
+        except Exception:self.journal.error='Diagnoseprotokoll konnte nicht gespeichert werden.'
+
     def config(self):
         c = {**luna.DEFAULT, **read(self.config_path,{})}
         return luna.validate(c)
@@ -191,16 +198,18 @@ class Dashboard:
         self.proc = subprocess.Popen(cmd,stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,bufsize=1)
         self.job = job
         proc = self.proc
-        threading.Thread(target=self.collect,args=(proc,gen,job),daemon=True).start()
-    def collect(self, proc, gen, job):
+        threading.Thread(target=self.collect,args=(proc,gen,job,self.mode),daemon=True).start()
+    def collect(self, proc, gen, job, mode=None):
         for line in proc.stdout:
             try:
                 event = json.loads(line)
             except ValueError:
                 continue  # Never relay arbitrary library output or secrets.
+            self.audit_event(event,job,mode)
             with self.lock:
                 if gen != self.generation:
                     continue
+                event={k:v for k,v in event.items() if k not in ("diagnostic_plan","diagnostic_pv","diagnostic_inputs")}
                 self.events.append(event)
                 if event.get('event') in ('snapshot','test_sample','decision'):
                     self.telemetry = event
@@ -220,6 +229,7 @@ class Dashboard:
                     self.alert('controller-error','⚠ LUNA · Steuerung prüfen','Ein Steuerungsfehler ist aufgetreten. Details stehen in der App.')
         rc = proc.wait()
         with self.lock:
+            self.audit_event({"event":"controller_exit","returncode":rc},job,mode)
             if gen == self.generation:
                 self.proc = None
                 self.job = None
@@ -609,7 +619,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static.update({
-            '/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
+            '/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
             '/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),
             '/offline.html':('offline.html','text/html; charset=utf-8'),'/icon.svg':('icon.svg','image/svg+xml'),
             **{f'/icon-{n}.png':(f'icon-{n}.png','image/png') for n in (180,192,512)}})
@@ -623,6 +633,27 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/api/update':
             return self.send(200,{**updater.read_status(self.server.app.folder),'revision':self.server.app.revision})
+        if self.path.split('?',1)[0]=='/api/journal/plan':
+            from urllib.parse import urlsplit,parse_qs
+            try:
+                key=int(parse_qs(urlsplit(self.path).query).get('id',['0'])[0])
+                if key<=0:raise ValueError()
+            except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Plan'})
+            plan=self.server.app.journal.plan(key)
+            return self.send(200,plan) if plan is not None else self.send(404,{'error':'Plan nicht mehr gespeichert'})
+        if self.path.split('?',1)[0] in ('/api/journal','/api/journal/export','/api/journal/text'):
+            from urllib.parse import urlsplit,parse_qs
+            try:
+                query=parse_qs(urlsplit(self.path).query)
+                hours=int(query.get('hours',['24'])[0]);before=int(query.get('before',['0'])[0])
+                if hours not in (6,12,24,48) or before<0:raise ValueError()
+            except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Zeitraum'})
+            journal=self.server.app.journal;path=self.path.split('?',1)[0]
+            if path=='/api/journal/export':
+                import gzip
+                return self.send(200,gzip.compress(json.dumps(journal.export(hours),ensure_ascii=False).encode()),'application/gzip')
+            if path=='/api/journal/text':return self.send(200,journal.prose(hours).encode(),'text/plain; charset=utf-8')
+            return self.send(200,journal.entries(hours,before,query.get('all',['0'])[0]=='1'))
         if self.path=='/api/history':
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):
@@ -671,6 +702,9 @@ class Handler(BaseHTTPRequestHandler):
                 from geocoding import lookup
                 return self.send(200,{'results':lookup(data.get('postcode'))})
             self.server.app.action(self.path[5:],data)
+            safe={k:v for k,v in data.items() if k in ('mode','minutes','start','end','end_kind','target_soc','until')}
+            if self.path=='/api/settings':safe={'fields':list(data.keys())}
+            self.server.app.audit_event({'event':'user_action','action':self.path[5:],'parameters':safe})
             self.send(200,{'ok':True})
         except (ValueError,KeyError) as exc:
             self.send(400,{'error':str(exc)})
