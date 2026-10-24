@@ -12,6 +12,7 @@ function chartPhases(d){
 }
 function phaseAt(phases,time){return [...phases].reverse().find(w=>Date.parse(w.start)<=time&&time<Date.parse(w.end))?.action;}
 function renderExtras(d){
+ renderUpdate(d.update,d);
  document.getElementById('referencelabel').textContent=d.settings.smart_discharge_enabled?'Erwarteter Preis bei Entladung':'Durchschnittspreis im Verbrauchsfenster';
  const q=d.dispatch_preview;
  document.getElementById('dispatchreason').textContent=q?.enabled?'✧ '+q.reason:'ⓘ Smart-Entladen in den Einstellungen aktivierbar';
@@ -30,18 +31,18 @@ async function loadHistory(force=false){
 function renderHistory(){
  if(!historyData)return;
  const d=historyData,eur=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'}),num=n=>n.toLocaleString('de-DE',{maximumFractionDigits:2});
- document.getElementById('historyinfo').textContent=(d.started?'≈ Geschätzter Preisvorteil · Erfassung seit '+d.started:'Noch keine bewertbaren Messungen')+(d.enabled?'':' · Erfassung pausiert');
+ document.getElementById('historyinfo').textContent=(d.started?'≈ Preisvorteil laut Ladeplan · seit '+d.started:'Noch keine bewertbaren Ladeaufträge')+(d.enabled?'':' · Erfassung pausiert');
  const box=document.getElementById('periodstats');box.replaceChildren();
  for(const [key,title] of [['today','Heute'],['yesterday','Gestern'],['last30','Letzte 30 Tage'],['last365','Letzte 365 Tage']]){
   const v=d.periods[key],card=document.createElement('article');card.className='card statcard';
   const h=document.createElement('p');h.className='eyebrow';h.textContent=title;
-  const amount=document.createElement('strong');amount.className='big';amount.textContent=v.seconds>0?'≈ '+eur(v.saving):'—';
-  const detail=document.createElement('p');detail.className='muted';detail.textContent=`${num(v.valued)} kWh bewertet · ${num(v.seconds/3600)} h erfasst`;
+  const amount=document.createElement('strong');amount.className='big';amount.textContent=v.valued>0?'≈ '+eur(v.saving):'—';
+  const detail=document.createElement('p');detail.className='muted';detail.textContent=`${num(v.valued)} kWh laut Plan · ${num(v.seconds/3600)} h Ladeauftrag`;
   card.append(h,amount,detail);box.append(card);
  }
  const tbody=document.getElementById('historyrows');tbody.replaceChildren();
  const rows=d[document.getElementById('historygroup').value];
- for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,eur(v.saving),num(v.valued)+' kWh',num(v.seconds/3600)+' h']){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
+ for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,v.valued>0?eur(v.saving):'—',num(v.valued)+' kWh',num(v.seconds/3600)+' h']){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
  if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='Noch keine Daten. Die Erfassung beginnt ab jetzt.';row.append(cell);tbody.append(row);}
 }
 let installPrompt=null,pwaRegistration=null;
@@ -91,4 +92,36 @@ document.addEventListener('DOMContentLoaded',()=>{
  });
  document.getElementById('pushtest').onclick=e=>pushAction(e.currentTarget,async()=>{await api('push-test',{});document.getElementById('pushstatus').textContent='Testnachricht angefordert.';});
  initializePwa();
+});
+
+const updateStates=new Set(['queued','checking','dependencies','testing','installing','restarting','rollback']);
+let updateTimer=null,updateWatch=false,updateStarting=false;
+function renderUpdate(u,d){
+ if(!u)return;
+ const active=updateStates.has(u.state),button=document.getElementById('updateapp');
+ document.getElementById('updateversion').textContent='Installierter Stand: '+(u.revision?u.revision.slice(0,8):'kein Git-Stand erkannt');
+ document.getElementById('updatestatus').textContent=u.message||'Bereit für Updates';
+ const hold=d?.discharge?.request?.until&&Date.parse(d.discharge.request.until)>Date.now();
+ button.disabled=active||updateStarting||!!(d&&(d.mode!=='off'||d.job||d.discharge?.restore_pending||hold));
+ button.classList.toggle('button-loading',active||updateStarting);
+ if(active){updateWatch=true;scheduleUpdatePoll();}
+ else if(updateWatch){updateWatch=false;clearTimeout(updateTimer);if(u.state==='done')window.location.reload();}
+}
+function scheduleUpdatePoll(){clearTimeout(updateTimer);if(updateWatch&&!document.hidden)updateTimer=setTimeout(pollUpdate,2000);}
+async function pollUpdate(){
+ if(document.hidden)return;
+ try{const r=await fetch('/api/update');if(r.status===401){updateWatch=false;document.getElementById('updatestatus').textContent='Bitte nach dem Neustart erneut anmelden.';return;}if(!r.ok)throw Error();renderUpdate(await r.json(),lastStatus);}
+ catch{document.getElementById('updatestatus').textContent='Verbindung unterbrochen · Neustart wird abgewartet …';}
+ finally{scheduleUpdatePoll();}
+}
+document.addEventListener('DOMContentLoaded',()=>{
+ document.getElementById('updateapp').onclick=async()=>{
+  if(updateStarting||updateWatch)return;
+  updateStarting=true;const b=document.getElementById('updateapp');b.disabled=true;b.classList.add('button-loading');
+  document.getElementById('updatestatus').textContent='Update wird angefordert …';
+  try{await api('update',{});updateWatch=true;await pollUpdate();}
+  catch(e){document.getElementById('updatestatus').textContent=e.message;}
+  finally{updateStarting=false;if(!updateWatch){b.disabled=false;b.classList.remove('button-loading');}}
+ };
+ document.addEventListener('visibilitychange',()=>{clearTimeout(updateTimer);if(!document.hidden&&updateWatch)pollUpdate();});
 });

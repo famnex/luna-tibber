@@ -83,6 +83,34 @@ class DashboardTests(unittest.TestCase):
         self.app.device={'serial':'unconfirmed'}
         with self.assertRaises(ValueError):self.app.action('adopt-serial',{})
 
+    def test_update_requires_idle_and_released_battery(self):
+        with patch('web.updater.start') as start:
+            self.app.mode='smart'
+            with self.assertRaises(ValueError):self.app.action('update',{})
+            self.app.mode='off';self.app.proc=object()
+            with self.assertRaises(ValueError):self.app.action('update',{})
+            self.app.proc=None
+            for name in ('pending-charge.json','discharge-restore.json'):
+                path=self.folder/name;path.write_text('{}')
+                with self.assertRaises(ValueError):self.app.action('update',{})
+                path.unlink()
+            start.assert_not_called()
+            self.app.action('update',{})
+            start.assert_called_once()
+
+    def test_update_blocks_controls_and_measurements(self):
+        self.app.save_settings({})
+        with patch('web.updater.busy',return_value=True),patch.object(self.app,'launch') as launch:
+            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'on'})
+            self.app.request_sample(fast=True)
+            launch.assert_not_called()
+
+    def test_statistics_do_not_poll_in_background(self):
+        self.app.save_settings({'statistics_enabled':True})
+        with patch.object(self.app.closed,'wait',side_effect=[False,True]),patch.object(self.app,'launch') as launch,patch.object(self.app,'request_sample') as sample:
+            self.app.worker()
+            sample.assert_not_called();launch.assert_not_called()
+
 class HTTPTests(unittest.TestCase):
     def setUp(self):
         import threading, hashlib
@@ -122,7 +150,11 @@ class HTTPTests(unittest.TestCase):
         for path,kind in [('/manifest.webmanifest','application/manifest+json'),('/sw.js','application/javascript'),('/icon-192.png','image/png')]:
             conn.request('GET',path);r=conn.getresponse()
             self.assertEqual(r.status,200);self.assertIn(kind,r.getheader('Content-Type'));self.assertTrue(r.read())
-        conn.request('GET','/api/history');r=conn.getresponse();self.assertEqual(r.status,401);r.read();conn.close()
+        for path in ('/api/history','/api/update'):
+            conn.request('GET',path);r=conn.getresponse();self.assertEqual(r.status,401);r.read()
+        conn.request('GET','/healthz');r=conn.getresponse();self.assertEqual(r.status,200)
+        self.assertEqual(set(json.loads(r.read())),{'ok','pid','revision'})
+        self.server.app.request_sample.assert_not_called();conn.close()
 
     def test_unknown_host_rejected(self):
         import http.client

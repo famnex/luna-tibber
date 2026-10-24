@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 import time
 from zoneinfo import ZoneInfo
 import luna
+import updater
 
 BASE = Path(__file__).resolve().parent
 MODES = {'off', 'smart', 'on', 'schedule'}
@@ -161,6 +162,8 @@ class Dashboard:
         self.notifications=Notifications(folder,start_worker=start_worker)
         self.sample_failures=0
         self.price_failed_since=None
+        self.revision=updater.revision(folder)
+        self.update_settings={"port":8099,"tls":False,"old_pid":os.getpid()}
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
@@ -201,9 +204,11 @@ class Dashboard:
                 self.events.append(event)
                 if event.get('event') in ('snapshot','test_sample','decision'):
                     self.telemetry = event
+                if event.get('event')=='charge_command' and job in ('run','charge'):
                     try:self.history.record(self.config(),event,self.price_data)
-                    except Exception:
-                        self.events.append({'event':'statistics_error','message':'Statistik konnte nicht gespeichert werden'})
+                    except Exception:self.events.append({'event':'statistics_error','message':'Planstatistik konnte nicht gespeichert werden'})
+                if event.get('event') in ('stopped','stopped_on_exit','target_reached'):
+                    self.finish_history(datetime.fromisoformat(event['time']))
                 if event.get('event') == 'connected':
                     self.device = event
                 if event.get('event') == 'stop_unconfirmed':
@@ -235,6 +240,10 @@ class Dashboard:
                 if rc == 0 and job == 'probe':
                     self.device = read(self.folder/'device.json',{})
                     self.last_probe_serial = self.device.get('serial')
+    def finish_history(self,now=None):
+        try:self.history.finish(now)
+        except Exception:self.events.append({'event':'statistics_error','message':'Planstatistik konnte nicht abgeschlossen werden'})
+
     def alert(self,key,title,body,cooldown=1800):
         contact=self.config().get('push_contact','')
         self.notifications.emit(key,title,body,'mailto:'+contact if contact else '',cooldown)
@@ -254,6 +263,7 @@ class Dashboard:
                 p.kill()
                 p.wait(timeout=5)
                 self.fault = 'Stopp nicht bestätigt; letzter Ladeauftrag maximal zwei Minuten. Gerät prüfen.'
+        self.finish_history()
         self.generation += 1
         self.proc = None
         self.job = None
@@ -291,7 +301,16 @@ class Dashboard:
             self.price_data = []
     def action(self, name, data):
         with self.lock:
-            if name == 'push-subscribe':
+            if updater.busy(self.folder):raise ValueError('Update läuft; Steuerung vorübergehend gesperrt')
+            if name == 'update':
+                request=read(self.folder/'discharge-request.json',{})
+                hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
+                if self.mode!='off' or self.proc:
+                    raise ValueError('Zum Update auf Aus schalten und laufenden Vorgang abwarten')
+                if hold or any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
+                    raise ValueError('Vor dem Update Entladesperre aufheben und Freigabe abwarten')
+                updater.start(self.folder,**self.update_settings)
+            elif name == 'push-subscribe':
                 contact=self.config().get('push_contact','')
                 self.notifications.subscribe(data['subscription'],'mailto:'+contact if contact else '')
             elif name == 'push-unsubscribe':
@@ -385,6 +404,7 @@ class Dashboard:
         while not self.closed.wait(1):
             with self.lock:
                 try:
+                    if updater.busy(self.folder):continue
                     request=read(self.folder/'discharge-request.json',{})
                     needs_restore=(self.folder/'discharge-restore.json').exists()
                     hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
@@ -396,8 +416,6 @@ class Dashboard:
                     if self.job == 'discharge-sync':
                         continue
                     if self.mode == 'off':
-                        if self.config().get('statistics_enabled'):
-                            self.request_sample()
                         continue
                     if self.job in ('sample','probe','charge-test','stop'):
                         continue
@@ -479,7 +497,7 @@ class Dashboard:
     def request_sample(self, fast=False):
         # Called only by a visible browser. Reuse ongoing controller measurements.
         with self.lock:
-            if self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
+            if updater.busy(self.folder) or self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
                 return
             self.sample_at = time.monotonic()
             self.launch('sample')
@@ -500,7 +518,7 @@ class Dashboard:
             return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),
+                    'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':{**updater.read_status(self.folder),'revision':self.revision},
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
@@ -573,8 +591,12 @@ class Handler(BaseHTTPRequestHandler):
         if asset_path in static:
             filename,kind = static[asset_path]
             return self.send(200,(BASE/filename).read_bytes(),kind)
+        if self.path=='/healthz':
+            return self.send(200,{'ok':True,'pid':os.getpid(),'revision':getattr(self.server,'started_revision',None)})
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
+        if self.path=='/api/update':
+            return self.send(200,{**updater.read_status(self.server.app.folder),'revision':self.server.app.revision})
         if self.path=='/api/history':
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):
@@ -661,6 +683,8 @@ def main():
             server.socket=context.wrap_socket(server.socket,server_side=True)
         server.daemon_threads=True
         server.app,server.auth=app,auth
+        server.started_revision=app.revision
+        app.update_settings={"port":args.port,"tls":bool(args.tls_cert),"old_pid":os.getpid()}
         server.session_path=BASE/'web-sessions.json'
         server.sessions=load_sessions(server.session_path,auth)
         server.attempts=deque()

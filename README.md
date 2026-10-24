@@ -539,11 +539,26 @@ Im Diagramm: **Grün ↗ Laden**, **Orange ↘ Entladung freigegeben**, **Violet
 
 ### Statistik
 
-Heute, gestern, letzte 30 und 365 Kalendertage einschließlich heute, Monats- und Jahresübersichten. Erfassung beginnt nach dem Update; keine erfundene Rückrechnung. Der Backend-Dienst liest bei aktivierter Statistik auch ohne sichtbare Webseite ungefähr einmal pro Minute. Laufende Controller-Messungen werden wiederverwendet; die Bildschirmaktualisierung bleibt bei geschlossenem/verdecktem Browser pausiert. Die Statistik lässt sich abschalten.
+Heute, gestern, letzte 30 und 365 Kalendertage einschließlich heute, Monats- und Jahresübersichten. Die Statistik verwendet ausschließlich **angeforderte Ladeleistung und Laufzeit sowie den berechneten Preisvorteil**. Dafür werden keine zusätzlichen Batterie- oder PV-Messwerte gelesen. Im Modus Aus ohne Entladesperre gibt es keine Hintergrundabfragen für die Statistik. Die für aktive Steuerung und Freigaben notwendigen Prüfungen bleiben bestehen; Bildschirmwerte werden weiterhin nur bei sichtbarer Webseite angefragt.
 
-`history.sqlite3` enthält lokale Tagesaggregate, Messwerte der letzten 30 Tage und einen bewerteten Energiebestand. Tagesaggregate bleiben für Jahresvergleiche erhalten. Batterieenergie wird aus Leistung und Messdauer integriert. Messlücken über 150 Sekunden werden nicht aufgefüllt; der bewertete Bestand wird dann vorsichtig verworfen. Die angezeigten Euro-Beträge sind **geschätzter Preisvorteil** gegenüber Netzbezug zum späteren Entladepreis. Bewertet werden nur erfasste App-Ladungen mit höchstens 50 W gemessener PV-Eingangsleistung und anschließend gemessener Entladung. Unbekannter Anfangsbestand und PV-Ladung erhalten keinen erfundenen Einkaufspreis. Gemischte Bestände werden anteilig bewertet. Auch negative Ergebnisse bleiben sichtbar.
+`plan-history.sqlite3` speichert die zeitlich begrenzten Ladeaufträge. Erneuerte Befehle ersetzen ihren überlappenden Vorgänger, ein Stopp kürzt den Auftrag. Nur bereits verstrichene Auftragszeit zählt; ein bloß vorgemerkter Smart-Slot wird nicht als Ersparnis verbucht. Jeder Auftrag endet spätestens nach seiner angeforderten Laufzeit, auch wenn der Webdienst ausfällt. Der erwartete spätere Preisvorteil wird dem **Tag der Ladung** zugeordnet. Fehlende Preise führen zu unbewerteter Planenergie, nicht zu erfundenen Euro-Beträgen. Alte Messstatistiken in `history.sqlite3` bleiben unangetastet und werden nicht mit den Planwerten vermischt.
 
-Das Modell verteilt den Gesamtwirkungsgrad gleichmäßig auf Lade- und Entladeverluste (`sqrt(eta)` je Richtung), berücksichtigt die Verschleißreserve und nimmt an, dass normale Entladung Hausverbrauch ersetzt. Es ist kein geeichter Netzenergie- oder Rechnungsnachweis. Einstellungen zum Modell gelten ab Änderung; bestehende Tageswerte werden nicht nachträglich umgerechnet. Erfasste Stunden und bewertete kWh zeigen die Datengrundlage. Datenbank und Zugangsdaten lokal sichern, nicht ins Git laden.
+Die Schätzung nimmt vollständige Netzladung mit der angeforderten Leistung und spätere Nutzung zum berechneten Referenzpreis an. Das Modell verteilt den Gesamtwirkungsgrad gleichmäßig auf beide Richtungen (`sqrt(eta)`) und berücksichtigt die Verschleißreserve. Tatsächliche Leistung, PV-Anteile und tatsächliche Entladung werden dafür nicht geprüft. Auch negative Planvorteile bleiben sichtbar. Es ist kein gemessener Einsparungs- oder Rechnungsnachweis. Einstellungen gelten ab Änderung; alte Werte werden nicht nachträglich umgerechnet. Die Erfassung lässt sich in den Einstellungen abschalten.
+
+### Updatebutton
+
+Unter **Einstellungen → Software → Prüfen & aktualisieren** holt die App den aktuellen `main`-Stand von `famnex/luna-tibber`, prüft ihn und startet den Webdienst neu. Dafür muss die App über den mitgelieferten systemd-Benutzerdienst `luna-web.service` laufen. Einmalig diese Version installieren:
+
+```bash
+cd ~/apps/luna-tibber
+git pull --ff-only && systemctl --user restart luna-web
+```
+
+Danach die Webseite neu laden. Für Updates auf **Aus** schalten, eine manuelle Entladesperre aufheben und laufende Vorgänge/Freigaben abwarten. Während des Updates werden neue Steuerungsaufträge gesperrt. Es gibt eine Fortschrittsanzeige mit Spinner; nach erfolgreichem Neustart lädt die Webseite neu. Das Update läuft unabhängig vom Browser weiter.
+
+Der Updater akzeptiert nur den erwarteten Git-Ursprung, Branch `main`, einen sauberen Arbeitsstand und Fast-Forward-Updates. Lokale Codeänderungen führen zum Abbruch und werden nicht überschrieben. Konfiguration, Anmeldung, Preise und Statistiken bleiben lokal erhalten. Python-Abhängigkeiten werden bei unveränderten Requirements wiederverwendet; bei Änderungen wird eine separate Umgebung vorbereitet. Ein bereits installiertes Push-Paket wird berücksichtigt. Python selbst wird dabei nicht neu kompiliert oder aktualisiert.
+
+Syntaxprüfung und Python-Tests laufen vor der Übernahme in einem separaten Git-Arbeitsverzeichnis. Nach dem Neustart werden Prozess und installierter Git-Stand am lokalen Webdienst geprüft. Bei fehlgeschlagener Aktivierung versucht der Updater, den vorherigen Code und die vorherige Python-Umgebung wiederherzustellen. Bei Stromausfall oder beschädigtem System ist manuelle Wiederherstellung gegebenenfalls notwendig. Status steht in der App, Details in `update.log`. Abhängigkeitsänderungen können auf dem Pi länger dauern. `.updates` enthält die vorbereiteten bzw. vorherigen Umgebungen; nicht löschen, solange `.venv` darauf verweist.
 
 ### PWA und Push
 

@@ -34,3 +34,9 @@ history.sqlite3*
 push-*.json
 push-key.pem
 *.pem
+
+plan-history.sqlite3*
+.updates/
+update-state.json
+update-state.tmp
+update.log

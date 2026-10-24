@@ -2,10 +2,11 @@
 
 ## Update
 
+Ab der Version mit Updatebutton: **Einstellungen → Software → Prüfen & aktualisieren**. Zuerst auf Aus schalten und Entladesperre/Freigabe beenden. Fortschritt und Neustart werden in der App angezeigt. Für die einmalige Installation des Buttons oder manuelle Updates:
+
 ```bash
 cd ~/apps/luna-tibber
-git pull --ff-only
-systemctl --user restart luna-web
+git pull --ff-only && systemctl --user restart luna-web
 ```
 
 Für Web Push zusätzlich, optional für die restlichen Funktionen:
@@ -69,4 +70,4 @@ Server, Internetzugang und Browser-Push-Dienst müssen für die Zustellung verf�
 
 Offline erscheint eine eigene Hinweisseite. Steuerungsbefehle werden niemals offline zwischengespeichert oder später automatisch abgesendet; Status-/API-Antworten werden nicht im Service-Worker-Cache gespeichert. Die tatsächliche Steuerung läuft auf dem Linux-Server.
 
-`push-key.pem`, `push-subscriptions.json`, `push-events.json`, `history.sqlite3` und vorhandene Konfigurations-/Sitzungsdateien gehören ausschließlich auf den Server. Das Repository ignoriert sie. Der private VAPID-Schlüssel muss bei Updates erhalten bleiben, sonst müssen Geräte Push neu abonnieren.
+`push-key.pem`, `push-subscriptions.json`, `push-events.json`, `plan-history.sqlite3`, die bisherige `history.sqlite3` und vorhandene Konfigurations-/Sitzungsdateien gehören ausschließlich auf den Server. Das Repository ignoriert sie. Der private VAPID-Schlüssel muss bei Updates erhalten bleiben, sonst müssen Geräte Push neu abonnieren.

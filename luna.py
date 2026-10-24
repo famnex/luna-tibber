@@ -207,13 +207,6 @@ class Huawei:
             raise ValueError("SOC außerhalb 0–100")
         result["battery_status"] = int(result["battery_status"])
         result["ac_charge_enabled"] = bool(result["ac_charge_enabled"])
-        # Optional PV reading for conservative grid-charge accounting.
-        try:
-            pv=await asyncio.wait_for(self.device.batch_update([rn.INPUT_POWER]),10)
-            v=pv[rn.INPUT_POWER].value
-            result['pv_input_w']=v if isinstance(v,(int,float)) and math.isfinite(v) else None
-        except Exception:
-            result['pv_input_w']=None
         return result
     async def login(self):
         missing = [label for key, label in (("expected_serial", "Wechselrichter-Seriennummer"), ("password", "Huawei-Installateurpasswort")) if not self.c[key]]

@@ -1,5 +1,4 @@
-"""Local measured energy integration and explicitly modelled battery arbitrage savings."""
-import json
+"""Plan-only savings ledger. Never reads battery telemetry or requests measurements."""
 import math
 import os
 import sqlite3
@@ -9,81 +8,63 @@ from zoneinfo import ZoneInfo
 
 class History:
     def __init__(self,folder):
-        self.path=folder/'history.sqlite3'
+        # Keep the previous measurement-based database untouched and separate.
+        self.path=folder/'plan-history.sqlite3'
         with self.connect() as db:
-            db.executescript('''CREATE TABLE IF NOT EXISTS state (id INTEGER PRIMARY KEY, data TEXT NOT NULL);
-            CREATE TABLE IF NOT EXISTS daily (day TEXT PRIMARY KEY, charge REAL DEFAULT 0, discharge REAL DEFAULT 0,
-              valued REAL DEFAULT 0, saving REAL DEFAULT 0, cost REAL DEFAULT 0, avoided REAL DEFAULT 0,
-              seconds REAL DEFAULT 0, gaps REAL DEFAULT 0);
-            CREATE TABLE IF NOT EXISTS samples (time REAL PRIMARY KEY, soc REAL, power REAL);''')
+            db.executescript('''CREATE TABLE IF NOT EXISTS commands (id TEXT PRIMARY KEY);
+            CREATE TABLE IF NOT EXISTS intervals (
+                command TEXT, day TEXT, start REAL, end REAL,
+                charge_rate REAL, useful_rate REAL, valued_rate REAL,
+                saving_rate REAL, cost_rate REAL, avoided_rate REAL);
+            CREATE INDEX IF NOT EXISTS interval_end ON intervals(end);''')
         os.chmod(self.path,0o600)
     def connect(self):return sqlite3.connect(self.path,timeout=10)
-    def record(self,c,t,prices):
-        if not c.get('statistics_enabled') or c['battery_capacity_kwh']<=0:return
-        try:
-            now=datetime.fromisoformat(t['time']);power=float(t['battery_power_w']);soc=float(t['soc'])
-            if now.tzinfo is None or not all(math.isfinite(x) for x in (power,soc)) or not 0<=soc<=100 or abs(power)>20000:return
-        except (KeyError,ValueError,TypeError):return
-        zone=ZoneInfo(c['timezone']);eta=math.sqrt(c['roundtrip_efficiency'])
-        model=[c['expected_serial'],c['battery_capacity_kwh'],c['roundtrip_efficiency'],c['wear_ct_kwh'],c['timezone']]
+    def finish(self,now=None):
+        stamp=(now or datetime.now(timezone.utc)).timestamp()
         with self.connect() as db:
-            row=db.execute('SELECT data FROM state WHERE id=1').fetchone()
-            state=json.loads(row[0]) if row else {}
-            prev=state.get('prev');pool=state.get('pool',0);book=state.get('book',0)
-            if prev and now.timestamp()<=prev['stamp']:return
-            if prev and now.timestamp()-prev['stamp']<45:return
-            current={'stamp':now.timestamp(),'power':power,'soc':soc,'app':bool(t.get('app_charging')),'pv':t.get('pv_input_w')}
-            if state.get('model')!=model:prev=None;pool=book=0
-            if prev:
-                start=datetime.fromtimestamp(prev['stamp'],timezone.utc);dt=(now-start).total_seconds()
-                if dt>150:
-                    pool=book=0
-                    day=now.astimezone(zone).date().isoformat()
-                    db.execute('INSERT OR IGNORE INTO daily(day) VALUES(?)',(day,))
-                    db.execute('UPDATE daily SET gaps=gaps+? WHERE day=?',(dt,day))
-                else:
-                    cuts={start,now}
-                    for p in prices:
-                        for edge in (p['start'],p['end']):
-                            if start<edge<now:cuts.add(edge)
-                    midnight=(start.astimezone(zone).replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
-                    if start<midnight<now:cuts.add(midnight)
-                    total=max(0,prev['soc']/100*c['battery_capacity_kwh'])
-                    if pool>total and pool>0:book*=total/pool;pool=total
-                    edges=sorted(cuts)
-                    for a,b in zip(edges,edges[1:]):
-                        seconds=(b-a).total_seconds();mid=a+(b-a)/2
-                        # Ambiguous direction changes are not turned into invented savings.
-                        avg=(prev['power']+power)/2 if prev['power']*power>=0 else 0
-                        dc=abs(avg)*seconds/3600000
-                        price=next((p['ct'] for p in prices if p['start']<=mid<p['end']),None)
-                        charge=dc if avg>0 else 0;discharge=dc if avg<0 else 0
-                        saving=valued=cost=avoided=0
-                        if charge:
-                            if (prev['app'] and current['app'] and price is not None and
-                                all(type(v) in (int,float) and 0<=v<=50 for v in (prev['pv'],current['pv']))):
-                                pool+=dc;book+=dc/eta*price/100
-                            total+=dc
-                        if discharge:
-                            portion=min(dc,total)*min(1,pool/total) if total>0 else 0
-                            used_cost=book*portion/pool if pool>0 else 0
-                            pool=max(0,pool-portion);book-=used_cost;total=max(0,total-dc)
-                            if price is not None:
-                                valued=portion*eta;cost=used_cost
-                                avoided=valued*price/100
-                                saving=avoided-cost-valued*c['wear_ct_kwh']/100
-                        day=mid.astimezone(zone).date().isoformat()
-                        db.execute('INSERT OR IGNORE INTO daily(day) VALUES(?)',(day,))
-                        db.execute('UPDATE daily SET charge=charge+?,discharge=discharge+?,valued=valued+?,saving=saving+?,cost=cost+?,avoided=avoided+?,seconds=seconds+? WHERE day=?',
-                                   (charge,discharge,valued,saving,cost,avoided,seconds,day))
-            db.execute('INSERT OR REPLACE INTO state VALUES(1,?)',(json.dumps({'prev':current,'pool':pool,'book':book,'model':model}),))
-            db.execute('INSERT OR REPLACE INTO samples VALUES(?,?,?)',(now.timestamp(),soc,power))
-            db.execute('DELETE FROM samples WHERE time<?',(now.timestamp()-30*86400,))
+            db.execute('UPDATE intervals SET end=MAX(start,?) WHERE end>?',(stamp,stamp))
+    def record(self,c,event,prices):
+        if not c.get('statistics_enabled') or event.get('event')!='charge_command':return
+        try:
+            start=datetime.fromisoformat(event['time']);watts=event['watts'];minutes=event['minutes']
+            if start.tzinfo is None or type(watts) not in (int,float) or not math.isfinite(watts) or not 0<watts<=5000 or type(minutes) is not int or not 1<=minutes<=2:return
+        except (KeyError,ValueError,TypeError):return
+        from luna import economics_plan
+        current=next((p['ct'] for p in prices if p['start']<=start<p['end']),None)
+        reference=economics_plan(c,prices,start).get('reference_ct_kwh')
+        eta=math.sqrt(c['roundtrip_efficiency'])
+        charge_rate=watts/3600000
+        useful_rate=charge_rate*eta
+        valued=all(type(v) in (int,float) and math.isfinite(v) for v in (current,reference))
+        cost_rate=charge_rate/eta*current/100 if valued else 0
+        avoided_rate=useful_rate*reference/100 if valued else 0
+        saving_rate=avoided_rate-cost_rate-useful_rate*c['wear_ct_kwh']/100 if valued else 0
+        end=start+timedelta(minutes=minutes);zone=ZoneInfo(c['timezone'])
+        command=start.isoformat()
+        with self.connect() as db:
+            if db.execute('SELECT 1 FROM commands WHERE id=?',(command,)).fetchone():return
+            db.execute('INSERT INTO commands VALUES(?)',(command,))
+            # Renewed finite-duration commands replace their predecessor, not add to it.
+            db.execute('UPDATE intervals SET end=MAX(start,?) WHERE end>?',(start.timestamp(),start.timestamp()))
+            left=start
+            while left<end:
+                local=left.astimezone(zone)
+                midnight=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
+                right=min(end,midnight)
+                db.execute('INSERT INTO intervals VALUES(?,?,?,?,?,?,?,?,?,?)',
+                    (command,local.date().isoformat(),left.timestamp(),right.timestamp(),charge_rate,useful_rate,useful_rate if valued else 0,saving_rate,cost_rate,avoided_rate))
+                left=right
     def summary(self,c,now=None):
         now=now or datetime.now(timezone.utc);today=now.astimezone(ZoneInfo(c['timezone'])).date()
         with self.connect() as db:
             db.row_factory=sqlite3.Row
-            rows=[dict(r) for r in db.execute('SELECT * FROM daily ORDER BY day')]
+            rows=[dict(r) for r in db.execute('''SELECT day,
+                SUM(duration*charge_rate) charge, SUM(duration*useful_rate) discharge,
+                SUM(duration*valued_rate) valued, SUM(duration*saving_rate) saving,
+                SUM(duration*cost_rate) cost, SUM(duration*avoided_rate) avoided,
+                SUM(duration) seconds, 0 gaps
+                FROM (SELECT *,MAX(0,MIN(end,?)-start) duration FROM intervals WHERE start<? AND end>start)
+                GROUP BY day ORDER BY day''',(now.timestamp(),now.timestamp()))]
         keys=['charge','discharge','valued','saving','cost','avoided','seconds','gaps']
         def combine(selected):return {**{k:sum(r[k] for r in selected) for k in keys},'days':len(selected)}
         periods={}
@@ -95,4 +76,4 @@ class History:
         for label,n in [('months',7),('years',4)]:
             grouped[label]=[{'period':p,**combine([r for r in rows if r['day'][:n]==p])} for p in sorted({r['day'][:n] for r in rows},reverse=True)]
         return {'periods':periods,**grouped,'started':rows[0]['day'] if rows else None,
-                'estimated':True,'enabled':c.get('statistics_enabled',True)}
+                'estimated':True,'source':'plan','enabled':c.get('statistics_enabled',True)}
