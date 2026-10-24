@@ -66,6 +66,13 @@ class DashboardTests(unittest.TestCase):
             self.assertEqual(self.app.mode,'off')
             self.assertIsNone(self.app.until)
 
+    def test_unrelated_settings_keep_prices(self):
+        self.app.price_data=[{'ct':12}]
+        self.app.save_settings({})
+        self.assertEqual(self.app.price_data,[{'ct':12}])
+        self.app.save_settings({'tibber_token':'new-token'})
+        self.assertEqual(self.app.price_data,[])
+
     def test_manual_still_obeys_soc_and_ac(self):
         c={**luna.DEFAULT,'_manual':True}
         s={'soc':61,'battery_status':2,'ac_charge_enabled':True}

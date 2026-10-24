@@ -15,8 +15,10 @@ class CacheTests(unittest.TestCase):
             get(c,folder,fetch,now+timedelta(seconds=60))
             self.assertEqual(fetch.call_count,1)
             fetch.side_effect=OSError('offline')
-            self.assertTrue(get(c,folder,fetch,now+timedelta(minutes=6))[2])
-            with self.assertRaises(OSError):get(c,folder,fetch,now+timedelta(hours=25))
+            self.assertFalse(get(c,folder,fetch,now+timedelta(minutes=6))[2])
+            self.assertEqual(fetch.call_count,1)
+            self.assertTrue(get(c,folder,fetch,now+timedelta(hours=12))[2])
+            with self.assertRaises(OSError):get(c,folder,fetch,now+timedelta(hours=49))
             with self.assertRaises(OSError):get({**c,'tibber_home_id':'other'},folder,fetch,now)
     def test_expired_intervals_not_reused(self):
         now=datetime(2026,10,24,tzinfo=timezone.utc)
@@ -26,3 +28,13 @@ class CacheTests(unittest.TestCase):
             get(c,folder,fetch,now)
             fetch.side_effect=OSError()
             with self.assertRaises(OSError):get(c,folder,fetch,now+timedelta(minutes=16))
+
+    def test_complete_tomorrow_avoids_afternoon_refetch(self):
+        now=datetime(2026,10,24,12,tzinfo=timezone.utc)
+        c={'tibber_token':'test','tibber_home_id':'home'}
+        rows=[{'start':now,'end':now+timedelta(hours=36),'ct':20}]
+        fetch=Mock(return_value=rows)
+        with tempfile.TemporaryDirectory() as folder:
+            get(c,folder,fetch,now)
+            get(c,folder,fetch,now+timedelta(hours=2))
+            self.assertEqual(fetch.call_count,1)

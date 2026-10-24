@@ -27,3 +27,5 @@ web-sessions.json.tmp
 tibber-prices.json
 tibber-prices.lock
 .tibber-*
+
+discharge-*.json

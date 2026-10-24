@@ -9,7 +9,7 @@ async function api(action,data){const r=await fetch('/api/'+action,{method:'POST
 function showBusy(active,text='Bitte warten …',button=null){$('progressbar').hidden=!active;$('progresstext').textContent=text;if(button){button.classList.toggle('button-loading',active);button.setAttribute('aria-busy',String(active));}}
 function notify(s,kind='success'){$('notice').textContent=s;$('notice').dataset.kind=kind;}
 const actionLabels={settings:'Einstellungen speichern',schedules:'Zeitpläne speichern',planned:'Ladeauftrag planen',probe:'Gerät auslesen',test:'Ladetest starten','adopt-serial':'Seriennummer übernehmen',mode:'Steuerung umschalten'};
-async function perform(name,data={},button=null){if(busy)return false;busy=true;pendingButton=button;showBusy(true,(actionLabels[name]||'Aktion')+' …',button);document.body.classList.add('working');const buttons=[...document.querySelectorAll('#dashboard button')];buttons.forEach(b=>b.disabled=true);$('dashboard').setAttribute('aria-busy','true');notify('');try{await api(name,data);if(['mode','planned','test'].includes(name))watchChange(name,data);if(name==='mode'||name==='planned'){modeDirty=false;chosenMode=name==='planned'?'planned':data.mode;}notify(name==='probe'||name==='test'?'':name==='settings'?'Einstellungen gespeichert.':name==='planned'?'Ladeauftrag eingeplant. Start und Ende stehen unten.':name==='mode'&&data.mode==='off'?'Stopp angefordert. Bestätigung im Gerätestatus abwarten.':'Änderung übernommen.');if(name==='settings')settingsDirty=false;await refresh();return true;}catch(e){notify(e.message,'error');return false;}finally{showBusy(false,'',pendingButton);pendingButton=null;busy=false;buttons.forEach(b=>b.disabled=false);document.body.classList.remove('working');$('dashboard').setAttribute('aria-busy','false');}}
+async function perform(name,data={},button=null){if(busy)return false;busy=true;pendingButton=button;showBusy(true,(actionLabels[name]||'Aktion')+' …',button);document.body.classList.add('working');const buttons=[...document.querySelectorAll('#dashboard button')];buttons.forEach(b=>b.disabled=true);$('dashboard').setAttribute('aria-busy','true');notify('');try{await api(name,data);if(['mode','planned','test','discharge'].includes(name))watchChange(name,data);if(name==='mode'||name==='planned'){modeDirty=false;chosenMode=name==='planned'?'planned':data.mode;}notify(name==='probe'||name==='test'?'':name==='settings'?'Einstellungen gespeichert.':name==='planned'?'Ladeauftrag eingeplant. Start und Ende stehen unten.':name==='mode'&&data.mode==='off'?'Stopp angefordert. Bestätigung im Gerätestatus abwarten.':'Änderung übernommen.');if(name==='settings')settingsDirty=false;await refresh();return true;}catch(e){notify(e.message,'error');return false;}finally{showBusy(false,'',pendingButton);pendingButton=null;busy=false;buttons.forEach(b=>b.disabled=false);document.body.classList.remove('working');$('dashboard').setAttribute('aria-busy','false');}}
 
 function fillSettings(s,secrets){const box=$('fields');box.replaceChildren();const sections={};const group=k=>['host','port','unit_id','expected_serial','username','password','wifi_enabled'].includes(k)?'Wechselrichter & Verbindung':k.startsWith('tibber')?'Tibber-Zugang':['target_soc','charge_power_w','max_session_minutes','battery_capacity_kwh'].includes(k)?'Ladegrenzen':'Preise, Vergleich & Zeitzone';for(const [key,label] of Object.entries(labels)){const l=document.createElement('label');l.textContent=label;const i=document.createElement('input');i.name=key;types[key]=typeof s[key];i.type=typeof s[key]==='boolean'?'checkbox':typeof s[key]==='number'?'number':'text';if(i.type==='number')i.step='any';if(key==='password'||key==='tibber_token')i.type='password';i.autocomplete='off';if(i.type==='checkbox')i.checked=s[key];else i.value=s[key]??'';if(key==='password'||key==='tibber_token')i.placeholder=secrets[key]?'Gespeichert – leer lassen zum Behalten':'Noch nicht gespeichert';l.append(i);if(key==='password'||key==='tibber_token'){const b=document.createElement('button');b.type='button';b.textContent='Anzeigen / verbergen';b.onclick=()=>i.type=i.type==='password'?'text':'password';l.append(b);}const g=group(key);if(!sections[g]){const section=document.createElement('section');section.className='card';const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='fields';section.append(h,grid);box.append(section);sections[g]=grid;}sections[g].append(l);}}
 async function refresh(){if(document.hidden||refreshing)return;refreshing=true;try{const r=await fetch('/api/status'+(watch?'?fast=1':''));if(r.status===401){$('connection').textContent='Webinterface erreichbar · bitte anmelden';$('login').hidden=false;$('dashboard').hidden=true;$('logout').hidden=true;return;}if(!r.ok)throw new Error('Status nicht erreichbar');const d=await r.json();if(document.hidden)return;trackTransition(d);lastStatus=d;countdownAnchor=performance.now();renderBatteryCard(d);renderControl(d);$('connection').textContent='● Verbunden · aktualisiert '+new Date().toLocaleTimeString('de-DE');$('connection').classList.remove('offline');renderPrices(d);$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;if(!initialized){fillSettings(d.settings,d.secrets_set);initialized=true;}const p=d.planned;$('plannedstatus').textContent=p?`${p.phase==='waiting'?'Wartet':p.phase==='charging'?'Lädt':p.phase==='completed'?'Beendet':'Fehler'} · ${new Date(p.start).toLocaleString('de-DE',{timeZone:d.settings.timezone})} bis spätestens ${new Date(p.end).toLocaleString('de-DE',{timeZone:d.settings.timezone})} · Ziel ${p.target_soc} %`:'Kein einmaliger Auftrag.';const t=d.telemetry;const age=t.time?(Date.now()-Date.parse(t.time))/1000:null;$('soc').textContent=typeof t.soc==='number'?t.soc.toFixed(1)+' %':'—';$('battery').value=t.soc??0;$('power').textContent=typeof t.battery_power_w==='number'?(t.battery_power_w/1000).toFixed(2)+' kW':'—';$('sampletime').textContent=age===null?'Noch keine Messung':`Letzte Messung vor ${Math.max(0,Math.floor(age))} s${age>90?' · veraltet':''}`;$('price').textContent=ct(d.current_price);$('modebadge').textContent=modes[d.mode];$('activity').classList.toggle('spinning',!!d.job);$('activity').textContent=d.fault?'Steuerung meldet einen Fehler – Details unten.':d.job==='sample'?'Messwerte werden aktualisiert …':d.job==='probe'?'Gerät wird ausgelesen …':d.job==='stop'?'Stopp wird an den Wechselrichter gesendet …':d.job==='charge-test'?'Beaufsichtigter Ladetest läuft …':d.job?(t.eligible?'Ladeauftrag aktiv · '+(t.reason||'Ladung freigegeben'):'Steuerung aktiv · '+(t.reason||'Warte auf Messwerte')):d.mode==='planned'?'Geplant: wartet auf Startzeit.':d.mode==='off'?'Aus: keine automatische oder geplante Ladung durch diese App.':'Wartet auf das nächste Zeitfenster.';if(!busy){for(const [id,job] of [['probe','probe'],['test','charge-test']])$(id).classList.toggle('button-loading',d.job===job);}$('fault').hidden=!d.fault;$('fault').textContent=d.fault;$('missing').hidden=!d.missing.length;$('missing').textContent='Noch einzurichten: '+d.missing.join(', ');const e=d.economics;$('saving').textContent=typeof e.saving_ct_kwh==='number'?ct(e.saving_ct_kwh)+' Vorteil':'—';$('planreason').textContent=d.price_error||e.reason;$('effective').textContent=ct(e.effective_ct_kwh);$('reference').textContent=ct(e.reference_ct_kwh);$('window').textContent=e.window_start?new Date(e.window_start).toLocaleString('de-DE',{timeZone:d.settings.timezone})+' – '+new Date(e.window_end).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'}):'—';$('device').textContent=d.device.serial?`${d.device.model||'Huawei'} · Seriennummer ${d.device.serial}`:'Gerät noch nicht ausgelesen';$('wifi').textContent=d.wifi.interface?`WLAN-Profil: ${d.wifi.interface} · ${d.wifi.ssid} · ${d.wifi.host} (Systemdienst)`:'WLAN-Connector noch nicht eingerichtet';$('commissioned').hidden=d.job==='charge-test';$('commissioned').textContent=d.commissioned?'Ladetest bestätigt.':'Ladetest noch nicht bestätigt.';$('events').textContent=d.events.map(x=>JSON.stringify(x)).join('\n');}catch(e){$('connection').textContent='Verbindung unterbrochen · angezeigte Werte können veraltet sein';$('connection').classList.add('offline');}finally{refreshing=false;scheduleRefresh();}}
@@ -30,6 +30,15 @@ $('confirmmode').onclick=async e=>{
 };
 $('cancelmode').onclick=()=>{modeDirty=false;chosenMode=lastStatus?.mode||'off';renderControl(lastStatus);};
 
+$('dischargemode').onchange=()=>{$('dischargeuntilwrap').hidden=$('dischargemode').value!=='hold';};
+$('dischargeform').onsubmit=e=>{e.preventDefault();perform('discharge',{mode:$('dischargemode').value,until:$('dischargeuntil').value},e.submitter);};
+function renderDischarge(d){
+ const x=d.discharge;if(!x)return;
+ const requested=x.request.until&&Date.parse(x.request.until)>Date.now();
+ const stamp=x.status.time, fresh=stamp&&Date.now()-Date.parse(stamp)<90000;
+ const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+ $('dischargestatus').textContent=requested?(fresh&&x.status.locked?'🔒 Entladesperre bestätigt':'⌛ Entladesperre angefordert / Bestätigung ausstehend')+' · bis '+fmt(x.request.until):x.restore_pending?'⌛ Entladung freigeben · Wiederherstellung ausstehend':'✓ Aktiv · keine Entladesperre durch diese App';
+}
 $('probe').onclick=e=>perform('probe',{},e.currentTarget);
 $('adopt').onclick=async e=>{await perform('adopt-serial',{},e.currentTarget);initialized=false;await refresh();};
 $('test').onclick=e=>{if(confirm('Beaufsichtigten Test starten? Maximal 1 kW für zwei Minuten. Netzbezug vor Ort prüfen.'))perform('test',{},e.currentTarget);};
@@ -67,8 +76,16 @@ function renderControl(d){
  $('smarttiming').textContent=preview.reason;
  const number=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
  $('smarttarget').textContent=`SOC ${number(preview.soc)} → ${preview.target_soc} % · Kapazität ${number(preview.capacity_kwh)} kWh · Bedarf ${number(preview.needed_kwh)} kWh · Ladeleistung bis ${preview.power_w} W · reine Ladedauer ca. ${number(preview.duration_minutes)} Minuten.`;
- $('smartslots').replaceChildren();
- for(const slot of preview.windows){const row=document.createElement('li');row.textContent=`${fmt(slot.start)} – ${fmt(slot.end)} · ${ct(slot.ct)}`;$('smartslots').append(row);}
+ if(preview.soc===null&&$('smartslots').children.length){
+  $('smarttiming').textContent='Messung wird aktualisiert · bisheriger Plan, derzeit nicht bestätigt';
+ }else{
+  const texts=preview.windows.map(slot=>`${fmt(slot.start)} – ${fmt(slot.end)} · ${ct(slot.ct)}`);
+  const signature=JSON.stringify(texts);
+  if($('smartslots').dataset.signature!==signature){
+   $('smartslots').replaceChildren(...texts.map(text=>{const row=document.createElement('li');row.textContent=text;return row;}));
+   $('smartslots').dataset.signature=signature;
+  }
+ }
 
  const info=chosenMode==='off'?'Die erzwungene Ladung und aktive Zeitplanung dieser App werden beendet.':chosenMode==='smart'?`Ziel ${c.target_soc} % · Leistung bis ${c.charge_power_w} W · Kaufgrenze ${ct(c.max_buy_ct_kwh)} · Mindestvorteil ${ct(c.min_saving_ct_kwh)}.`:chosenMode==='on'?`Ziel ${c.target_soc} % · Leistung bis ${c.charge_power_w} W · maximale Sitzung ${c.max_session_minutes} Minuten. Kein Preisvergleich.`:`Leistung bis ${c.charge_power_w} W · maximale Sitzung ${c.max_session_minutes} Minuten. Start und Ende wie oben eingegeben.`;
  $('modepreview').textContent=info+' Ohne Bestätigung bleibt der aktive Modus unverändert.';
@@ -108,6 +125,7 @@ function phaseInfo(d,now=Date.now()){
  return [loading?'ϟ Lade …':'⌛ Warte auf Ladebestätigung',d.remaining_seconds!==null?`■ Geplanter Stopp um ${fmt(now+d.remaining_seconds*1000)}`:'Status wird aktualisiert'];
 }
 function renderBatteryCard(d){
+ renderDischarge(d);
  const t=d.telemetry,age=t.time?(Date.now()-Date.parse(t.time))/1000:Infinity;
  const fresh=age>=0&&age<=90;
  const charging=fresh&&t.battery_power_w>100,discharging=fresh&&t.battery_power_w < -100;
@@ -128,7 +146,7 @@ setInterval(()=>{if(!document.hidden)drawCountdown();},1000);
 
 let refreshTimer=null,watch=null;
 function watchChange(name,data){
- const kind=name==='test'||data.mode==='on'?'charge':data.mode==='off'?'stop':'state';
+ const kind=name==='discharge'?'discharge':name==='test'||data.mode==='on'?'charge':data.mode==='off'?'stop':'state';
  watch={kind,since:Date.now(),baseline:lastStatus?.telemetry?.time,expected:name==='planned'?'planned':data.mode};
 }
 function trackTransition(d){
@@ -136,6 +154,12 @@ function trackTransition(d){
   watch={kind:d.telemetry.eligible?'charge':d.mode==='off'?'stop':'state',since:Date.now(),baseline:lastStatus.telemetry?.time,expected:d.mode};
  }
  if(!watch)return;
+ if(watch.kind==='discharge'){
+  const x=d.discharge,stamp=x?.status?.time;
+  if(x&&((watch.expected==='active'&&!x.restore_pending&&!x.request.until)||(stamp&&Date.parse(stamp)>=watch.since&&x.status.locked===(watch.expected==='hold')))||d.fault)watch=null;
+  else if(Date.now()-watch.since>180000){watch=null;notify('Entladeänderung noch nicht bestätigt. Verbindung und Status prüfen.','info');}
+  return;
+ }
  const t=d.telemetry,fresh=t.time&&Date.parse(t.time)>=watch.since&&t.time!==watch.baseline;
  const measured=fresh&&(watch.kind==='charge'?t.battery_power_w>100:watch.kind==='stop'?t.battery_power_w<=100:d.mode===watch.expected);
  if(measured||d.fault){watch=null;return;}
@@ -144,7 +168,7 @@ function trackTransition(d){
 function scheduleRefresh(){
  clearTimeout(refreshTimer);
  if(document.hidden)return;
- const pending=watch||['sample','probe','charge-test','stop'].includes(lastStatus?.job);
+ const pending=watch||['sample','probe','charge-test','stop','discharge-sync'].includes(lastStatus?.job);
  let delay=pending?10000:60000;
  // Refresh at a known phase boundary; the server remains authoritative.
  if(lastStatus){

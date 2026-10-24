@@ -204,7 +204,7 @@ class Huawei:
         await asyncio.wait_for(self.device.login(self.c["username"], self.c["password"]), 30)
     async def write(self, name, value):
         from huawei_solar import register_names as rn
-        allowed = {rn.STORAGE_FORCIBLE_CHARGE_POWER,
+        allowed = {rn.STORAGE_MAXIMUM_DISCHARGING_POWER, rn.STORAGE_FORCIBLE_CHARGE_POWER,
                    rn.STORAGE_FORCED_CHARGING_AND_DISCHARGING_PERIOD,
                    rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_SETTING_MODE,
                    rn.STORAGE_FORCIBLE_CHARGE_DISCHARGE_WRITE}
@@ -249,7 +249,7 @@ async def operate(args, c, folder):
     status_path = folder / "status.json"
     own_charge = False
     live = args.execute and (args.command != "run" or c["mode"] == "auto")
-    if args.command in ("charge-test", "stop") and not args.execute:
+    if args.command in ("charge-test", "stop", "discharge-sync") and not args.execute:
         raise ValueError("Für diesen ausdrücklich gewünschten Schreibtest --execute ergänzen")
     if args.command in ("run", "charge") and c["mode"] == "auto" and not args.execute:
         raise ValueError("Automatik zusätzlich mit --execute starten")
@@ -259,6 +259,12 @@ async def operate(args, c, folder):
         loop.add_signal_handler(sig, stop_event.set)
     try:
         await hw.connect()
+        if args.command == "discharge-sync":
+            from discharge import sync
+            await hw.login()
+            await asyncio.wait_for(sync(hw,folder),60)
+            emit("discharge_synced")
+            return
         if args.command == "stop":
             await hw.login()
             await hw.stop_charge()
@@ -328,6 +334,9 @@ async def operate(args, c, folder):
                     emit("price_error", error_type=type(exc).__name__)
             if c.get("wifi_enabled"):
                 await asyncio.to_thread(check_app, c["host"])
+            if live:
+                from discharge import sync
+                await asyncio.wait_for(sync(hw,folder),60)
             snapshot = await hw.snapshot()
             now = datetime.now(timezone.utc)
             eligible, reason, slot = decide(c, snapshot, prices, now)
@@ -382,7 +391,7 @@ async def operate(args, c, folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
-    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample"])
+    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample", "discharge-sync"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     parser.add_argument("--target-soc", type=float, help="Temporärer Ziel-SOC nur für charge")
     args = parser.parse_args()

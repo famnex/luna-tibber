@@ -429,7 +429,7 @@ Fenster wird nicht nachgeholt. SOC wird per Abfrage geprüft, daher ist ein klei
 Überschwinger möglich; kein exakt auf die Sekunde garantierter Stopp.
 
 ### Grenzen und Eingriffe
-Die Software schreibt ausschließlich die vier Register für erzwungene Ladeleistung,
+Die Ladesteuerung schreibt die vier Register für erzwungene Ladeleistung,
 Ladedauer, Zielmodus TIME und CHARGE/STOP. Diese Positivliste wird vor jedem Schreiben
 geprüft. Das ist ein Eingriff in die Wechselrichtersteuerung; es wird keine
 vollständige Wiederherstellung vorheriger Registerwerte versprochen. Netzschutz,
@@ -510,4 +510,14 @@ zu behaupten. Es entstehen keine zusätzlichen sekündlichen Geräte-/Netzabfrag
 
 Die Statuskarte zeigt geplanten Start, Ladebestätigung, Ladephase, Pause und Stopp mit Symbolen. Smart bleibt zwischen Ladefenstern aktiv. An und Geplant wechseln nach Zeitablauf bzw. nach Erreichen des Ziel-SOC automatisch auf Aus; der Server übernimmt dies auch bei geschlossenem Browser. Am bekannten Phasenwechsel fragt die sichtbare Oberfläche den Status zusätzlich ab. Angezeigte Smart-Stoppzeiten berücksichtigen den 130-Sekunden-Sicherheitsabstand des Controllers; Pläne werden anhand aktueller Messwerte neu berechnet.
 
-Webserver und Controller teilen einen lokalen Tibber-Cache (`tibber-prices.json`, Dateirechte 0600). Er übersteht Neustarts und vermeidet doppelte Preisabrufe innerhalb von fünf Minuten. Bei Abruffehlern werden höchstens 24 Stunden alte, noch zeitlich gültige Preisintervalle weiterverwendet. Die bestehende Prüfung auf vollständige Nacht-/Verbrauchsfenster bleibt aktiv. Der Cache ist an Token und Zuhause-ID gebunden, enthält aber keine Zugangsdaten. Änderungen dieser Zugangsdaten verhindern die Wiederverwendung des alten Caches. Die Oberfläche meldet die Verwendung gespeicherter Preise bei Abruffehlern.
+Webserver und Controller teilen einen lokalen Tibber-Cache (`tibber-prices.json`, Dateirechte 0600). Er übersteht Neustarts und vermeidet doppelte Preisabrufe innerhalb von fünf Minuten. Bei Abruffehlern werden höchstens 48 Stunden alte, noch zeitlich gültige Preisintervalle weiterverwendet. Die bestehende Prüfung auf vollständige Nacht-/Verbrauchsfenster bleibt aktiv. Der Cache ist an Token und Zuhause-ID gebunden, enthält aber keine Zugangsdaten. Änderungen dieser Zugangsdaten verhindern die Wiederverwendung des alten Caches. Die Oberfläche meldet die Verwendung gespeicherter Preise bei Abruffehlern.
+
+### Zeitlich begrenzte Entladesperre
+
+Unter Entladung gibt es unabhängig vom Ladeauftrag „Aktiv“ und „Entladesperre“ mit Enduhrzeit und Bestätigung. Eine frühere Uhrzeit gilt für morgen (Zeitzone aus den Einstellungen). Der erste Zugriff sichert den aktuellen Wert von `STORAGE_MAXIMUM_DISCHARGING_POWER` (47077) dauerhaft, setzt ihn auf 0 W und liest ihn zur Bestätigung zurück. Dieses zusätzliche Register wird nur für die Entladesperre verwendet. Nach Ablauf bzw. nach Auswahl von Aktiv wird der Originalwert wiederhergestellt; unbekannte Fremdänderungen werden nicht überschrieben. Die Sperre gilt für die gesamte Batterieentladung, nicht nur für das Auto.
+
+Die Wiederherstellung benötigt den laufenden Server und eine Verbindung zum Wechselrichter. Bei Ausfall kann 0 W über die Endzeit hinaus bestehen bleiben. Das Wiederherstellungsjournal übersteht Neustarts und wird erst nach erfolgreichem Rücklesen gelöscht. Nicht manuell löschen. Der Dienst versucht bei ausstehender Sperre/Wiederherstellung alle 30 Sekunden erneut; während Smart/An übernimmt derselbe Controller den Abgleich. Keine parallelen Huawei-Schreibclients. Die Funktion ist softwaregetestet, aber noch nicht an dieser Enpal-Anlage verifiziert. Erste Sperre und Freigabe beaufsichtigen.
+
+### Stabile Preisanzeige
+
+Vollständig vorhandene Preise für die nächsten zwölf Stunden werden ohne erneuten API-Abruf verwendet. Ab 13 Uhr lokaler Zeit wird zusätzlich nach dem vollständigen Folgetag gesucht; die Veröffentlichung muss nicht genau um 13 Uhr erfolgt sein. Fehlende Daten werden frühestens alle fünf Minuten nachgefragt. Bereits bekannte Intervalle bleiben erhalten, auch während eines Abrufs und beim Wechsel des Lademodus. Erst geänderte Tibber-Zugangsdaten leeren den aktuellen Preisbestand. Unveränderte Smart-Slotlisten werden nicht neu aufgebaut; ein bisheriger Plan bei fehlender aktueller SOC-Messung wird ausdrücklich als unbestätigt gekennzeichnet. Die Steuerung selbst verlangt weiterhin aktuelle Messwerte.

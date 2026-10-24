@@ -152,6 +152,7 @@ class Dashboard:
         self.price_fetched_at = 0
         self.price_error = ''
         self.sample_at = -60
+        self.discharge_at = -30
         self.closed = threading.Event()
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
@@ -171,7 +172,7 @@ class Dashboard:
         self.generation += 1
         gen = self.generation
         cmd = [sys.executable,str(BASE/'luna.py'),'--config',str(self.config_path),job]
-        if job in ('run','charge','charge-test','stop'):
+        if job in ('run','charge','charge-test','stop','discharge-sync'):
             cmd.append('--execute')
         if target_soc is not None:
             cmd.extend(['--target-soc',str(target_soc)])
@@ -235,6 +236,9 @@ class Dashboard:
         self.proc = None
         self.job = None
     def save_settings(self, patch):
+        old_prices=self.config()
+        if patch and (self.folder/'discharge-restore.json').exists():
+            raise ValueError('Vor Einstellungsänderungen Entladung aktivieren und Wiederherstellung abwarten')
         if self.proc or self.mode != 'off':
             raise ValueError('Vor dem Speichern auf Aus schalten und Vorgang beenden')
         allowed = set(luna.DEFAULT)-{'mode'}
@@ -259,12 +263,30 @@ class Dashboard:
             luna.write_json(self.config_path,c)
             if c['expected_serial'] != old_serial:
                 (self.folder/'commissioned.json').unlink(missing_ok=True)
-        self.price_at = 0
-        self.price_fetched_at = 0
-        self.price_data = []
+        if any(c[k]!=old_prices[k] for k in ('tibber_token','tibber_home_id')):
+            self.price_at = 0
+            self.price_fetched_at = 0
+            self.price_data = []
     def action(self, name, data):
         with self.lock:
-            if name == 'settings':
+            if name == 'discharge':
+                c=self.config()
+                self.preflight(c)
+                until=None
+                if data.get('mode')=='hold':
+                    zone=ZoneInfo(c['timezone'])
+                    now=datetime.now(timezone.utc)
+                    local=now.astimezone(zone)
+                    clock=datetime.strptime(data['until'],'%H:%M').time()
+                    end=datetime.combine(local.date(),clock).replace(tzinfo=zone)
+                    if end<=local:end+=timedelta(days=1)
+                    if end.replace(fold=0).utcoffset()!=end.replace(fold=1).utcoffset():
+                        raise ValueError('Endzeit liegt in einer Zeitumstellung')
+                    until=end.astimezone(timezone.utc).isoformat()
+                elif data.get('mode')!='active':raise ValueError('Ungültiger Entlademodus')
+                luna.write_json(self.folder/'discharge-request.json',{'serial':c['expected_serial'],'until':until})
+                self.discharge_at=-30
+            elif name == 'settings':
                 self.save_settings(data)
             elif name == 'schedules':
                 rows = validate_schedules(data['rows'])
@@ -334,6 +356,16 @@ class Dashboard:
         while not self.closed.wait(1):
             with self.lock:
                 try:
+                    request=read(self.folder/'discharge-request.json',{})
+                    needs_restore=(self.folder/'discharge-restore.json').exists()
+                    hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
+                    if (hold or needs_restore) and not self.proc and time.monotonic()-self.discharge_at>=30:
+                        self.discharge_at=time.monotonic()
+                        self.preflight(self.config())
+                        self.launch('discharge-sync')
+                        continue
+                    if self.job == 'discharge-sync':
+                        continue
                     if self.mode == 'off':
                         continue
                     if self.expire_order():
@@ -417,12 +449,12 @@ class Dashboard:
             c = self.config()
             settings = {k:v for k,v in c.items() if k not in SECRETS and k != 'mode'}
             missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
-            prices = self.price_data if time.monotonic()-self.price_at < 600 else []
+            prices = self.price_data
             now = datetime.now(timezone.utc)
             plan = luna.economics_plan(c,prices,now)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
+            return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'smart_preview':smart_preview(c,prices,now,self.telemetry),
