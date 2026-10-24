@@ -22,3 +22,5 @@ body{padding-bottom:calc(96px + env(safe-area-inset-bottom));overscroll-behavior
 .legend .legend-pv:before{background:#a56808;width:22px;height:3px;vertical-align:middle;border-radius:0}.chart text.pv-axis{fill:#8d5906}.legend [hidden]{display:none}
 
 #pvsummary{white-space:pre-line}
+
+.postcode-field{grid-column:1/-1}.postcode-results{display:flex;gap:8px;flex-wrap:wrap;margin-top:10px}.postcode-results button{text-align:left;white-space:normal}

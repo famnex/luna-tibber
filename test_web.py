@@ -191,6 +191,21 @@ class HTTPTests(unittest.TestCase):
         self.assertEqual(set(json.loads(r.read())),{'ok','pid','revision'})
         self.server.app.request_sample.assert_not_called();conn.close()
 
+    def test_postcode_lookup_requires_login_and_does_not_touch_controller(self):
+        import http.client
+        conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        headers={'Content-Type':'application/json','X-Luna':'1'}
+        with patch('geocoding.lookup',return_value=[{'name':'Berlin','latitude':52.5,'longitude':13.4,'postcode':'10115'}]) as lookup:
+            conn.request('POST','/api/pv-location',body='{"postcode":"10115"}',headers=headers)
+            r=conn.getresponse();self.assertEqual(r.status,401);r.read();lookup.assert_not_called()
+            conn.request('POST','/api/login',body='{"password":"test-password"}',headers=headers)
+            r=conn.getresponse();self.assertEqual(r.status,200);headers['Cookie']=r.getheader('Set-Cookie').split(';')[0];r.read()
+            conn.request('POST','/api/pv-location',body='{"postcode":"10115"}',headers=headers)
+            r=conn.getresponse();self.assertEqual(r.status,200);self.assertEqual(json.loads(r.read())['results'][0]['name'],'Berlin')
+            lookup.assert_called_once_with('10115')
+            self.server.app.action.assert_not_called();self.server.app.request_sample.assert_not_called()
+        conn.close()
+
     def test_unknown_host_rejected(self):
         import http.client
         conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)

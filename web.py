@@ -665,6 +665,9 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path == '/api/pv-location':
+                from geocoding import lookup
+                return self.send(200,{'results':lookup(data.get('postcode'))})
             self.server.app.action(self.path[5:],data)
             self.send(200,{'ok':True})
         except (ValueError,KeyError) as exc:

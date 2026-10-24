@@ -660,3 +660,20 @@ Die Linie ist stufig, um keine feinere Zeitauflösung vorzutäuschen; Datenlück
 nicht verbunden oder als Null ausgegeben. Beim Fokus/Antippen eines Preisbalkens steht
 zusätzlich die PV-Leistung des zugehörigen Intervalls. Die Linie ist bei aktivierter
 PV-Prognose auch im Modus Aus sichtbar; sie nutzt ausschließlich denselben Wettercache.
+
+
+### Standort über PLZ (auch ohne Browser-HTTPS)
+
+Unter **Einstellungen → PV-Prognose** steht **Postleitzahl (Deutschland)**.
+Fünfstellige PLZ eingeben → **PLZ suchen** → passenden Ort auswählen →
+**Einstellungen speichern**. Führende Nullen bleiben erhalten. Kein Adressfeld nötig.
+Die Suche allein ändert weder Konfiguration noch Steuerung; nach Auswahl werden
+nur die Koordinaten als Formularentwurf übernommen. Gespeichert werden die Koordinaten,
+nicht die PLZ-Suchanfrage. Der Ortspunkt ist eine Näherung für die Wetterprognose.
+
+Nur beim Suchklick fragt der Server [Zippopotam.us](https://docs.zippopotam.us/docs/getting-started/)
+mit der PLZ und Ländercode DE ab (Ortsdaten: GeoNames). Die Browserverbindung zur App
+kann dafür lokales HTTP sein. Keine Standortfreigabe und kein API-Schlüssel nötig.
+Antworten werden im Serverprozess zwischengespeichert. Ergebnisse werden zusätzlich
+auf das Land und die exakte PLZ geprüft. Suchfehler oder mehrere Treffer übernehmen
+keine Koordinaten automatisch; die normalen Speicherabfragen werden nicht beeinflusst.

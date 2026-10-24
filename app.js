@@ -54,7 +54,7 @@ const settingHelp={
 let locating=false;
 function useDeviceLocation(button){
  if(locating)return;
- if(!window.isSecureContext){notify('Gerätestandort benötigt eine vertrauenswürdige HTTPS-Verbindung. Über die lokale HTTP-Adresse bitte Koordinaten manuell eintragen.','error');return;}
+ if(!window.isSecureContext){notify('Gerätestandort benötigt eine vertrauenswürdige HTTPS-Verbindung. Über die lokale HTTP-Adresse bitte die PLZ-Suche verwenden oder Koordinaten manuell eintragen.','error');return;}
  if(!navigator.geolocation){notify('Dieser Browser stellt keinen Gerätestandort bereit. Koordinaten bitte manuell eintragen.','error');return;}
  const lat=$('setting-pv_latitude'),lon=$('setting-pv_longitude');
  const before=[lat.value,lon.value];locating=true;button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
@@ -70,6 +70,40 @@ function useDeviceLocation(button){
   lat.value=latitude.toFixed(4);lon.value=longitude.toFixed(4);settingsDirty=true;
   notify('Gerätestandort übernommen'+(Number.isFinite(accuracy)?' · Genauigkeit ca. '+Math.round(accuracy)+' m':'')+'. Nur am Anlagenstandort verwenden. Bitte Einstellungen speichern.','info');
  },failed,{enableHighAccuracy:true,timeout:15000,maximumAge:60000});}catch(error){failed(error);}
+}
+function postcodeField(){
+ const field=document.createElement('div');field.className='setting-field postcode-field';
+ const label=document.createElement('label');label.textContent='Postleitzahl (Deutschland)';label.htmlFor='pv-postcode';
+ const input=document.createElement('input');input.id='pv-postcode';input.type='text';input.inputMode='numeric';input.maxLength=5;input.autocomplete='postal-code';input.placeholder='z. B. 10115';
+ const search=document.createElement('button');search.type='button';search.textContent='PLZ suchen';
+ const info=document.createElement('p');info.className='muted';info.setAttribute('role','status');info.textContent='Suche über Zippopotam.us/GeoNames. Nur die PLZ wird übertragen; keine Adresse erforderlich.';
+ const results=document.createElement('div');results.className='postcode-results';
+ field.append(label,input,search,info,results);
+ let loading=false;
+ input.oninput=()=>{results.replaceChildren();info.textContent='PLZ suchen und passenden Ort auswählen.';};
+ search.onclick=async()=>{
+  if(loading)return;
+  const postcode=input.value.trim();results.replaceChildren();
+  if(!/^[0-9]{5}$/.test(postcode)){info.textContent='Bitte eine fünfstellige deutsche PLZ eingeben.';return;}
+  loading=true;search.disabled=true;search.classList.add('button-loading');search.setAttribute('aria-busy','true');info.textContent='Orte zur PLZ werden gesucht …';
+  try{
+   const data=await api('pv-location',{postcode});
+   if(input.value.trim()!==postcode||field.isConnected===false)return;
+   if(!data.results?.length){info.textContent='Kein Ort für diese PLZ gefunden. Bitte PLZ prüfen oder Koordinaten manuell eintragen.';return;}
+   info.textContent='Passenden Ort auswählen. Die Koordinaten werden erst mit „Einstellungen speichern“ dauerhaft übernommen.';
+   for(const place of data.results){
+    const choose=document.createElement('button');choose.type='button';choose.textContent=postcode+' '+place.name;
+    choose.onclick=()=>{
+     if(input.value.trim()!==postcode)return;
+     $('setting-pv_latitude').value=Number(place.latitude).toFixed(4);$('setting-pv_longitude').value=Number(place.longitude).toFixed(4);settingsDirty=true;
+     info.textContent='✓ '+postcode+' '+place.name+' übernommen · bitte Einstellungen speichern.';results.replaceChildren();notify('Standort übernommen · Einstellungen speichern.','info');
+    };results.append(choose);
+   }
+  }catch(error){if(input.value.trim()===postcode)info.textContent=error.message;}
+  finally{loading=false;search.disabled=false;search.classList.remove('button-loading');search.setAttribute('aria-busy','false');}
+ };
+ input.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();search.onclick();}};
+ return field;
 }
 function fillSettings(s,secrets){
  settingsBaseline={...s};const box=$('fields');box.replaceChildren();const sections={};
@@ -89,7 +123,7 @@ function fillSettings(s,secrets){
   field.append(i,description);
   if(key==='pv_latitude'){const b=document.createElement('button');b.type='button';b.textContent='⌖ Gerätestandort übernehmen';b.onclick=()=>useDeviceLocation(b);field.append(b);}
   if(key==='password'||key==='tibber_token'){const b=document.createElement('button');b.type='button';b.textContent='Anzeigen / verbergen';b.onclick=()=>i.type=i.type==='password'?'text':'password';field.append(b);}
-  const g=group(key);if(!sections[g]){const section=document.createElement('section');section.className='card';const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='fields';section.append(h,grid);box.append(section);sections[g]=grid;}
+  const g=group(key);if(!sections[g]){const section=document.createElement('section');section.className='card';const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='fields';if(g==='PV-Prognose')grid.append(postcodeField());section.append(h,grid);box.append(section);sections[g]=grid;}
   sections[g].append(field);
  }
 }
@@ -123,11 +157,11 @@ function renderDischarge(d){
 $('probe').onclick=e=>perform('probe',{},e.currentTarget);
 $('adopt').onclick=async e=>{await perform('adopt-serial',{},e.currentTarget);initialized=false;await refresh();};
 $('test').onclick=e=>{if(confirm('Beaufsichtigten Test starten? Maximal 1 kW für zwei Minuten. Netzbezug vor Ort prüfen.'))perform('test',{},e.currentTarget);};
-$('settingsform').onsubmit=async e=>{e.preventDefault();const data={};for(const i of $('fields').querySelectorAll('input')){const value=i.type==='checkbox'?i.checked:types[i.name]==='number'?Number(i.value):i.value;if((i.name==='password'||i.name==='tibber_token')&&value==='')continue;if(value!==settingsBaseline[i.name])data[i.name]=value;}await perform('settings',data,e.submitter);};
+$('settingsform').onsubmit=async e=>{e.preventDefault();const data={};for(const i of $('fields').querySelectorAll('input[name]')){const value=i.type==='checkbox'?i.checked:types[i.name]==='number'?Number(i.value):i.value;if((i.name==='password'||i.name==='tibber_token')&&value==='')continue;if(value!==settingsBaseline[i.name])data[i.name]=value;}await perform('settings',data,e.submitter);};
 $('plannedkind').onchange=()=>{$('endtimelabel').hidden=$('plannedkind').value!=='time';$('endsoclabel').hidden=$('plannedkind').value!=='soc';$('plannedend').required=$('plannedkind').value==='time';};
 $('plannedform').onsubmit=e=>{e.preventDefault();};
 
-$('settingsform').addEventListener('input',()=>{settingsDirty=true;notify('Ungespeicherte Einstellungen · Speichern ist auch während Smart oder einer Entladesperre möglich.','info');});
+$('settingsform').addEventListener('input',e=>{if(e.target.id==='pv-postcode')return;settingsDirty=true;notify('Ungespeicherte Einstellungen · Speichern ist auch während Smart oder einer Entladesperre möglich.','info');});
 window.addEventListener('beforeunload',e=>{if(settingsDirty){e.preventDefault();e.returnValue='';}});
 function renderPrices(d){
  const comp=$('compareday').value==='auto'?d.comparison:d.comparisons[$('compareday').value];const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});

@@ -11,6 +11,8 @@ vm.createContext(ctx);const s=fs.readFileSync(__dirname+'/app.js','utf8');
 vm.runInContext(s.slice(s.indexOf('const labels='),s.indexOf('const types='))+s.slice(s.indexOf('const settingHelp='),s.indexOf('async function refresh()')),ctx);
 vm.runInContext("fillSettings(Object.fromEntries(Object.keys(labels).map(k=>[k,k==='smart_discharge_enabled'?true:0])),{password:true,tibber_token:true})",ctx);
 const all=[];function visit(node){all.push(node);for(const child of node.children)visit(child);}visit(fields);
+assert.ok(all.some(n=>n.id==='pv-postcode'));
+assert.equal(all.find(n=>n.id==='pv-postcode').name,undefined);
 const helps=all.filter(n=>n.className==='help-button');assert.equal(helps.length,37);
 for(const help of helps){
  const desc=all.find(n=>n.id===help.attrs['aria-controls']);assert.ok(desc.textContent&&desc.textContent.length>40);
