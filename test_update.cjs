@@ -1,9 +1,9 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const callbacks=[],timers=new Map(),nodes={};let timer=0,reloads=0,requests=[];
-for(const id of ['updateapp','updateversion','updatestatus']){
- const classes=new Set();nodes[id]={textContent:'',disabled:false,classList:{toggle:(name,on)=>on?classes.add(name):classes.delete(name),add:name=>classes.add(name),remove:name=>classes.delete(name),contains:name=>classes.has(name)}};
+for(const id of ['updateapp','updateversion','updatestatus','updateprogresswrap','updateprogress','updatestep','updatesteps']){
+ const classes=new Set();nodes[id]={textContent:'',disabled:false,children:[],removeAttribute(k){delete this[k];},replaceChildren(){this.children=[];},append(x){this.children.push(x);},classList:{toggle:(name,on)=>on?classes.add(name):classes.delete(name),add:name=>classes.add(name),remove:name=>classes.delete(name),contains:name=>classes.has(name)}};
 }
-const ctx={window:{addEventListener:()=>{},location:{reload:()=>reloads++}},document:{hidden:false,addEventListener:(event,fn)=>{if(event==='DOMContentLoaded')callbacks.push(fn);},getElementById:id=>nodes[id]},Date,
+const ctx={window:{addEventListener:()=>{},location:{reload:()=>reloads++}},document:{createElement:()=>({}),hidden:false,addEventListener:(event,fn)=>{if(event==='DOMContentLoaded')callbacks.push(fn);},getElementById:id=>nodes[id]},Date,AbortController,
  setTimeout:(fn,ms)=>{timers.set(++timer,{fn,ms});return timer;},clearTimeout:id=>timers.delete(id),lastStatus:{mode:'off'},
  fetch:async url=>{requests.push(url);return {ok:true,status:200,json:async()=>({state:'current',message:'Aktuell'})};}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/features.js','utf8'),ctx);
@@ -16,7 +16,7 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/features.js','
  ctx.renderUpdate({state:'done'},{mode:'off',discharge:{restore_pending:true}});assert.equal(button.disabled,false);
  ctx.renderUpdate({state:'preparing',message:'Stoppen'},ctx.lastStatus);assert.equal(button.disabled,true);
  ctx.renderUpdate({state:'testing',message:'Prüfe'},ctx.lastStatus);
- assert.equal(button.disabled,true);assert.equal(button.classList.contains('button-loading'),true);
+ assert.equal(button.disabled,true);assert.equal(button.classList.contains('button-loading'),true);assert.equal(nodes.updateprogress.value,5);assert.match(nodes.updatestep.textContent,/Schritt 6 von 9/);
  assert.equal([...timers.values()][0].ms,2000);
  await ctx.pollUpdate();assert.deepEqual(requests,['/api/update']);assert.equal(timers.size,0);assert.equal(button.disabled,false);
  ctx.document.hidden=true;ctx.renderUpdate({state:'checking'},ctx.lastStatus);assert.equal(timers.size,0);

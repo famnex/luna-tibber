@@ -126,7 +126,7 @@ function fillSettings(s,secrets){
   field.append(i,description);
   if(key==='pv_latitude'){const b=document.createElement('button');b.type='button';b.textContent='⌖ Gerätestandort übernehmen';b.onclick=()=>useDeviceLocation(b);field.append(b);}
   if(key==='password'||key==='tibber_token'){const b=document.createElement('button');b.type='button';b.textContent='Anzeigen / verbergen';b.onclick=()=>i.type=i.type==='password'?'text':'password';field.append(b);}
-  const g=group(key);if(!sections[g]){const section=document.createElement('section');section.className='card';const h=document.createElement('h2');h.textContent=g;const grid=document.createElement('div');grid.className='fields';if(g==='PV-Prognose')grid.append(postcodeField());section.append(h,grid);box.append(section);sections[g]=grid;}
+  const g=group(key);if(!sections[g]){const section=document.createElement('details');section.className='card settings-group';const h=document.createElement('summary');h.textContent=g;const grid=document.createElement('div');grid.className='fields';if(g==='PV-Prognose')grid.append(postcodeField());section.append(h,grid);box.append(section);sections[g]=grid;}
   sections[g].append(field);
  }
 }
@@ -160,6 +160,7 @@ function renderDischarge(d){
 $('probe').onclick=e=>perform('probe',{},e.currentTarget);
 $('adopt').onclick=async e=>{await perform('adopt-serial',{},e.currentTarget);initialized=false;await refresh();};
 $('test').onclick=e=>{if(confirm('Beaufsichtigten Test starten? Maximal 1 kW für zwei Minuten. Netzbezug vor Ort prüfen.'))perform('test',{},e.currentTarget);};
+$('settingsform').addEventListener('invalid',e=>{const group=e.target.closest('details');if(group)group.open=true;},true);
 $('settingsform').onsubmit=async e=>{e.preventDefault();const data={};for(const i of $('fields').querySelectorAll('input[name]')){const value=i.type==='checkbox'?i.checked:types[i.name]==='number'?Number(i.value):i.value;if((i.name==='password'||i.name==='tibber_token')&&value==='')continue;if(value!==settingsBaseline[i.name])data[i.name]=value;}await perform('settings',data,e.submitter);};
 $('plannedkind').onchange=()=>{$('endtimelabel').hidden=$('plannedkind').value!=='time';$('endsoclabel').hidden=$('plannedkind').value!=='soc';$('plannedend').required=$('plannedkind').value==='time';};
 $('plannedform').onsubmit=e=>{e.preventDefault();};
@@ -362,3 +363,5 @@ function renderOverview(d){
  $('nexttime').textContent=next.time?new Date(next.time).toLocaleString('de-DE',{...fmt,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
  $('nextaction').textContent=next.label;$('nextreason').textContent=next.reason;
 }
+
+

@@ -40,7 +40,14 @@ def busy(folder):return read_status(folder).get('state') in ACTIVE
 
 
 def write_status(folder,state,message,**data):
-    data.update(state=state,message=message,at=time.time(),pid=os.getpid())
+    try:previous=json.loads((folder/'update-state.json').read_text())
+    except (OSError,ValueError):previous={}
+    now=time.time()
+    history=previous.get('steps',[]) if previous.get('token')==data.get('token') else []
+    if previous.get('state')!=state or previous.get('message')!=message:
+        history=[*history,{'state':state,'message':message,'at':now}][-16:]
+    data.update(state=state,message=message,at=now,pid=os.getpid(),steps=history)
+
     path=folder/'update-state.json';tmp=path.with_suffix('.tmp')
     fd=os.open(tmp,os.O_CREAT|os.O_TRUNC|os.O_WRONLY,0o600)
     with os.fdopen(fd,'w') as f:json.dump(data,f);f.flush();os.fsync(f.fileno())

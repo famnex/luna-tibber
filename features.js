@@ -133,9 +133,26 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 
 const updateStates=new Set(['preparing','queued','checking','dependencies','testing','installing','restarting','rollback']);
-let updateTimer=null,updateWatch=false,updateStarting=false;
+let updateTimer=null,updateWatch=false,updateStarting=false,updateDisconnectedAt=0;
+function renderUpdateProgress(u){
+ const wrap=document.getElementById('updateprogresswrap');if(!wrap)return;
+ const labels=['Steuerung stoppen','Ladestopp bestätigen','Entladung freigeben','Git prüfen','Abhängigkeiten prüfen','Tests ausführen','Version installieren','Dienst neu starten','Bereitschaft bestätigen'];
+ const steps={queued:4,checking:4,dependencies:5,testing:6,installing:7,restarting:8,done:9,current:9};
+ const n=u.state==='preparing'?(u.step||1):steps[u.state],active=updateStates.has(u.state);
+ wrap.hidden=!active&&!['done','current','failed'].includes(u.state);
+ const bar=document.getElementById('updateprogress');
+ if(u.state==='failed')bar.value=0;else if(n)bar.value=['done','current'].includes(u.state)?9:n-1;else bar.removeAttribute('value');
+ document.getElementById('updatestep').textContent=u.state==='current'?'Keine neuere Version vorhanden':u.state==='failed'?'Abgebrochen · Details unten':u.state==='rollback'?'Vorherige Version wird wiederhergestellt':n?`Schritt ${n} von 9 · ${labels[n-1]}${u.at?' · seit '+Math.max(0,Math.floor(Date.now()/1000-u.at))+' s':''}`:'Vorbereitung läuft …';
+ const list=document.getElementById('updatesteps');list.replaceChildren();
+ for(const item of u.steps||[]){const li=document.createElement('li');li.textContent=new Date(item.at*1000).toLocaleTimeString('de-DE')+' · '+item.message;list.append(li);}
+}
+async function updateStatusRequest(){
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
+ try{return await fetch('/api/update',{signal:controller.signal});}finally{clearTimeout(timer);}
+}
 function renderUpdate(u,d){
  if(!u)return;
+ renderUpdateProgress(u);
  const active=updateStates.has(u.state),button=document.getElementById('updateapp');
  document.getElementById('updateversion').textContent='Installierter Stand: '+(u.revision?u.revision.slice(0,8):'kein Git-Stand erkannt');
  document.getElementById('updatestatus').textContent=active?(u.message||'Update läuft …'):updateStarting?'Stopp und Update werden vorbereitet …':u.message||'Bereit für Updates';
@@ -147,18 +164,27 @@ function renderUpdate(u,d){
 function scheduleUpdatePoll(){clearTimeout(updateTimer);if(updateWatch&&!document.hidden)updateTimer=setTimeout(pollUpdate,2000);}
 async function pollUpdate(){
  if(document.hidden)return;
- try{const r=await fetch('/api/update');if(r.status===401){updateWatch=false;document.getElementById('updatestatus').textContent='Bitte nach dem Neustart erneut anmelden.';return;}if(!r.ok)throw Error();renderUpdate(await r.json(),lastStatus);}
- catch{document.getElementById('updatestatus').textContent='Verbindung unterbrochen · Neustart wird abgewartet …';}
- finally{scheduleUpdatePoll();}
+ try{
+  const r=await updateStatusRequest();
+  if(r.status===401){updateWatch=false;const b=document.getElementById('updateapp');b.disabled=false;b.classList.remove('button-loading');document.getElementById('updatestatus').textContent='Bitte nach dem Neustart erneut anmelden.';return;}
+  if(!r.ok)throw Error();const status=await r.json();updateDisconnectedAt=0;renderUpdate(status,lastStatus);
+ }catch{
+  if(!updateDisconnectedAt)updateDisconnectedAt=Date.now();
+  const seconds=Math.floor((Date.now()-updateDisconnectedAt)/1000);
+  document.getElementById('updatestatus').textContent=`Server nicht erreichbar · seit ${seconds} s. Neustart wird abgewartet …`;
+  if(seconds>=120){updateWatch=false;const b=document.getElementById('updateapp');b.disabled=false;b.classList.remove('button-loading');document.getElementById('updatestatus').textContent='Seit zwei Minuten keine Rückmeldung. Dienst und update.log per PuTTY prüfen; der Updateausgang ist unbekannt.';}
+ }finally{scheduleUpdatePoll();}
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('updateapp').onclick=async()=>{
   if(updateStarting||updateWatch)return;
   updateStarting=true;const b=document.getElementById('updateapp');b.disabled=true;b.classList.add('button-loading');
   document.getElementById('updatestatus').textContent='Update wird angefordert …';
-  try{await api('update',{});updateWatch=true;await pollUpdate();}
-  catch(e){document.getElementById('updatestatus').textContent=e.message;}
-  finally{updateStarting=false;if(!updateWatch){b.disabled=false;b.classList.remove('button-loading');}}
+  renderUpdateProgress({state:'preparing',step:1});
+  let timer;
+  try{await Promise.race([api('update',{}),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('Anforderung noch unbestätigt')),20000);})]);updateWatch=true;await pollUpdate();}
+  catch(e){document.getElementById('updatestatus').textContent=e.message;if(e.message==='Anforderung noch unbestätigt'){updateWatch=true;scheduleUpdatePoll();}else renderUpdateProgress({state:'failed'});}
+  finally{clearTimeout(timer);updateStarting=false;if(!updateWatch){b.disabled=false;b.classList.remove('button-loading');}}
  };
  document.addEventListener('visibilitychange',()=>{clearTimeout(updateTimer);if(!document.hidden&&updateWatch)pollUpdate();});
 });

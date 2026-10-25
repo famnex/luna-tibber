@@ -123,6 +123,23 @@ class DashboardTests(unittest.TestCase):
         self.assertEqual(self.app.mode,'off');self.assertFalse(self.app.update_preparing)
         self.assertIsNone(web.read(self.folder/'discharge-request.json',{})['until'])
 
+    def test_update_waits_without_blocking_output_collector(self):
+        import threading
+        self.app.save_settings({'expected_serial':'test','password':'test'})
+        self.app.mode='smart';self.app.update_preparing=True
+        proc=Mock();proc.poll.return_value=None;self.app.proc=proc;self.app.job='run'
+        def wait(**kwargs):
+            drained=threading.Event()
+            def collect():
+                with self.app.lock:drained.set()
+            thread=threading.Thread(target=collect);thread.start()
+            self.assertTrue(drained.wait(1),'stdout collector was blocked by update lock')
+            thread.join();proc.poll.return_value=0
+        proc.wait.side_effect=wait
+        with patch('web.subprocess.run',return_value=Mock(returncode=0,stdout='')),patch('web.updater.start') as start:
+            self.app.prepare_update();start.assert_called_once()
+        proc.terminate.assert_called_once()
+
     def test_update_stop_failure_never_installs(self):
         self.app.save_settings({'expected_serial':'test','password':'test'})
         self.app.mode='smart';self.app.update_preparing=True

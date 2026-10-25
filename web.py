@@ -330,12 +330,25 @@ class Dashboard:
                 if need_stop or need_release:self.preflight(c,commissioning=False)
                 self.fault=''
                 if need_release:luna.write_json(self.folder/'discharge-request.json',{'serial':c['expected_serial'],'until':None})
+                # Collector must keep draining stdout while the controller exits.
+                # Waiting under self.lock can fill its pipe and turn a clean STOP
+                # into a timeout. update_preparing excludes competing commands.
+                self.mode='off';self.planned=None;self.until=None;self.last_slot=None
+                proc=self.proc
+            if proc is not None and proc.poll() is None:
+                proc.terminate()
+                try:proc.wait(timeout=45)
+                except subprocess.TimeoutExpired:
+                    proc.kill();proc.wait(timeout=5)
+                    raise ValueError('Update abgebrochen: Geräteprozess hat den Stopp nicht rechtzeitig bestätigt.')
+            with self.lock:
                 self.stop()
                 if self.fault:raise ValueError(self.fault)
             # No lock while doing device IO: progress remains reachable. All other
             # commands and sampling are excluded by update_preparing.
             for command,needed in [('stop',need_stop),('discharge-sync',need_release)]:
                 if not needed:continue
+                self.update_progress={'state':'preparing','step':2 if command=='stop' else 3,'message':'Ladestopp am Wechselrichter bestätigen …' if command=='stop' else 'Entladefreigabe am Wechselrichter bestätigen …','at':time.time()}
                 result=subprocess.run([sys.executable,str(BASE/'luna.py'),'--config',str(self.config_path),command,'--execute'],
                                       stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=90)
                 for line in result.stdout.splitlines():
@@ -345,6 +358,7 @@ class Dashboard:
             with self.lock:
                 if any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
                     raise ValueError('Update abgebrochen: Gerätebestätigung steht aus.')
+                self.update_progress={'state':'preparing','step':3,'message':'Update-Dienst starten …','at':time.time()}
                 updater.start(self.folder,**self.update_settings)
                 self.update_progress=None
         except Exception as exc:
@@ -360,7 +374,7 @@ class Dashboard:
                 try:updater.inspect_repo(self.folder)
                 except updater.UpdateError as exc:raise ValueError(str(exc)) from None
                 self.update_preparing=True
-                self.update_progress={'state':'preparing','message':'Steuerung stoppen und Entladesperre freigeben …'}
+                self.update_progress={'state':'preparing','message':'Steuerung stoppen und Entladesperre freigeben …','step':1,'at':time.time()}
                 threading.Thread(target=self.prepare_update,daemon=True).start()
             elif name == 'push-subscribe':
                 contact=self.config().get('push_contact','')

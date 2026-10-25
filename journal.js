@@ -6,6 +6,7 @@ function journalTime(stamp){
  const zone=typeof lastStatus!=='undefined'?lastStatus?.settings?.timezone||'Europe/Berlin':'Europe/Berlin';
  return new Date(stamp*1000).toLocaleString('de-DE',{timeZone:zone,day:'2-digit',month:'2-digit',year:'numeric',hour:'2-digit',minute:'2-digit',second:'2-digit',timeZoneName:'shortOffset'});
 }
+let journalExportBusy=false;
 let journalFilter='all';
 const journalNumber=(n,unit='')=>Number.isFinite(n)?n.toLocaleString('de-DE',{maximumFractionDigits:2})+unit:null;
 function journalCard(event){
@@ -84,23 +85,43 @@ async function loadJournal(more=false){
  }catch(e){document.getElementById('journalstatus').textContent=e.message;}
  finally{journalBusy=false;button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
 }
+function exportProgress(value,text){
+ const wrap=document.getElementById('exportprogresswrap');if(!wrap)return;wrap.hidden=false;
+ const bar=document.getElementById('exportprogress');
+ if(value===null)bar.removeAttribute('value');else bar.value=value;
+ document.getElementById('exportstep').textContent=text;
+}
+async function downloadBody(response){
+ const total=Number(response.headers?.get('Content-Length'))||0;
+ if(!response.body?.getReader)return response.blob();
+ const reader=response.body.getReader(),chunks=[];let received=0;
+ while(true){const {done,value}=await reader.read();if(done)break;chunks.push(value);received+=value.byteLength;
+  const percent=total?Math.min(100,received/total*100):null;
+  exportProgress(percent,`Download: ${percent===null?'':Math.floor(percent)+' % · '}${(received/1048576).toLocaleString('de-DE',{maximumFractionDigits:1})} MB${total?' / '+(total/1048576).toLocaleString('de-DE',{maximumFractionDigits:1})+' MB':''}`);
+ }
+ return new Blob(chunks,{type:response.headers.get('Content-Type')||'application/octet-stream'});
+}
 async function exportJournal(kind,button){
+ if(journalExportBusy)return; journalExportBusy=true;
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
  const status=document.getElementById('journalstatus');
  button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
+ exportProgress(null,'1/2 · Protokoll wird zusammengestellt …');
  status.textContent='Export wird erstellt … bei vielen Planständen kann das bis zu einer Minute dauern.';
  try{
   const r=await fetch('/api/journal/'+(kind==='json'?'export':'text')+'?hours='+document.getElementById('journalhours').value,{signal:controller.signal});
   if(!r.ok)throw Error(r.status===401?'Bitte erneut anmelden.':'Export fehlgeschlagen. Bitte 6 Stunden wählen und erneut versuchen.');
-  const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
+  exportProgress(null,'2/2 · Datei wird übertragen …');
+  const blob=await downloadBody(r),url=URL.createObjectURL(blob),a=document.createElement('a');
   a.href=url;a.download='luna-diagnose-'+new Date().toISOString().slice(0,10)+'.'+(kind==='json'?'json.gz':'txt');
   a.textContent='Datei speichern / öffnen';a.className='download-link';
   status.replaceChildren(document.createTextNode('Export bereit. Falls der Download nicht startet: '),a);
+  exportProgress(100,'Datei vollständig übertragen · bereit zum Speichern');
   a.click();
   // Keep a real, tappable link for Safari/PWA user-activation requirements.
   setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},300000);
- }catch(e){status.textContent=e.name==='AbortError'?'Export dauert zu lange. Bitte 6 Stunden wählen und erneut versuchen.':e.message;}
- finally{clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
+ }catch(e){exportProgress(0,'Export nicht abgeschlossen');status.textContent=e.name==='AbortError'?'Export dauert zu lange. Bitte 6 Stunden wählen und erneut versuchen.':e.message;}
+ finally{journalExportBusy=false;clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.querySelectorAll('[data-journal-filter]').forEach(button=>button.onclick=()=>{journalFilter=button.dataset.journalFilter;document.querySelectorAll('[data-journal-filter]').forEach(b=>{b.classList.toggle('selected',b===button);b.setAttribute('aria-pressed',String(b===button));});filterJournal();});
