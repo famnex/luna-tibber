@@ -128,6 +128,21 @@ class Journal:
                 db.execute('DELETE FROM plans WHERE id NOT IN (SELECT DISTINCT plan_id FROM events WHERE plan_id IS NOT NULL)')
                 self.maintenance=stamp
         self.last_state=state
+    def soc_series(self):
+        # Reuse recorded telemetry; no extra inverter requests. One read per minute.
+        now=time.time()
+        with self.lock:
+            if now-getattr(self,'soc_cache_at',0)<60:return self.soc_cache
+            with self.connect() as db:
+                rows=db.execute("SELECT time,data FROM events WHERE time>=? AND kind IN ('snapshot','decision') ORDER BY time",(now-48*3600,)).fetchall()
+            buckets={}
+            for stamp,raw in rows:
+                value=json.loads(raw).get('soc')
+                if type(value) in (int,float) and math.isfinite(value) and 0<=value<=100:
+                    buckets[int(stamp//300)]={'time':datetime.fromtimestamp(stamp,timezone.utc).isoformat(),'soc':value}
+            self.soc_cache=list(buckets.values());self.soc_cache_at=now
+            return self.soc_cache
+
     def entries(self,hours=24,before=None,all_checks=False):
         cutoff=datetime.now(timezone.utc).timestamp()-hours*3600
         with self.connect() as db:

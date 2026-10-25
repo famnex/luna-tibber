@@ -28,7 +28,7 @@ function solarAverage(rows,start,end){
 function renderExtras(d){
  renderUpdate(d.update,d);
  renderPv(d);
- document.getElementById('referencelabel').textContent=d.settings.smart_discharge_enabled?'Erwarteter Preis bei Entladung':'Durchschnittspreis im Verbrauchsfenster';
+
  const q=d.dispatch_preview;
  const j=d.smart_preview?.joint,b=j?.bridge;
  const num=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
@@ -286,4 +286,46 @@ function renderTodayPlan(d){
   const text=document.createElement('small');text.textContent=label;li.append(symbol,time,text);list.append(li);
  }
  root.append(bar,list);
+}
+
+const chartVisibility={pv:true,battery:true};
+function batterySeries(d,now=Date.now()){
+ const measured=(d.battery_history||[]).map(p=>({time:Date.parse(p.time),soc:p.soc})).filter(p=>Number.isFinite(p.time)&&Number.isFinite(p.soc)&&p.time<=now&&p.soc>=0&&p.soc<=100);
+ const t=d.telemetry||{},stamp=Date.parse(t.time),fresh=Number.isFinite(t.soc)&&Number.isFinite(stamp)&&now-stamp<=120000&&now>=stamp;
+ if(fresh)measured.push({time:stamp,soc:t.soc});
+ measured.sort((a,b)=>a.time-b.time);
+ const forecast=[],c=d.settings,capacity=c.battery_capacity_kwh;
+ if(!fresh||!(capacity>0))return {measured,forecast};
+ const trace=d.mode==='smart'?d.smart_preview?.joint?.trace:null;
+ if(trace?.length){
+  const floor=c.battery_floor_soc||0;
+  for(const row of trace){
+   forecast.push({time:Date.parse(row.start),soc:floor+row.start_kwh/capacity*100});
+   forecast.push({time:Date.parse(row.end),soc:floor+row.end_kwh/capacity*100});
+  }
+ }else if(c.pv_enabled&&d.pv_forecast?.series?.length&&c.base_load_w>0&&d.mode==='off'){
+  // Normal self-consumption estimate when Smart is off; never imply its plan is active.
+  let soc=t.soc,cursor=now;const eta=Math.sqrt(c.roundtrip_efficiency),floor=c.battery_floor_soc||0;
+  forecast.push({time:now,soc});
+  for(const row of d.pv_forecast.series){
+   const start=Math.max(now,Date.parse(row.start)),end=Date.parse(row.end);if(end<=start)continue;
+   if(start>cursor+1000)break;
+   for(let a=start;a<end;){
+    const b=Math.min(end,a+300000),local=new Intl.DateTimeFormat('en-GB',{timeZone:c.timezone,hour:'2-digit',hourCycle:'h23'}).format(new Date(a));
+    const extra=Number(local)>=c.extra_load_start_hour&&Number(local)<c.extra_load_end_hour?c.extra_load_kwh/(c.extra_load_end_hour-c.extra_load_start_hour):0;
+    const net=row.kw-c.base_load_w/1000-extra,held=Date.parse(d.discharge?.request?.until)>a;
+    const energy=net>=0?Math.min(net*eta,c.charge_power_w/1000):held?0:net/eta;
+    soc=Math.max(floor,Math.min(100,soc+energy*(b-a)/3600000/capacity*100));forecast.push({time:b,soc});a=b;
+   }
+   cursor=end;
+  }
+ }
+ return {measured,forecast:forecast.filter(p=>Number.isFinite(p.soc)&&Number.isFinite(p.time))};
+}
+function socPath(points,first,last,x,y){
+ let path='',previous=null;
+ for(const p of points){if(p.time<first||p.time>last)continue;
+  path+=(previous===null||p.time-previous>20*60000?' M':' L')+x(new Date(p.time).toISOString())+' '+y(p.soc);previous=p.time;
+ }
+ return path;
 }
