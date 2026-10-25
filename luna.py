@@ -196,15 +196,24 @@ def decide(c, snapshot, prices, now):
         return True, "Manuelles Laden bis Ziel-SOC oder Zeitlimit", slot
     if slot["ct"] > c["max_buy_ct_kwh"]:
         return False, "Preis oberhalb Kaufgrenze", slot
-    if (slot["end"] - now).total_seconds() < 130:
-        return False, "Preisintervall endet in weniger als 130 Sekunden", slot
     from smart import plan as smart_plan
     plan = smart_plan(c, prices, now, snapshot['soc'], snapshot.get('max_charge_power_w'),c.get('_hold_until'))
     c['_diagnostic_plan']=plan
-    for window in plan['windows']:
+    windows=plan['windows']
+    for index,window in enumerate(windows):
         start,end=datetime.fromisoformat(window['start']),datetime.fromisoformat(window['end'])
+        # Cross a tariff boundary only when the next interval is also selected.
+        for following in windows[index+1:]:
+            if abs((datetime.fromisoformat(following['start'])-(end-timedelta(seconds=130))).total_seconds())>1:break
+            end=datetime.fromisoformat(following['end'])
+        # Never cross a price gap or purchase ceiling, even with a bad plan.
+        safe_end=slot['end']
+        for price in sorted(prices,key=lambda p:p['start']):
+            if price['start']==safe_end and price['ct']<=c['max_buy_ct_kwh'] and safe_end<end:
+                safe_end=price['end']
+        end=min(end,safe_end)
         if start <= now < end and (end-now).total_seconds() >= 130:
-            return True, 'Smart: ausgewählter günstiger Ladeabschnitt', {**slot,'end':min(slot['end'],end)}
+            return True, 'Smart: ausgewählter günstiger Ladeabschnitt', {**slot,'end':end}
     return False, plan['reason'] if not plan['windows'] else 'Smart wartet auf einen günstigeren Ladeabschnitt', slot
 
 class Huawei:

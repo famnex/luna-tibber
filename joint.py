@@ -52,12 +52,15 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     initial=capacity*max(0,soc-floor)/100
     ceiling=max(limit,initial) # An existing SOC above the configured target is usable.
     specs=[]
-    for r in rows:
+    for index,r in enumerate(rows):
         seconds=(r['end']-r['start']).total_seconds();hours=seconds/3600
         load=r['load_kw']*hours
         solar=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)*hours
-        can_charge=night_a<=r['start']<night_b and r['ct']<=c['max_buy_ct_kwh'] and seconds>=190
-        charge=power*max(0,seconds-130)/3600 if can_charge else 0
+        following=rows[index+1] if index+1<len(rows) else None
+        continues=bool(following and following['start']==r['end'] and following['start']<night_b and following['ct']<=c['max_buy_ct_kwh'])
+        margin_seconds=0 if continues else 130
+        can_charge=night_a<=r['start']<night_b and r['ct']<=c['max_buy_ct_kwh'] and seconds>=margin_seconds+60
+        charge=power*max(0,seconds-margin_seconds)/3600 if can_charge else 0
         specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),power/60,0.))
     # Morning energy is a time-specific minimum, released for consumption after
     # night-end. Stop bridging only once PV covers the configured household load.
@@ -92,7 +95,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
         a,b=r['start'],r['end']
         if charge>1e-7:
-            stop=min(b,a+timedelta(seconds=charge/power*3600+130))
+            stop=a+timedelta(seconds=charge/power*3600+130)
             charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge})
             windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
         elif used>1e-7:
@@ -136,8 +139,10 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
             # Match the chart and controller's effective charge duration.
             stop=(datetime.fromisoformat(charge['end'])-timedelta(seconds=130)).isoformat()
             parts=[{**parts[0],'action':'charge','end':stop,'kwh':charge['battery_kwh']},
-                   {**parts[0],'start':stop}]
+                   {**parts[0],'start':stop,'reason':'charge_complete'}]
         for item in parts:
+            if datetime.fromisoformat(item['end'])<=datetime.fromisoformat(item['start']):continue
+            reason=item['reason']
             if phases and phases[-1]['action']==item['action'] and phases[-1]['reason']==reason and phases[-1]['end']==item['start']:
                 old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
             else:phases.append(item)

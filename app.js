@@ -273,7 +273,7 @@ function phaseFacts(j,c){
  return (j.phases||[]).map(p=>{
   const price=p.low_ct===p.high_ct?num(p.low_ct):num(p.low_ct)+'–'+num(p.high_ct);
   const action=p.action==='charge'?'↗ Laden':p.action==='discharge'?'↘ Entladung frei':'Ⅱ Gesperrt';
-  const why=p.action==='charge'||p.action==='discharge'?`${num(p.kwh)} kWh · ${price} ct/kWh`:p.reason==='reserve'?'🔒 Benötigte Energie zurückhalten':p.reason==='manual'?'Manuelle Sperre':`${price} ct jetzt${Number.isFinite(peak)?' · Entladung bis '+num(peak)+' ct geplant':''}`;
+  const why=p.action==='charge'||p.action==='discharge'?`${num(p.kwh)} kWh · ${price} ct/kWh`:p.reason==='reserve'?'🔒 Benötigte Energie zurückhalten':p.reason==='manual'?'Manuelle Sperre':p.reason==='charge_complete'?'Lademenge für diesen Abschnitt erreicht · Entladung bleibt gesperrt':`${price} ct jetzt${Number.isFinite(peak)?' · Für spätere Entladung halten · Preisspitze '+num(peak)+' ct/kWh':''}`;
   return `${fmt(p.start)} – ${fmt(p.end)} · ${action}
 ${why}`;
  });

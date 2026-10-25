@@ -180,3 +180,26 @@ class IntervalRegressionTests(JointTests):
             hours=(datetime.fromisoformat(w['end'])-datetime.fromisoformat(w['start'])).total_seconds()/3600
             self.assertAlmostEqual(hours*5,w['kwh'],places=6)
         self.assertAlmostEqual(sum(w['kwh'] for w in phases),r['planned_kwh'])
+
+class ContinuousChargeTests(unittest.TestCase):
+    def test_command_crosses_selected_boundary_but_not_price_ceiling(self):
+        from unittest.mock import patch
+        c={**luna.DEFAULT,'max_buy_ct_kwh':20}
+        a=datetime(2026,10,26,2,45,tzinfo=timezone.utc)
+        b=a+timedelta(minutes=15)
+        prices=[dict(start=a,end=b,ct=14.09),dict(start=b,end=b+timedelta(minutes=15),ct=14.19)]
+        windows=[dict(start=a.isoformat(),end=(b+timedelta(seconds=130)).isoformat()),dict(start=b.isoformat(),end=(b+timedelta(minutes=9)).isoformat())]
+        snapshot=dict(soc=30,battery_status=2,ac_charge_enabled=True)
+        with patch('smart.plan',return_value=dict(windows=windows,reason='test')):
+            ok,_,slot=luna.decide(c,snapshot,prices,b-timedelta(seconds=60))
+            self.assertTrue(ok)
+            self.assertGreater(slot['end'],b)
+            prices[1]['ct']=100
+            self.assertFalse(luna.decide(c,snapshot,prices,b-timedelta(seconds=60))[0])
+
+    def test_planner_uses_full_intermediate_tariff_interval(self):
+        c,p,n,s=JointTests().setup_case()
+        r=joint.plan(c,p,n,s)
+        self.assertTrue(any(abs(w['battery_kwh']-1.25)<1e-7 for w in r['charges']))
+        for w in r['phases']:
+            self.assertLess(w['start'],w['end'])
