@@ -74,7 +74,10 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:-1],minimum)
     wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
     values=_values(tuple(specs),ceiling,limit,eta,wear,margin)
-    guard=reserve(values[1],ceiling,specs[0][2],eta,wear,capacity,initial,c.get('_guard_held',False))
+    # Protection uses the continuous value curve. Whole-interval dispatch adds
+    # small non-convex steps which must not weaken the independent live guard.
+    guard_values=_values(tuple(specs),ceiling,limit,eta,wear,margin,True)
+    guard=reserve(guard_values[1],ceiling,specs[0][2],eta,wear,capacity,initial,c.get('_guard_held',False))
     guard['threshold_soc']=floor+guard['trigger_kwh']/capacity*100
     guard['release_soc']=floor+guard['release_kwh']/capacity*100
     if guard['hold']:
@@ -93,9 +96,9 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
             charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge})
             windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
         elif used>1e-7:
-            stop=min(b,a+timedelta(hours=used/r['load_kw']))
-            windows.append({'start':a.isoformat(),'end':stop.isoformat(),'action':'discharge','allocated_kwh':used,'ct':r['ct']})
-            if stop<b:windows.append({'start':stop.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
+            # Permission lasts for the row, even if the battery reaches its
+            # device floor earlier. Allocated energy still reflects availability.
+            windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'discharge','allocated_kwh':used,'ct':r['ct']})
         else:
             # With no stored energy or no residual demand there is nothing to reserve.
             action='hold' if spec[4] or (energy>1e-7 and spec[0]>0) else 'discharge'
@@ -125,13 +128,19 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     for w in windows:
         a=datetime.fromisoformat(w['start']);b=datetime.fromisoformat(w['end'])
         charge=next((x for x in charges if x['start']==w['start']),None)
-        action='charge' if charge else w['action']
         reason='manual' if hold_until and a<hold_until else 'reserve' if guard['hold'] and a==now else 'price'
-        item=dict(start=w['start'],end=w['end'],action=action,reason=reason,
-                  kwh=charge['battery_kwh'] if charge else w['allocated_kwh'],low_ct=w['ct'],high_ct=w['ct'])
-        if phases and phases[-1]['action']==action and phases[-1]['reason']==reason and phases[-1]['end']==item['start']:
-            old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
-        else:phases.append(item)
+        parts=[dict(start=w['start'],end=w['end'],action=w['action'],reason=reason,
+                    kwh=w['allocated_kwh'],low_ct=w['ct'],high_ct=w['ct'])]
+        if charge:
+            # The charge window carries 130 s of command headroom, not energy.
+            # Match the chart and controller's effective charge duration.
+            stop=(datetime.fromisoformat(charge['end'])-timedelta(seconds=130)).isoformat()
+            parts=[{**parts[0],'action':'charge','end':stop,'kwh':charge['battery_kwh']},
+                   {**parts[0],'start':stop}]
+        for item in parts:
+            if phases and phases[-1]['action']==item['action'] and phases[-1]['reason']==reason and phases[-1]['end']==item['start']:
+                old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
+            else:phases.append(item)
     solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start))
     return dict(night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
                 planning_soc=floor+at_night/capacity*100,morning_soc=(floor+at_morning/capacity*100) if night_complete else None,
@@ -146,15 +155,20 @@ def _interpolate(values,energy,ceiling):
     return values[i]*(1-f)+values[i+1]*f
 
 
-def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin):
+def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin,partial_discharge=False):
     load,solar,price,max_charge,blocked,min_charge,required=spec
     stored=min(ceiling,energy+solar)
     # Holding avoids needless cycling on equal costs. PV first supplies the house.
     best=(load*price+_interpolate(next_values,stored,ceiling),stored,0.,0.)
     step=ceiling/(len(next_values)-1) if ceiling else 1
     if not blocked and load>0:
+        # Choose a full load interval or hold, never a partial discharge to an
+        # interpolation knot. Those artificial targets caused 2–3 minute pauses
+        # within unchanged-price slots. Live protection may still stop earlier.
         minimum=max(0,stored-load/eta)
-        targets=[minimum]+[j*step for j in range(math.ceil(minimum/step),math.ceil(stored/step))]
+        targets=[minimum]
+        if partial_discharge:
+            targets += [j*step for j in range(math.ceil(minimum/step),math.ceil(stored/step))]
         for after in targets:
             used=(stored-after)*eta
             cost=(load-used)*price+used*wear+_interpolate(next_values,after,ceiling)
@@ -171,9 +185,9 @@ def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin):
 
 
 @lru_cache(maxsize=4)
-def _values(specs,ceiling,limit,eta,wear,margin):
+def _values(specs,ceiling,limit,eta,wear,margin,partial_discharge=False):
     # About 81*81*200 simple operations, no scipy/numpy on the Raspberry Pi.
     values=[[0.]*81 for _ in range(len(specs)+1)]
     for i in range(len(specs)-1,-1,-1):
-        values[i]=[_choose(ceiling*j/80,specs[i],values[i+1],ceiling,limit,eta,wear,margin)[0] for j in range(81)]
+        values[i]=[_choose(ceiling*j/80,specs[i],values[i+1],ceiling,limit,eta,wear,margin,partial_discharge)[0] for j in range(81)]
     return values

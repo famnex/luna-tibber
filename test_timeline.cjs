@@ -14,3 +14,10 @@ const phases=ctx.todayPhases(d,now);assert.equal(phases[0].action,'charge');asse
 d.mode='off';assert.equal(ctx.todayPhases(d,now).length,0);
 d.mode='planned';d.planned={start:at(1),end:at(2)};assert.equal(ctx.todayPhases(d,now)[0].action,'unknown');assert.equal(ctx.todayPhases(d,now)[1].action,'charge');
 console.log('PV smoothing: bounded cubics, zero values and gaps; daily plan: clipping, precedence and inactive modes passed');
+// Tomorrow is a local calendar day, not now + 24 hours (DST fallback).
+const dstNow=Date.parse('2026-10-24T22:30:00Z');
+assert.equal(ctx.planDayKey(d,dstNow,1),'2026-10-26');
+const tomorrow={...d,mode:'smart',prices:[{start:'2026-10-25T23:00:00Z',end:'2026-10-26T23:00:00Z'}],dispatch_preview:{windows:[{start:'2026-10-25T23:00:00Z',end:'2026-10-26T23:00:00Z',action:'hold'}]},smart_preview:{windows:[]}};
+assert.equal(ctx.todayPhases(tomorrow,dstNow,1)[0].start,Date.parse('2026-10-25T23:00:00Z'));
+assert.equal(ctx.todayPhases(tomorrow,dstNow,0).length,0);
+assert.equal(ctx.todayPhases({...tomorrow,prices:[]},dstNow,1).length,0);

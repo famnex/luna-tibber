@@ -211,11 +211,20 @@ function smoothSolarPath(rows,first,last,x,y){
   return path;
  }).join('');
 }
-function todayPhases(d,now=Date.now()){
- const day=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:d.settings.timezone});
- const prices=(d.prices||[]).filter(p=>day(p.start)===day(now));
+// Calendar days in the installation timezone, including 23/25-hour DST days.
+function planDayKey(d,now,offset=0){
+ const parts=new Intl.DateTimeFormat('en-CA',{timeZone:d.settings.timezone,year:'numeric',month:'2-digit',day:'2-digit'}).formatToParts(new Date(now));
+ const value=type=>Number(parts.find(p=>p.type===type).value);
+ return new Date(Date.UTC(value('year'),value('month')-1,value('day')+offset)).toISOString().slice(0,10);
+}
+function dayPrices(d,now,offset){
+ const key=planDayKey(d,now,offset);
+ return (d.prices||[]).filter(p=>planDayKey(d,p.start)===key).sort((a,b)=>Date.parse(a.start)-Date.parse(b.start));
+}
+function todayPhases(d,now=Date.now(),offset=0){
+ const prices=dayPrices(d,now,offset);
  if(!prices.length)return [];
- const start=Math.max(now,Date.parse(prices[0].start)),end=Date.parse(prices[prices.length-1].end);
+ const start=offset===0?Math.max(now,Date.parse(prices[0].start)):Date.parse(prices[0].start),end=Date.parse(prices[prices.length-1].end);
  let phases=chartPhases(d);
  if(d.mode==='planned'&&d.planned)phases=[{start:d.planned.start,end:d.planned.end,action:'charge',reason:'manual'}];
  if(d.mode==='on'&&d.remaining_seconds>0)phases=[{start:new Date(now).toISOString(),end:new Date(now+d.remaining_seconds*1000).toISOString(),action:'charge',reason:'manual'}];
@@ -231,11 +240,39 @@ function todayPhases(d,now=Date.now()){
  }
  return result;
 }
+let selectedPlanDay=0;
+function bindPlanNavigation(card){
+ if(card.dataset.navigationReady)return;
+ card.dataset.navigationReady='true';
+ const select=offset=>{selectedPlanDay=offset;renderTodayPlan(card.planStatus);};
+ document.getElementById('plan-today').onclick=()=>select(0);
+ document.getElementById('plan-tomorrow').onclick=()=>select(1);
+ let origin=null;
+ card.addEventListener('touchstart',e=>{
+  origin=e.touches.length===1&&!e.target.closest('button')?{x:e.touches[0].clientX,y:e.touches[0].clientY,time:Date.now()}:null;
+ },{passive:true});
+ card.addEventListener('touchcancel',()=>{origin=null;},{passive:true});
+ card.addEventListener('touchend',e=>{
+  if(!origin)return;
+  const start=origin;origin=null;
+  const touch=e.changedTouches[0];if(!touch||e.touches.length)return;
+  const dx=touch.clientX-start.x,dy=touch.clientY-start.y;
+  if(Date.now()-start.time<800&&Math.abs(dx)>=60&&Math.abs(dx)>Math.abs(dy)*1.5)select(dx<0?1:0);
+ },{passive:true});
+}
 function renderTodayPlan(d){
  const root=document.getElementById('todayphases');if(!root)return;
- const rows=todayPhases(d),signature=JSON.stringify(rows.map(r=>[Math.floor(r.start/60000),r.end,r.action]));
+ const card=document.getElementById('dayplan');card.planStatus=d;bindPlanNavigation(card);
+ const now=Date.now(),offset=selectedPlanDay,day=offset?'Morgen':'Heute';
+ const rows=todayPhases(d,now,offset),hasPrices=dayPrices(d,now,offset).length>0;
+ const signature=JSON.stringify([offset,planDayKey(d,now,offset),d.mode,hasPrices,rows.map(r=>[Math.floor(r.start/60000),r.end,r.action])]);
  if(root.dataset.signature===signature)return;root.dataset.signature=signature;root.replaceChildren();
- document.getElementById('todayplanhint').textContent=rows.length?'Ab jetzt · geplante Freigaben, keine Messwerte':d.mode==='off'?'Aus · kein Ladeplan aktiv':'Heute keine weiteren bestätigten Planphasen';
+ document.getElementById('dayplantitle').textContent=day+' geplant';
+ for(const [id,value] of [['plan-today',0],['plan-tomorrow',1]]){
+  const button=document.getElementById(id);button.setAttribute('aria-pressed',String(offset===value));button.classList.toggle('selected',offset===value);
+ }
+ const key=planDayKey(d,now,offset),date=key.slice(8)+'.'+key.slice(5,7)+'.';
+ document.getElementById('todayplanhint').textContent=date+' · '+(rows.length?(offset?'Vorschau · geplante Freigaben':'Ab jetzt · geplante Freigaben'):d.mode==='off'?'Aus · kein Ladeplan aktiv':!hasPrices?'Preise noch nicht verfügbar':day+' noch keine bestätigten Planphasen');
  if(!rows.length)return;
  const bar=document.createElement('div');bar.className='plan-strip';bar.setAttribute('aria-hidden','true');
  const list=document.createElement('ol');list.className='plan-steps';

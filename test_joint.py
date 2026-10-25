@@ -157,3 +157,26 @@ class JointTests(unittest.TestCase):
         for price in (0,20):
             g=reserve([0.]*81,8,price,.9,0,10,1)
             self.assertEqual(g['required_kwh'],0)
+
+class IntervalRegressionTests(JointTests):
+    def test_discharge_does_not_split_tariff_rows_at_energy_knots(self):
+        c,p,n,s=self.setup_case(hour=17,soc=43)
+        r=joint.plan(c,p,n,s)
+        for w,t in zip(r['windows'],r['trace']):
+            self.assertEqual(w['start'],t['start'])
+            self.assertEqual(w['end'],t['end'])
+        self.assertEqual(len(r['windows']),len(r['trace']))
+        for t in r['trace']:
+            if t['discharge_kwh']>1e-7 and t['end_kwh']>1e-7:
+                hours=(datetime.fromisoformat(t['end'])-datetime.fromisoformat(t['start'])).total_seconds()/3600
+                self.assertAlmostEqual(t['discharge_kwh'],.5*hours)
+
+    def test_phase_charge_duration_matches_energy_not_tariff_length(self):
+        c,p,n,s=self.setup_case()
+        r=joint.plan(c,p,n,s)
+        phases=[w for w in r['phases'] if w['action']=='charge']
+        self.assertTrue(phases)
+        for w in phases:
+            hours=(datetime.fromisoformat(w['end'])-datetime.fromisoformat(w['start'])).total_seconds()/3600
+            self.assertAlmostEqual(hours*5,w['kwh'],places=6)
+        self.assertAlmostEqual(sum(w['kwh'] for w in phases),r['planned_kwh'])
