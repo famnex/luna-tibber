@@ -1,11 +1,14 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 class El{constructor(){this.children=[];this.hidden=false;this.value='24';this.checked=false;this.dataset={};this.classList={add(){},remove(){}};}append(...x){this.children.push(...x);}replaceChildren(...x){this.children=x;}setAttribute(){}remove(){}}
 const els={};const get=id=>els[id]??=new El();let calls=[];
-const ctx={Date,JSON,URL,setTimeout,document:{hidden:false,getElementById:get,createElement:()=>new El(),addEventListener(){},body:new El()},setInterval(){},fetch:async url=>{calls.push(url);return {ok:true,json:async()=>({events:[{timestamp:1792888200,mode:'smart',text:'Akku entlädt <script>',data:{soc:40},plan_id:7}],before:5})};}};
+const ctx={Date,JSON,URL,setTimeout,document:{hidden:false,getElementById:get,createElement:()=>new El(),addEventListener(){},body:new El()},setInterval(){},fetch:async url=>{calls.push(url);return {ok:true,json:async()=>({events:[{timestamp:1792888200,mode:'smart',event:'decision',text:'Akku entlädt <script>',data:{soc:40,battery_power_w:-1200},plan_id:7}],before:5})};}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/journal.js','utf8'),ctx);
 (async()=>{
+ assert.equal(ctx.journalCard({event:'charge_command',data:{watts:5000},text:''}).title,'Ladebefehl gesendet');
+ assert.equal(ctx.journalCard({event:'snapshot',data:{battery_power_w:null},text:''}).title,'Messwert fehlt');
+ assert.equal(ctx.journalCard({event:'stop_unconfirmed',data:{},text:'Fehler'}).type,'error');
  await ctx.loadJournal();assert.equal(calls.length,1);assert.match(calls[0],/^\/api\/journal\?/);
- const entry=get('journalentries').children[0];assert.equal(entry.children[1].textContent,'Akku entlädt <script>');
+ const entry=get('journalentries').children[0];assert.equal(entry.children[4].textContent,'Akku entlädt <script>');assert.equal(entry.children[1].children[1].textContent,'Entladung gemessen');assert.equal(entry.children[2].children[0].textContent,'40 % SOC');
  assert.match(entry.children[0].textContent,/GMT/);assert.equal(get('journalmore').hidden,false);
  await ctx.loadJournal(true);assert.match(calls[1],/before=5/);assert.equal(get('journalentries').children.length,2);
  ctx.document.hidden=true;await ctx.loadJournal();assert.equal(calls.length,2);

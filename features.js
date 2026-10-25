@@ -1,5 +1,5 @@
 'use strict';
-const phaseColor=action=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#6875bb'}[action]||'#91af83');
+const phaseColor=action=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#8c9da2'}[action]||'#91af83');
 const phaseLabel=action=>({charge:'↗ Laden',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
 function chartPhases(d){
  if(d.mode!=='smart')return [];
@@ -162,3 +162,65 @@ document.addEventListener('DOMContentLoaded',()=>{
  };
  document.addEventListener('visibilitychange',()=>{clearTimeout(updateTimer);if(!document.hidden&&updateWatch)pollUpdate();});
 });
+
+// Smoothstep cubic curves stay between neighbouring samples; never bridge gaps.
+// This affects only SVG geometry, not hourly averages, tooltips or scheduling.
+function smoothSolarPath(rows,first,last,x,y){
+ const segments=[];let segment=[],previous=null;
+ for(const r of rows){
+  const a=Math.max(first,r.start),b=Math.min(last,r.end);if(b<=a)continue;
+  if(previous!==a&&segment.length){segments.push(segment);segment=[];}
+  if(!segment.length)segment.push([a,r.kw]);
+  segment.push([(a+b)/2,r.kw]);previous=b;
+  const next=rows.find(q=>q.start===b);
+  if(!next||b===last){segment.push([b,r.kw]);segments.push(segment);segment=[];previous=null;}
+ }
+ if(segment.length)segments.push(segment);
+ return segments.map(points=>{
+  let path=' M'+x(points[0][0])+' '+y(points[0][1]);
+  for(let i=1;i<points.length;i++){
+   const [a,v]=points[i-1],[b,w]=points[i],left=x(a),right=x(b),dx=(right-left)/3;
+   path+=' C'+(left+dx)+' '+y(v)+' '+(right-dx)+' '+y(w)+' '+right+' '+y(w);
+  }
+  return path;
+ }).join('');
+}
+function todayPhases(d,now=Date.now()){
+ const day=t=>new Date(t).toLocaleDateString('en-CA',{timeZone:d.settings.timezone});
+ const prices=(d.prices||[]).filter(p=>day(p.start)===day(now));
+ if(!prices.length)return [];
+ const start=Math.max(now,Date.parse(prices[0].start)),end=Date.parse(prices[prices.length-1].end);
+ let phases=chartPhases(d);
+ if(d.mode==='planned'&&d.planned)phases=[{start:d.planned.start,end:d.planned.end,action:'charge',reason:'manual'}];
+ if(d.mode==='on'&&d.remaining_seconds>0)phases=[{start:new Date(now).toISOString(),end:new Date(now+d.remaining_seconds*1000).toISOString(),action:'charge',reason:'manual'}];
+ phases=phases.filter(p=>Date.parse(p.end)>start&&Date.parse(p.start)<end);
+ if(!phases.length||end<=start)return [];
+ const boundaries=[...new Set([start,end,...phases.flatMap(p=>[Date.parse(p.start),Date.parse(p.end)]).filter(t=>t>start&&t<end)])].sort((a,b)=>a-b);
+ const result=[];
+ for(let i=0;i<boundaries.length-1;i++){
+  const a=boundaries[i],b=boundaries[i+1],entry=phaseEntryAt(phases,a),action=entry?.action||'unknown';
+  const prev=result[result.length-1];
+  if(prev&&prev.action===action)prev.end=b;
+  else result.push({start:a,end:b,action});
+ }
+ return result;
+}
+function renderTodayPlan(d){
+ const root=document.getElementById('todayphases');if(!root)return;
+ const rows=todayPhases(d),signature=JSON.stringify(rows.map(r=>[Math.floor(r.start/60000),r.end,r.action]));
+ if(root.dataset.signature===signature)return;root.dataset.signature=signature;root.replaceChildren();
+ document.getElementById('todayplanhint').textContent=rows.length?'Ab jetzt · geplante Freigaben, keine Messwerte':d.mode==='off'?'Aus · kein Ladeplan aktiv':'Heute keine weiteren bestätigten Planphasen';
+ if(!rows.length)return;
+ const bar=document.createElement('div');bar.className='plan-strip';bar.setAttribute('aria-hidden','true');
+ const list=document.createElement('ol');list.className='plan-steps';
+ const fmt=t=>new Date(t).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'});
+ const labels={charge:['↑','Laden'],discharge:['↓','Entladung frei'],hold:['Ⅱ','Pause'],unknown:['·','Keine Planung']};
+ for(const row of rows){
+  const [icon,label]=labels[row.action],part=document.createElement('span');part.className='phase-'+row.action;part.style.flex=String(row.end-row.start);bar.append(part);
+  const li=document.createElement('li');li.className='phase-'+row.action;
+  const symbol=document.createElement('span');symbol.className='plan-symbol';symbol.textContent=icon;
+  const time=document.createElement('strong');time.textContent=fmt(row.start)+'–'+fmt(row.end);
+  const text=document.createElement('small');text.textContent=label;li.append(symbol,time,text);list.append(li);
+ }
+ root.append(bar,list);
+}
