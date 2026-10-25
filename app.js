@@ -168,11 +168,19 @@ $('plannedform').onsubmit=e=>{e.preventDefault();};
 $('settingsform').addEventListener('input',e=>{if(e.target.id==='pv-postcode')return;settingsDirty=true;notify('Ungespeicherte Einstellungen · Speichern ist auch während Smart oder einer Entladesperre möglich.','info');});
 window.addEventListener('beforeunload',e=>{if(settingsDirty){e.preventDefault();e.returnValue='';}});
 function renderPrices(d){
+function formatPriceAge(seconds){
+ if(typeof seconds!=='number'||!Number.isFinite(seconds))return 'unbekannt';
+ const minutes=Math.max(0,Math.floor(seconds/60));
+ if(minutes<60)return minutes+' Min.';
+ const hours=Math.floor(minutes/60),rest=minutes%60;
+ return hours+' Std.'+(rest?' '+rest+' Min.':'');
+}
+
  const comp=$('compareday').value==='auto'?d.comparison:d.comparisons[$('compareday').value];const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
  $('comparedate').textContent='Vergleichstag: '+comp.date+' · Nachtfenster '+fmt(comp.night_start)+' bis '+fmt(comp.night_end);
  $('dayaverage').textContent=ct(comp.day_ct);$('nightaverage').textContent=ct(comp.night_ct);$('nightsaving').textContent=ct(comp.saving_ct);
  $('comparereason').textContent=!comp.complete?'Für den ausgewählten Vergleichstag fehlen vollständige Preise. Anderen Tag auswählen oder Veröffentlichung abwarten.':`Effektiver Speicherstrompreis: ${ct(comp.effective_ct)}. ${comp.saving_ct>0?'Rechnerisch günstiger als der Tagesdurchschnitt.':'Gegenüber dem Tagesdurchschnitt kein Preisvorteil.'}`;
- const rows=d.prices||[];const chart=$('pricechart');$('chartinfo').textContent=d.price_error||(!rows.length?'Noch keine Preise verfügbar. Tibber-Zugang in den Einstellungen prüfen.':`${fmt(rows[0].start)} – ${fmt(rows[rows.length-1].end)} · Stand vor ${Math.floor((d.price_age_seconds??0)/60)} min · PV-Linie geglättet`);const phases=chartPhases(d);const allSolar=solarSeries(d),solar=chartVisibility.pv?allSolar:[],battery=batterySeries(d);const signature=JSON.stringify([rows,phases,solar,battery,chartVisibility.battery,d.settings.pv_enabled,d.settings.timezone,chart.clientWidth||1000,Math.floor(Date.now()/900000)]);if(signature===chartSignature)return;chartSignature=signature;chart.replaceChildren();if($('pvlegend'))$('pvlegend').hidden=!allSolar.length;if(!rows.length)return;
+ const rows=d.prices||[];const chart=$('pricechart');$('chartinfo').textContent=d.price_error||(!rows.length?'Noch keine Preise verfügbar. Tibber-Zugang in den Einstellungen prüfen.':`${fmt(rows[0].start)} – ${fmt(rows[rows.length-1].end)} · Stand vor ${formatPriceAge(d.price_age_seconds)} · PV-Linie geglättet`);const phases=chartPhases(d);const allSolar=solarSeries(d),solar=chartVisibility.pv?allSolar:[],battery=batterySeries(d);const signature=JSON.stringify([rows,phases,solar,battery,chartVisibility.battery,d.settings.pv_enabled,d.settings.timezone,chart.clientWidth||1000,Math.floor(Date.now()/900000)]);if(signature===chartSignature)return;chartSignature=signature;chart.replaceChildren();if($('pvlegend'))$('pvlegend').hidden=!allSolar.length;if(!rows.length)return;
  const ns='http://www.w3.org/2000/svg';const el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v]of Object.entries(attrs))n.setAttribute(k,v);if(text!==undefined)n.textContent=text;return n;};
  const chartWidth=Math.max(340,chart.clientWidth||1000);const svg=el('svg',{viewBox:`0 0 ${chartWidth} 280`,role:'group','aria-label':solar.length?'Tibber-Preise links in ct/kWh und PV-Prognose rechts in kW; Balken auswählbar':'Tibber-Preise, einzelne Balken auswählbar'});const min=Math.min(0,...rows.map(p=>p.ct)),max=Math.max(1,...rows.map(p=>p.ct)),span=max-min||1;const first=Date.parse(rows[0].start),last=Date.parse(rows[rows.length-1].end);const right=chartWidth-(chartVisibility.battery?112:solar.length?62:14);const x=t=>55+(Date.parse(t)-first)/(last-first)*(right-55);const y=v=>235-(v-min)/span*205;
  for(let i=0;i<=4;i++){const v=min+span*i/4;svg.append(el('line',{x1:55,x2:right,y1:y(v),y2:y(v),stroke:'#dce5dd'}),el('text',{x:46,y:y(v)+4,'text-anchor':'end'},v.toFixed(1)));}
