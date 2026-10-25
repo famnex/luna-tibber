@@ -198,7 +198,7 @@ function renderPrices(d){
    const line=el('path',{d:socPath(points,first,last,x,sy),fill:'none',stroke:'#6864b4','stroke-width':2.5,'stroke-dasharray':dashed?'6 4':'none','pointer-events':'none'});svg.append(line);
   }
  }
- if($('batterychartnote'))$('batterychartnote').textContent='Akku: Linie = gemessen · gestrichelt = '+(d.mode==='smart'?'Smart-Plan':'PV-/Verbrauchsschätzung')+'. '+(!battery.forecast.length?'Keine belastbare Prognose verfügbar. ':'')+'Datenlücken bleiben offen.';
+ if($('batterychartnote'))$('batterychartnote').textContent='Akku: Linie verbindet Messpunkte geglättet (Zwischenwerte geschätzt) · gestrichelt = '+(d.mode==='smart'?'Smart-Plan':'PV-/Verbrauchsschätzung')+'. '+(!battery.forecast.length?'Keine belastbare Prognose verfügbar. ':'')+'Datenlücken bleiben offen.';
  chart.append(svg);
 }
 

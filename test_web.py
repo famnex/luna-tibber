@@ -397,3 +397,17 @@ class DisplaySamplingTests(unittest.TestCase):
             with patch.object(app,'launch') as launch,patch('web.time.monotonic',return_value=500):
                 app.request_sample(fast=True)
                 launch.assert_not_called()
+
+class HourlyHistoryTests(unittest.TestCase):
+    def test_hourly_reuses_fresh_read_and_skips_busy_then_throttles_retry(self):
+        with tempfile.TemporaryDirectory() as folder:
+            app=web.Dashboard(Path(folder),start_worker=False)
+            app.save_settings({'expected_serial':'test'})
+            with patch.object(app,'request_sample') as sample:
+                app.telemetry={'time':datetime.now(timezone.utc).isoformat(),'soc':50}
+                app.hourly_sample();sample.assert_not_called()
+                app.telemetry={};app.proc=Mock()
+                app.hourly_sample();sample.assert_not_called()
+                app.proc=None
+                app.hourly_sample();sample.assert_called_once()
+                app.hourly_sample();sample.assert_called_once()

@@ -325,7 +325,14 @@ function batterySeries(d,now=Date.now()){
 function socPath(points,first,last,x,y){
  let path='',previous=null;
  for(const p of points){if(p.time<first||p.time>last)continue;
-  path+=(previous===null||p.time-previous>20*60000?' M':' L')+x(new Date(p.time).toISOString())+' '+y(p.soc);previous=p.time;
+  const right=x(new Date(p.time).toISOString()),value=y(p.soc);
+  if(previous===null||p.time-previous.time>75*60000)path+=' M'+right+' '+value;
+  else{
+   const left=x(new Date(previous.time).toISOString()),dx=(right-left)/3;
+   // Bounded cubic: stays between measured SOCs, no invented peaks.
+   path+=' C'+(left+dx)+' '+y(previous.soc)+' '+(right-dx)+' '+value+' '+right+' '+value;
+  }
+  previous=p;
  }
  return path;
 }

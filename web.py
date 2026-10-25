@@ -156,6 +156,7 @@ class Dashboard:
         self.price_fetched_at = 0
         self.price_error = ''
         self.sample_at = -60
+        self.hourly_sample_at = -3600
         self.discharge_at = -30
         self.closed = threading.Event()
         from history import History
@@ -482,6 +483,7 @@ class Dashboard:
                     if self.job == 'discharge-sync':
                         continue
                     if self.mode == 'off':
+                        self.hourly_sample()
                         continue
                     if self.job in ('sample','probe','charge-test','stop'):
                         continue
@@ -527,6 +529,7 @@ class Dashboard:
             self.alert('completed','✓ LUNA · Ladefenster beendet','Der geplante Auftrag ist abgelaufen.',cooldown=60)
             return
         if now < datetime.fromisoformat(order['start']):
+            self.hourly_sample()
             return
         if order['phase'] == 'waiting':
             if (end-now).total_seconds() < 120:
@@ -564,8 +567,22 @@ class Dashboard:
                                 self.alert('prices','⚠ LUNA · Preise fehlen','Tibber-Preise sind länger nicht verfügbar. Smart kann nicht vollständig planen.')
                         else:self.price_failed_since=None
             self.closed.wait(10)
+    def hourly_sample(self):
+        # Low-frequency history collection also with a closed browser. Controller
+        # telemetry takes precedence; failed reads retry no faster than five minutes.
+        with self.lock:
+            if self.proc or self.update_preparing or updater.busy(self.folder):return
+            stamp=self.telemetry.get('time');soc=self.telemetry.get('soc')
+            try:age=(datetime.now(timezone.utc)-datetime.fromisoformat(stamp)).total_seconds()
+            except (ValueError,TypeError):age=3600
+            if type(soc) in (int,float) and 0<=soc<=100 and 0<=age<3600:return
+            if time.monotonic()-self.hourly_sample_at<300:return
+            if not self.config_path.exists() or not self.config().get('expected_serial'):return
+            self.hourly_sample_at=time.monotonic()
+            self.request_sample()
+
     def request_sample(self, fast=False):
-        # Called only by a visible browser. Reuse ongoing controller measurements.
+        # Visible browser or hourly history task. Reuse ongoing controller measurements.
         with self.lock:
             if self.update_preparing or updater.busy(self.folder) or self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
                 return
