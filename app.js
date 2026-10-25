@@ -377,3 +377,6 @@ function renderOverview(d){
 }
 
 
+
+// Same host as this app, evcc's port; no app path or query parameters forwarded.
+{const link=document.getElementById('evcclink');if(link){const url=new URL(window.location.href);url.port='7070';url.pathname='/';url.search='';url.hash='';url.username='';url.password='';link.href=url.href;}}
