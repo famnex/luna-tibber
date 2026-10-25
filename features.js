@@ -132,16 +132,14 @@ document.addEventListener('DOMContentLoaded',()=>{
  initializePwa();
 });
 
-const updateStates=new Set(['queued','checking','dependencies','testing','installing','restarting','rollback']);
+const updateStates=new Set(['preparing','queued','checking','dependencies','testing','installing','restarting','rollback']);
 let updateTimer=null,updateWatch=false,updateStarting=false;
 function renderUpdate(u,d){
  if(!u)return;
  const active=updateStates.has(u.state),button=document.getElementById('updateapp');
  document.getElementById('updateversion').textContent='Installierter Stand: '+(u.revision?u.revision.slice(0,8):'kein Git-Stand erkannt');
- const hold=d?.discharge?.request?.until&&Date.parse(d.discharge.request.until)>Date.now();
- const reason=d?.mode&&d.mode!=='off'?'Zum Update Steuerung auf Aus stellen.':hold?'Manuelle Entladesperre aufheben.':d?.discharge?.restore_pending?'Bestätigung der Entladefreigabe wird abgewartet.':d?.job&&d.job!=='sample'?'Gerätevorgang läuft noch: '+d.job:'';
- document.getElementById('updatestatus').textContent=active?(u.message||'Update läuft …'):updateStarting?'Update wird angefordert; eine laufende Messwertabfrage wird abgewartet …':reason||((u.message||'Bereit für Updates')+(d?.job==='sample'?' · Update kann angefordert werden; Messwertabfrage wird abgewartet.':''));
- button.disabled=active||updateStarting||!!reason;
+ document.getElementById('updatestatus').textContent=active?(u.message||'Update läuft …'):updateStarting?'Stopp und Update werden vorbereitet …':u.message||'Bereit für Updates';
+ button.disabled=active||updateStarting;
  button.classList.toggle('button-loading',active||updateStarting);
  if(active){updateWatch=true;scheduleUpdatePoll();}
  else if(updateWatch){updateWatch=false;clearTimeout(updateTimer);if(u.state==='done')window.location.reload();}

@@ -766,3 +766,24 @@ Einträge beginnen mit diesem Update; frühere Abläufe werden nicht erfunden.
 Lücken durch Aus, fehlende Abfragen, Fehler oder einen gestoppten Dienst bleiben
 Lücken. Sie bedeuten nicht automatisch Batterie-Stillstand. Die Browseranzeige
 aktualisiert sich nur bei sichtbarer Verlaufsseite etwa einmal pro Minute.
+
+## Updates aus laufender Steuerung und Diagnose-Downloads
+Ab Version 20261025b kann der Updatebutton auch bei Smart, An, Geplant oder
+Entladesperre benutzt werden. Zuerst werden Repository-Voraussetzungen geprüft,
+dann die Steuerung auf Aus gesetzt und eine manuelle Entladesperre aufgehoben.
+Stopp und Wiederherstellung der bisherigen Entladeleistung müssen bestätigt sein,
+bevor der Updater startet. Währenddessen sind weitere Steuerbefehle und Messabfragen
+gesperrt. Bei einem Fehler wird nicht installiert. Nach dem Update bleibt Aus;
+Smart muss bewusst wieder eingeschaltet werden. Die vorherige Sperre wird nicht
+wieder aktiviert. Diese Funktion greift erst, nachdem diese Version installiert ist.
+
+Diagnoseexporte entpacken Planstände einzeln und schreiben komprimierte Daten
+ab 1 MiB in eine temporäre Datei statt alle Planstände gleichzeitig im RAM zu
+halten. TXT benötigt keine vollständigen Planstände. Ein Export pro Dienst ist
+möglich; Aufbereitung nach 60 Sekunden, Browseranfrage nach 90 Sekunden begrenzt.
+Bei großen Zeiträumen auf 6 Stunden reduzieren. Ein sichtbarer Downloadlink bleibt
+fünf Minuten erhalten, falls Safari/PWA den automatischen Download nicht startet.
+Es gibt dafür keine zusätzlichen Abfragen am Wechselrichter.
+TXT benutzt die aktuell eingestellte Zeitzone; JSON enthält die ursprünglichen Planstände.
+TXT wird als .txt und der komprimierte Diagnoseexport als .json.gz ausgeliefert.
+TXT-Schätzungen sind kein SOH-/Kapazitätsnachweis für eine Garantie.

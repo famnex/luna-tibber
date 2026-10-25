@@ -74,3 +74,21 @@ class AuditTests(unittest.TestCase):
         app.collect(proc,4,'run','smart')
         events=app.journal.entries()['events']
         self.assertTrue(any(e['event']=='stopped_on_exit' and e['mode']=='smart' for e in events))
+
+class DownloadTests(unittest.TestCase):
+    def test_streamed_download_matches_export_and_text_skips_plans(self):
+        import gzip,json,tempfile
+        from unittest.mock import patch
+        from audit import Journal
+        with tempfile.TemporaryDirectory() as folder:
+            j=Journal(Path(folder))
+            j.record({}, {'event':'decision','soc':42,'diagnostic_plan':{'needed_kwh':3}})
+            expected=j.export()
+            with j.download() as f:actual=json.loads(gzip.decompress(f.read()))
+            self.assertEqual(actual['events'],expected['events']);self.assertEqual(actual['plans'],expected['plans'])
+            with patch.object(j,'plan',side_effect=AssertionError('TXT must not decode plans')):
+                with j.download(compressed=False) as f:self.assertIn('42',f.read().decode())
+            with j.download() as f:
+                with self.assertRaises(ValueError):
+                    with j.download():pass
+            with j.download() as f:self.assertTrue(f.read())

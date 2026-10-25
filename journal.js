@@ -39,15 +39,22 @@ async function loadJournal(more=false){
  finally{journalBusy=false;button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
 }
 async function exportJournal(kind,button){
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
+ const status=document.getElementById('journalstatus');
  button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
+ status.textContent='Export wird erstellt … bei vielen Planständen kann das bis zu einer Minute dauern.';
  try{
-  const r=await fetch('/api/journal/'+(kind==='json'?'export':'text')+'?hours='+document.getElementById('journalhours').value);
-  if(!r.ok)throw Error('Export fehlgeschlagen.');
+  const r=await fetch('/api/journal/'+(kind==='json'?'export':'text')+'?hours='+document.getElementById('journalhours').value,{signal:controller.signal});
+  if(!r.ok)throw Error(r.status===401?'Bitte erneut anmelden.':'Export fehlgeschlagen. Bitte 6 Stunden wählen und erneut versuchen.');
   const blob=await r.blob(),url=URL.createObjectURL(blob),a=document.createElement('a');
-  a.href=url;a.download='luna-diagnose-'+new Date().toISOString().slice(0,10)+'.'+(kind==='json'?'json.gz':kind);document.body.append(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(url),30000);
-  document.getElementById('journalstatus').textContent='Export erstellt. Für die gemeinsame Diagnose bitte die JSON.GZ-Datei verwenden.';
- }catch(e){document.getElementById('journalstatus').textContent=e.message;}
- finally{button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
+  a.href=url;a.download='luna-diagnose-'+new Date().toISOString().slice(0,10)+'.'+(kind==='json'?'json.gz':'txt');
+  a.textContent='Datei speichern / öffnen';a.className='download-link';
+  status.replaceChildren(document.createTextNode('Export bereit. Falls der Download nicht startet: '),a);
+  a.click();
+  // Keep a real, tappable link for Safari/PWA user-activation requirements.
+  setTimeout(()=>{URL.revokeObjectURL(url);a.remove();},300000);
+ }catch(e){status.textContent=e.name==='AbortError'?'Export dauert zu lange. Bitte 6 Stunden wählen und erneut versuchen.':e.message;}
+ finally{clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');}
 }
 document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('journalrefresh').onclick=()=>loadJournal();

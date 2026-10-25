@@ -6,6 +6,10 @@ import os
 import sqlite3
 import threading
 import zlib
+import gzip
+import tempfile
+import time
+from contextlib import contextmanager
 from datetime import datetime,timezone
 from zoneinfo import ZoneInfo
 
@@ -68,7 +72,7 @@ def describe(kind,d):
 
 class Journal:
     def __init__(self,folder):
-        self.path=folder/'diagnostics.sqlite3';self.lock=threading.RLock();self.error=''
+        self.path=folder/'diagnostics.sqlite3';self.lock=threading.RLock();self.export_lock=threading.Lock();self.error=''
         self.last_plan=None;self.plan_at=0;self.plan_signature=None;self.last_state=None;self.maintenance=0
         with self.connect() as db:
             db.executescript('''CREATE TABLE IF NOT EXISTS plans(id INTEGER PRIMARY KEY, time REAL, data TEXT);
@@ -159,3 +163,49 @@ class Journal:
         lines+=['Vollständige Planstände, Preise und PV-Daten sind im separaten JSON-Diagnoseexport enthalten.']
         if data['limit_reached']:lines.append('Exportlimit erreicht; Zeitraum verkürzen.')
         return '\n'.join(lines)
+
+    @contextmanager
+    def download(self,hours=24,compressed=True,zone='Europe/Berlin'):
+        if not self.export_lock.acquire(blocking=False):raise ValueError('Ein Export läuft bereits')
+        try:
+            cutoff=datetime.now(timezone.utc).timestamp()-hours*3600
+            with self.connect() as db:
+                rows=db.execute('SELECT id,time,kind,mode,job,revision,important,text,data,plan_id FROM events WHERE time>=? ORDER BY id LIMIT 20000',(cutoff,)).fetchall()
+            deadline=time.monotonic()+60
+            def check():
+                if time.monotonic()>deadline:raise TimeoutError('Exportzeit überschritten')
+            # Roll to disk after 1 MiB; only one decoded plan is held at a time.
+            with tempfile.SpooledTemporaryFile(max_size=1024*1024,mode='w+b') as output:
+                if compressed:
+                    with gzip.GzipFile(fileobj=output,mode='wb',compresslevel=1) as gz:
+                        def write(value):gz.write(json.dumps(value,ensure_ascii=False).encode())
+                        gz.write(b'{"version":1,"exported_at":');write(datetime.now(timezone.utc).isoformat())
+                        gz.write(b',"events":[')
+                        for index,row in enumerate(rows):
+                            check()
+                            if index:gz.write(b',')
+                            write(self.row(row))
+                        gz.write(b'],"plans":{')
+                        ids=sorted({r[9] for r in rows if r[9] is not None})
+                        first=True
+                        for key in ids:
+                            check();plan=self.plan(key)
+                            if plan is None:continue
+                            if not first:gz.write(b',')
+                            first=False;write(str(key));gz.write(b':');write(plan)
+                            del plan
+                        gz.write(b'},"limit_reached":');write(len(rows)==20000)
+                        gz.write(b',"note":');write('Befehle sind kein Beleg für tatsächlichen Energiefluss. Keine rückwirkende Rekonstruktion.')
+                        gz.write(b'}')
+                else:
+                    tz=ZoneInfo(zone)
+                    output.write(b'LUNA Diagnoseverlauf\n\n')
+                    for row in rows:
+                        check()
+                        stamp=datetime.fromtimestamp(row[1],timezone.utc).astimezone(tz).isoformat(timespec='seconds')
+                        output.write(f"{stamp} · {row[3]} · Plan #{row[9] or '—'}\n{row[7]}\n\n".encode())
+                    output.write('Vollständige Planstände stehen im separaten JSON.GZ-Export. Befehle sind kein Beleg für tatsächlichen Energiefluss.\n'.encode())
+                    if len(rows)==20000:output.write('Exportlimit erreicht; Zeitraum verkürzen.\n'.encode())
+                output.seek(0)
+                yield output
+        finally:self.export_lock.release()

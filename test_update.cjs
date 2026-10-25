@@ -10,11 +10,11 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/features.js','
 (async()=>{
  const button=nodes.updateapp;
  ctx.renderUpdate({state:'idle',revision:'1234567890'},ctx.lastStatus);assert.equal(button.disabled,false);
- ctx.renderUpdate({state:'idle'},{mode:'smart'});assert.equal(button.disabled,true);
+ ctx.renderUpdate({state:'idle'},{mode:'smart'});assert.equal(button.disabled,false);
  ctx.renderUpdate({state:'done',message:'Update erfolgreich'},{mode:'off',job:'sample'});assert.equal(button.disabled,false);
- assert.match(nodes.updatestatus.textContent,/Messwertabfrage/);
- ctx.renderUpdate({state:'done'},{mode:'off',discharge:{restore_pending:true}});assert.equal(button.disabled,true);
- assert.match(nodes.updatestatus.textContent,/Entladefreigabe/);
+ assert.match(nodes.updatestatus.textContent,/Update erfolgreich/);
+ ctx.renderUpdate({state:'done'},{mode:'off',discharge:{restore_pending:true}});assert.equal(button.disabled,false);
+ ctx.renderUpdate({state:'preparing',message:'Stoppen'},ctx.lastStatus);assert.equal(button.disabled,true);
  ctx.renderUpdate({state:'testing',message:'Prüfe'},ctx.lastStatus);
  assert.equal(button.disabled,true);assert.equal(button.classList.contains('button-loading'),true);
  assert.equal([...timers.values()][0].ms,2000);

@@ -103,36 +103,45 @@ class DashboardTests(unittest.TestCase):
         self.app.device={'serial':'unconfirmed'}
         with self.assertRaises(ValueError):self.app.action('adopt-serial',{})
 
-    def test_update_requires_idle_and_released_battery(self):
-        with patch('web.updater.start') as start:
-            self.app.mode='smart'
-            with self.assertRaises(ValueError):self.app.action('update',{})
-            self.app.mode='off';self.app.proc=object()
-            with self.assertRaises(ValueError):self.app.action('update',{})
-            self.app.proc=None
-            for name in ('pending-charge.json','discharge-restore.json'):
-                path=self.folder/name;path.write_text('{}')
-                with self.assertRaises(ValueError):self.app.action('update',{})
-                path.unlink()
-            start.assert_not_called()
+    def test_update_queues_preparation_while_smart(self):
+        self.app.mode='smart'
+        with patch('web.updater.inspect_repo'),patch('web.threading.Thread') as thread:
             self.app.action('update',{})
-            start.assert_called_once()
+            self.assertTrue(self.app.update_preparing)
+            self.assertEqual(self.app.update_status()['state'],'preparing')
+            thread.return_value.start.assert_called_once()
+            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'on'})
 
-    def test_update_waits_for_status_sample(self):
-        self.app.proc=Mock();self.app.job='sample'
-        proc=self.app.proc
-        with patch('web.updater.start') as start:
-            self.app.action('update',{})
-            proc.wait.assert_called_once_with(timeout=20)
-            self.assertIsNone(self.app.proc);self.assertIsNone(self.app.job)
+    def test_update_prepares_stop_and_release_before_start(self):
+        self.app.save_settings({'expected_serial':'test','password':'test'})
+        self.app.mode='smart';self.app.update_preparing=True
+        luna.write_json(self.folder/'discharge-request.json',{'serial':'test','until':'2099-01-01T00:00:00+00:00'})
+        with patch('web.subprocess.run',return_value=Mock(returncode=0,stdout='')) as run,patch('web.updater.start') as start:
+            self.app.prepare_update()
+            self.assertEqual([c.args[0][-2] for c in run.call_args_list],['stop','discharge-sync'])
             start.assert_called_once()
-    def test_update_sample_timeout_preserves_process(self):
-        self.app.proc=Mock();self.app.job='sample';proc=self.app.proc
-        proc.wait.side_effect=web.subprocess.TimeoutExpired('sample',20)
-        with patch('web.updater.start') as start:
-            with self.assertRaisesRegex(ValueError,'Messwertabfrage'):
-                self.app.action('update',{})
-            self.assertIs(self.app.proc,proc);start.assert_not_called()
+        self.assertEqual(self.app.mode,'off');self.assertFalse(self.app.update_preparing)
+        self.assertIsNone(web.read(self.folder/'discharge-request.json',{})['until'])
+
+    def test_update_stop_failure_never_installs(self):
+        self.app.save_settings({'expected_serial':'test','password':'test'})
+        self.app.mode='smart';self.app.update_preparing=True
+        with patch('web.subprocess.run',return_value=Mock(returncode=1,stdout='')),patch('web.updater.start') as start:
+            self.app.prepare_update();start.assert_not_called()
+        self.assertEqual(self.app.mode,'off');self.assertEqual(self.app.update_status()['state'],'failed')
+        self.assertFalse(self.app.update_preparing)
+
+    def test_update_unresolved_restore_never_installs(self):
+        self.app.save_settings({'expected_serial':'test','password':'test'})
+        (self.folder/'discharge-restore.json').write_text('{}')
+        with patch('web.subprocess.run',return_value=Mock(returncode=0,stdout='')),patch('web.updater.start') as start:
+            self.app.prepare_update();start.assert_not_called()
+        self.assertEqual(self.app.update_status()['state'],'failed')
+
+    def test_update_idle_needs_no_device_io(self):
+        with patch('web.subprocess.run') as run,patch('web.updater.start') as start:
+            self.app.prepare_update();run.assert_not_called();start.assert_called_once()
+
     def test_update_blocks_controls_and_measurements(self):
         self.app.save_settings({})
         with patch('web.updater.busy',return_value=True),patch.object(self.app,'launch') as launch:
@@ -197,12 +206,17 @@ class HTTPTests(unittest.TestCase):
         conn.request('POST','/api/login',body='{"password":"test-password"}',headers={'Content-Type':'application/json','X-Luna':'1'})
         r=conn.getresponse();cookie=r.getheader('Set-Cookie').split(';')[0];r.read()
         self.server.app.journal.entries.return_value={'events':[]}
-        self.server.app.journal.export.return_value={'plans':{},'events':[]}
+        import io
+        from contextlib import contextmanager
+        @contextmanager
+        def download(*args):yield io.BytesIO(gzip.compress(b'{"plans":{},"events":[]}'))
+        self.server.app.journal.download.side_effect=download
+        self.server.app.config.return_value={'timezone':'Europe/Berlin'}
         self.server.app.journal.plan.return_value={'config':{}}
         for path in ('/api/journal?hours=12','/api/journal/plan?id=1'):
             conn.request('GET',path,headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,200);r.read()
         conn.request('GET','/api/journal/export?hours=24',headers={'Cookie':cookie})
-        r=conn.getresponse();self.assertEqual(r.status,200);self.assertEqual(json.loads(gzip.decompress(r.read())),{'plans':{},'events':[]})
+        r=conn.getresponse();self.assertEqual(r.status,200);self.assertIn('attachment',r.getheader('Content-Disposition'));self.assertEqual(json.loads(gzip.decompress(r.read())),{'plans':{},'events':[]})
         conn.request('GET','/api/journal?hours=999',headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,400);r.read()
         self.server.app.request_sample.assert_not_called();self.server.app.action.assert_not_called();conn.close()
 

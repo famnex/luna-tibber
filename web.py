@@ -138,6 +138,8 @@ class Dashboard:
         self.lock = threading.RLock()
         self.proc = None
         self.job = None
+        self.update_preparing = False
+        self.update_progress = None
         self.generation = 0
         self.mode = 'off'  # Never resume charging merely because the server rebooted.
         self.until = None
@@ -315,26 +317,51 @@ class Dashboard:
             self.price_at = 0
             self.price_fetched_at = 0
             self.price_data = []
+    def update_status(self):
+        return {**(self.update_progress or updater.read_status(self.folder)),'revision':self.revision}
+
+    def prepare_update(self):
+        try:
+            with self.lock:
+                c=self.config()
+                need_stop=self.mode!='off' or self.job in ('run','charge','charge-test','stop') or (self.folder/'pending-charge.json').exists()
+                request=read(self.folder/'discharge-request.json',{})
+                need_release=bool(request.get('until')) or (self.folder/'discharge-restore.json').exists()
+                if need_stop or need_release:self.preflight(c,commissioning=False)
+                self.fault=''
+                if need_release:luna.write_json(self.folder/'discharge-request.json',{'serial':c['expected_serial'],'until':None})
+                self.stop()
+                if self.fault:raise ValueError(self.fault)
+            # No lock while doing device IO: progress remains reachable. All other
+            # commands and sampling are excluded by update_preparing.
+            for command,needed in [('stop',need_stop),('discharge-sync',need_release)]:
+                if not needed:continue
+                result=subprocess.run([sys.executable,str(BASE/'luna.py'),'--config',str(self.config_path),command,'--execute'],
+                                      stdout=subprocess.PIPE,stderr=subprocess.STDOUT,text=True,timeout=90)
+                for line in result.stdout.splitlines():
+                    try:self.audit_event(json.loads(line),command,'off')
+                    except ValueError:pass
+                if result.returncode:raise ValueError('Update abgebrochen: Stopp oder Entladefreigabe nicht bestätigt. Verbindung prüfen.')
+            with self.lock:
+                if any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
+                    raise ValueError('Update abgebrochen: Gerätebestätigung steht aus.')
+                updater.start(self.folder,**self.update_settings)
+                self.update_progress=None
+        except Exception as exc:
+            with self.lock:
+                self.update_progress={'state':'failed','message':str(exc) if isinstance(exc,ValueError) else 'Update-Vorbereitung fehlgeschlagen; Gerät und Verbindung prüfen.'}
+        finally:
+            with self.lock:self.update_preparing=False
+
     def action(self, name, data):
         with self.lock:
-            if updater.busy(self.folder):raise ValueError('Update läuft; Steuerung vorübergehend gesperrt')
+            if self.update_preparing or updater.busy(self.folder):raise ValueError('Update läuft; Steuerung vorübergehend gesperrt')
             if name == 'update':
-                request=read(self.folder/'discharge-request.json',{})
-                hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
-                if self.mode!='off' or (self.proc and self.job!='sample'):
-                    raise ValueError('Zum Update auf Aus schalten und laufenden Vorgang abwarten')
-                if hold or any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
-                    raise ValueError('Vor dem Update Entladesperre aufheben und Freigabe abwarten')
-                # Status GETs start read-only samples. Wait under the lock so another
-                # browser cannot start a new one before the updater takes ownership.
-                if self.proc:
-                    try:self.proc.wait(timeout=20)
-                    except subprocess.TimeoutExpired:
-                        raise ValueError('Messwertabfrage läuft noch; Update bitte erneut anfordern') from None
-                    self.generation += 1
-                    self.proc = None
-                    self.job = None
-                updater.start(self.folder,**self.update_settings)
+                try:updater.inspect_repo(self.folder)
+                except updater.UpdateError as exc:raise ValueError(str(exc)) from None
+                self.update_preparing=True
+                self.update_progress={'state':'preparing','message':'Steuerung stoppen und Entladesperre freigeben …'}
+                threading.Thread(target=self.prepare_update,daemon=True).start()
             elif name == 'push-subscribe':
                 contact=self.config().get('push_contact','')
                 self.notifications.subscribe(data['subscription'],'mailto:'+contact if contact else '')
@@ -429,7 +456,7 @@ class Dashboard:
         while not self.closed.wait(1):
             with self.lock:
                 try:
-                    if updater.busy(self.folder):continue
+                    if self.update_preparing or updater.busy(self.folder):continue
                     request=read(self.folder/'discharge-request.json',{})
                     needs_restore=(self.folder/'discharge-restore.json').exists()
                     hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
@@ -526,7 +553,7 @@ class Dashboard:
     def request_sample(self, fast=False):
         # Called only by a visible browser. Reuse ongoing controller measurements.
         with self.lock:
-            if updater.busy(self.folder) or self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
+            if self.update_preparing or updater.busy(self.folder) or self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
                 return
             self.sample_at = time.monotonic()
             self.launch('sample')
@@ -554,7 +581,7 @@ class Dashboard:
             return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':{**updater.read_status(self.folder),'revision':self.revision},
+                    'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
                     'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
@@ -589,7 +616,7 @@ def save_sessions(server):
 class Handler(BaseHTTPRequestHandler):
     def log_message(self,*args):
         pass
-    def send(self,code,data,content_type='application/json',cookie=None):
+    def send(self,code,data,content_type='application/json',cookie=None,filename=None):
         body = data if isinstance(data,bytes) else json.dumps(data,ensure_ascii=False,default=str).encode()
         self.send_response(code)
         self.send_header('Content-Type',content_type)
@@ -598,11 +625,23 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header('X-Content-Type-Options','nosniff')
         self.send_header('X-Frame-Options','DENY')
         self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; frame-ancestors 'none'; base-uri 'none'")
+        if filename:self.send_header('Content-Disposition','attachment; filename="'+filename+'"')
         if cookie:
             if getattr(self.server,'secure_cookies',False):cookie+='; Secure'
             self.send_header('Set-Cookie',cookie)
         self.end_headers()
         self.wfile.write(body)
+    def send_download(self,stream,kind):
+        stream.seek(0,2);size=stream.tell();stream.seek(0)
+        self.send_response(200)
+        self.send_header('Content-Type','application/gzip' if kind=='json.gz' else 'text/plain; charset=utf-8')
+        self.send_header('Content-Disposition',f'attachment; filename="luna-diagnose-{datetime.now(timezone.utc):%Y-%m-%d}.{kind}"')
+        self.send_header('Content-Length',str(size));self.send_header('Cache-Control','no-store')
+        self.send_header('X-Content-Type-Options','nosniff');self.end_headers()
+        import shutil
+        try:shutil.copyfileobj(stream,self.wfile,64*1024)
+        except (BrokenPipeError,ConnectionResetError):pass
+
     def host_ok(self):
         try:return urlsplit('//'+self.headers.get('Host','')).hostname in self.server.allowed_hosts
         except ValueError:return False
@@ -632,7 +671,7 @@ class Handler(BaseHTTPRequestHandler):
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/api/update':
-            return self.send(200,{**updater.read_status(self.server.app.folder),'revision':self.server.app.revision})
+            return self.send(200,self.server.app.update_status())
         if self.path.split('?',1)[0]=='/api/journal/plan':
             from urllib.parse import urlsplit,parse_qs
             try:
@@ -649,10 +688,11 @@ class Handler(BaseHTTPRequestHandler):
                 if hours not in (6,12,24,48) or before<0:raise ValueError()
             except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Zeitraum'})
             journal=self.server.app.journal;path=self.path.split('?',1)[0]
-            if path=='/api/journal/export':
-                import gzip
-                return self.send(200,gzip.compress(json.dumps(journal.export(hours),ensure_ascii=False).encode()),'application/gzip')
-            if path=='/api/journal/text':return self.send(200,journal.prose(hours).encode(),'text/plain; charset=utf-8')
+            if path in ('/api/journal/export','/api/journal/text'):
+                try:
+                    with journal.download(hours,path.endswith('/export'),self.server.app.config()['timezone']) as stream:
+                        return self.send_download(stream,'json.gz' if path.endswith('/export') else 'txt')
+                except Exception:return self.send(503,{'error':'Export derzeit nicht möglich. Kürzeren Zeitraum wählen oder erneut versuchen.'})
             return self.send(200,journal.entries(hours,before,query.get('all',['0'])[0]=='1'))
         if self.path=='/api/history':
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
