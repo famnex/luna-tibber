@@ -1,7 +1,7 @@
 const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
 const source=fs.readFileSync(__dirname+'/app.js','utf8');
 let delay,callback,refreshed=0;
-const ctx={document:{hidden:false,addEventListener:(name,fn)=>callback=fn},setTimeout:(fn,ms)=>{delay=ms;return 1;},clearTimeout:()=>{delay=null;},refresh:()=>{refreshed++;},notify:()=>{},lastStatus:null,Date};
+const ctx={document:{getElementById:()=>null,hidden:false,addEventListener:(name,fn)=>callback=fn},setTimeout:(fn,ms)=>{delay=ms;return 1;},clearTimeout:()=>{delay=null;},refresh:()=>{refreshed++;},notify:()=>{},lastStatus:null,Date};
 vm.createContext(ctx);
 vm.runInContext(source.slice(source.indexOf('let refreshTimer=null,watch=null;')),ctx);
 vm.runInContext('scheduleRefresh()',ctx);assert.equal(delay,60000);

@@ -48,3 +48,6 @@ pv-forecast.lock
 diagnostics.sqlite3*
 
 meter-test.json
+
+meter-sample-at.json
+meter-sample-at.json.tmp

@@ -713,7 +713,7 @@ class Handler(BaseHTTPRequestHandler):
             except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Plan'})
             plan=self.server.app.journal.plan(key)
             return self.send(200,plan) if plan is not None else self.send(404,{'error':'Plan nicht mehr gespeichert'})
-        if self.path.split('?',1)[0] in ('/api/journal','/api/journal/export','/api/journal/text'):
+        if self.path.split('?',1)[0] in ('/api/journal','/api/journal/export','/api/journal/text','/api/journal/diagnosis'):
             from urllib.parse import urlsplit,parse_qs
             try:
                 query=parse_qs(urlsplit(self.path).query)
@@ -721,6 +721,7 @@ class Handler(BaseHTTPRequestHandler):
                 if hours not in (6,12,24,48) or before<0:raise ValueError()
             except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Zeitraum'})
             journal=self.server.app.journal;path=self.path.split('?',1)[0]
+            if path=='/api/journal/diagnosis':return self.send(200,journal.diagnosis(hours))
             if path in ('/api/journal/export','/api/journal/text'):
                 try:
                     with journal.download(hours,path.endswith('/export'),self.server.app.config()['timezone']) as stream:

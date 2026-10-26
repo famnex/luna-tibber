@@ -29,7 +29,11 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
                    projection_complete=True,planning_soc=joint['planning_soc'],
                    effective_target_soc=joint['morning_soc'],joint=joint,
                    night_start=joint['night_start'],night_end=joint['night_end'])
-        return finish(joint['reason'] if joint['charges'] or not joint['night_complete'] else 'Gemeinsamer Energieplan: keine wirtschaftliche Netzladung erforderlich')
+        if joint['charges'] or not joint['night_complete']:return finish(joint['reason'])
+        from diagnosis import fmt
+        bridge=joint['bridge']
+        status='Morgenbedarf gedeckt' if bridge['shortfall_kwh']<.001 else 'Morgenbedarf nicht vollständig gedeckt'
+        return finish(f"0 kWh Netzladung geplant · {status}: erwartet {fmt(joint['morning_soc'])} %, benötigt {fmt(bridge['required_soc'])} % SOC inkl. Puffer/Gerätegrenze · PV-Prognose {fmt(joint['solar']['generation_kwh'])} kWh")
     from dispatch import night_bounds,projected_soc
     start,end=night_bounds(c,now)
     a,b=max(now,start),end

@@ -787,3 +787,26 @@ Es gibt dafür keine zusätzlichen Abfragen am Wechselrichter.
 TXT benutzt die aktuell eingestellte Zeitzone; JSON enthält die ursprünglichen Planstände.
 TXT wird als .txt und der komprimierte Diagnoseexport als .json.gz ausgeliefert.
 TXT-Schätzungen sind kein SOH-/Kapazitätsnachweis für eine Garantie.
+
+### Verbrauchsdiagnose
+
+Im Verlauf lässt sich „Diagnose · Messung und Prognose vergleichen“ aufklappen.
+Bestehende Speicherabfragen ergänzen höchstens alle fünf Minuten einen optionalen
+Zähler-Leseblock (auch über Prozesswechsel gedrosselt, acht Sekunden Zeitlimit).
+Bei Aus ohne aktive Seite bleibt die stündliche Stichprobe bestehen. Die Diagnose
+schreibt keine Geräteeinstellungen. Fehlende Zählerdaten verhindern die Steuerung nicht.
+
+Hausleistung = Wechselrichter-AC-Leistung minus Zählerleistung (Huawei: Einspeisung
+positiv). Grundlage: https://github.com/wlcrs/huawei_solar/wiki/Visualisations .
+Die Energiewerte integrieren Stichproben näherungsweise; Lücken über zehn Minuten
+und Wechsel des Abendfensters werden nicht überbrückt. Vergleichswerte stammen
+aus der Prognose und Konfiguration zum Messzeitpunkt. PV-Eingangsleistung ist DC,
+die PV-Prognose AC: dieser Vergleich ist nur orientierend. Auto/Kochen/Grundlast
+sind mit einem Hauszähler nicht getrennt messbar; keine automatische Kalibrierung.
+Die Historie erfasst Messwerte erst ab Installation dieses Updates.
+
+Sperrphasen zeigen SOC-Abnahme und gemeldete Leistung getrennt. Zusätzlich wird
+die ausgelesene maximale Entladeleistung gegen eine zeitlich vorher bestätigte
+Sperre geprüft. SOC-Abnahme trotz 0 W belegt weder einen Defekt noch eine
+Entladung ins Haus. Planänderungen nennen veränderte Eingaben, Netzlademenge
+vorher/nachher und den geplanten Morgenbedarf.

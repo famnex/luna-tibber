@@ -20,7 +20,7 @@ CONFIG_KEYS=('target_soc','battery_floor_soc','battery_capacity_kwh','charge_pow
  'timezone','smart_discharge_enabled','pv_enabled','pv_factor','pv_kwp','pv_tilt','pv_azimuth','pv_ac_limit_kw')
 EVENT_KEYS=('soc','battery_power_w','battery_status','max_charge_power_w','ac_charge_enabled',
  'eligible','reason','app_charging','price_ct_kwh','economics','watts','minutes','fields',
- 'error_type','message','note','action','parameters','returncode','live','discharge_confirmation')
+ 'error_type','message','note','action','parameters','returncode','live','discharge_confirmation','meter')
 
 
 def clean(value,secrets=()):
@@ -101,9 +101,20 @@ class Journal:
         inputs={k:(event.get('diagnostic_inputs') or c).get(k) for k in CONFIG_KEYS}
         if preview:
             d['plan_summary']=clean({k:preview.get(k) for k in ('needed_kwh','planned_kwh','effective_target_soc','planning_soc','complete','reason')},secrets)
+        if d.get('meter'):
+            from diagnosis import sample_context
+            d['measurement_context']=sample_context(inputs,event.get('diagnostic_pv') or {},stamp)
+        change=None
+        if kind=='decision' and preview.get('joint'):
+            from diagnosis import plan_change
+            current={'joint':preview['joint'],'config':inputs,'soc':event.get('soc'),
+                     'prices_hash':hashlib.sha256(json.dumps(clean(prices),sort_keys=True).encode()).hexdigest()}
+            change=plan_change(getattr(self,'previous_decision',None),current)
+            self.previous_decision=current
+            if change:d['plan_change']=change
         state=(kind,mode,job,d.get('eligible'),d.get('reason'),dispatch.get('hold'),
                'charge' if (d.get('battery_power_w') or 0)>100 else 'discharge' if (d.get('battery_power_w') or 0)< -100 else 'idle')
-        important=kind not in ('decision','snapshot','test_sample') or state!=self.last_state
+        important=bool(change) or kind not in ('decision','snapshot','test_sample') or state!=self.last_state
         with self.connect() as db:
             if kind=='decision':
                 # Losslessly compress every distinct exact plan. Unchanged plans
@@ -121,6 +132,7 @@ class Journal:
                     self.last_plan=db.execute('INSERT INTO plans(time,data) VALUES (?,?)',(stamp,zlib.compress(raw,3))).lastrowid
                     self.plan_at=stamp;self.plan_signature=signature
             text=describe(kind,d)
+            if change:text+=' '+change
             db.execute('INSERT INTO events(time,kind,mode,job,revision,important,text,data,plan_id) VALUES (?,?,?,?,?,?,?,?,?)',
                        (stamp,kind,mode,job,revision,int(important),text,json.dumps(d,ensure_ascii=False),self.last_plan))
             if stamp-self.maintenance>=3600:
@@ -128,6 +140,13 @@ class Journal:
                 db.execute('DELETE FROM plans WHERE id NOT IN (SELECT DISTINCT plan_id FROM events WHERE plan_id IS NOT NULL)')
                 self.maintenance=stamp
         self.last_state=state
+    def diagnosis(self,hours):
+        from diagnosis import summarize
+        now=time.time()
+        with self.connect() as db:
+            rows=db.execute("SELECT time,data FROM events WHERE time>=? ORDER BY time,id",(now-hours*3600,)).fetchall()
+        return summarize([(t,json.loads(raw)) for t,raw in rows],hours)
+
     def soc_series(self):
         # Reuse recorded telemetry; no extra inverter requests. One read per minute.
         now=time.time()

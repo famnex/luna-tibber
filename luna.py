@@ -245,6 +245,29 @@ class Huawei:
             raise ValueError("SOC außerhalb 0–100")
         result["battery_status"] = int(result["battery_status"])
         result["ac_charge_enabled"] = bool(result["ac_charge_enabled"])
+        # Optional read-only diagnostics never prevent battery control.
+        if not hasattr(self,'_meter_at'):
+            try:self._meter_at=float(json.loads(self.meter_sample_path.read_text())['at'])
+            except (AttributeError,OSError,ValueError,KeyError,TypeError):self._meter_at=0
+        if time.time()-self._meter_at>=300:
+            self._meter_at=time.time()
+            try:
+                if getattr(self,'meter_sample_path',None):write_json(self.meter_sample_path,{'at':self._meter_at})
+                fields={'grid_w':rn.POWER_METER_ACTIVE_POWER,'inverter_w':rn.ACTIVE_POWER,
+                        'pv_dc_w':rn.INPUT_POWER,'meter_status':rn.METER_STATUS,
+                        'import_kwh':rn.GRID_ACCUMULATED_ENERGY,'export_kwh':rn.GRID_EXPORTED_ENERGY,
+                        'discharge_limit_w':rn.STORAGE_MAXIMUM_DISCHARGING_POWER}
+                values=await asyncio.wait_for(self.device.batch_update(list(fields.values())),8)
+                meter={k:values[v].value for k,v in fields.items()}
+                meter['meter_status']=int(meter['meter_status'])
+                if any(type(v) not in (int,float) or not math.isfinite(v) for v in meter.values()):
+                    raise ValueError('Invalid meter data')
+                meter['measured_at']=datetime.now(timezone.utc).isoformat()
+                meter['house_w']=meter['inverter_w']-meter['grid_w']
+                meter['valid']=meter['meter_status']==1 and meter['house_w']>=-50
+                result['meter']=meter
+            except Exception as exc:
+                result['meter']={'valid':False,'error':type(exc).__name__}
         return result
     async def meter_test(self):
         from huawei_solar import register_names as rn
@@ -311,6 +334,7 @@ async def operate(args, c, folder):
         from wifi import check_app
         await asyncio.to_thread(check_app, c["host"])
     hw = Huawei(c)
+    hw.meter_sample_path=folder/"meter-sample-at.json"
     pending = folder / "pending-charge.json"
     commissioned = folder / "commissioned.json"
     status_path = folder / "status.json"

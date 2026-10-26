@@ -29,7 +29,7 @@ function journalCard(event){
   journalNumber(d.price_ct_kwh,' ct/kWh'),journalNumber(d.minutes,' min'),
   journalNumber(d.guard?.threshold_soc,' % Schutzgrenze'),journalNumber(d.guard?.required_kwh,' kWh später benötigt')].filter(Boolean);
  const reasons=[d.reason,d.dispatch?.reason].filter(Boolean);
- let reason=reasons.length?[...new Set(reasons)].join(' · '):event.text;
+ let reason=d.plan_change||(reasons.length?[...new Set(reasons)].join(' · '):event.text);
  if(kind==='charge_command')reason='Befehl gesendet. Tatsächlichen Ladebeginn zeigen die folgenden Messwerte.';
  return {type,symbol,title,metrics,reason};
 }
@@ -133,3 +133,33 @@ document.addEventListener('DOMContentLoaded',()=>{
  document.addEventListener('visibilitychange',()=>{if(journalVisible())loadJournal();});
 });
 setInterval(()=>{if(journalVisible()&&Date.now()-journalAt>=60000)loadJournal();},1000);
+
+async function loadDiagnosis(){
+ const button=document.getElementById('diagnosisrefresh'),box=document.getElementById('diagnosisresult');
+ if(button.disabled)return;button.disabled=true;button.classList.add('button-loading');box.textContent='Messwerte werden ausgewertet …';
+ try{
+  const response=await fetch('/api/journal/diagnosis?hours='+document.getElementById('journalhours').value);
+  if(!response.ok)throw Error('Diagnose nicht erreichbar.');const d=await response.json();box.replaceChildren();
+  const line=text=>{const p=document.createElement('p');p.textContent=text;box.append(p);};
+  line(d.valid_samples+' gültige Zählermessungen · '+d.invalid_samples+' fehlgeschlagene / unplausible Messungen');
+  const labels={house:'Hausverbrauch gesamt',outside_evening:'Verbrauch außerhalb Abendfenster',evening:'Verbrauch im Abendfenster',pv:'PV: DC-Messung / AC-Prognose (nur Orientierung)'};
+  for(const [key,v] of Object.entries(d.totals)){
+   if(!v.hours){line(labels[key]+': noch keine vergleichbaren Messpaare.');continue;}
+   line(labels[key]+': '+journalNumber(v.actual_kwh,' kWh gemessen ≈')+' / '+journalNumber(v.planned_kwh,' kWh geplant')+' · Δ '+journalNumber(v.difference_kwh,' kWh')+' · '+journalNumber(v.hours,' h erfasst'));
+   if(key!=='pv')line('Ø '+journalNumber(v.actual_mean_w,' W gemessen')+' / '+journalNumber(v.planned_mean_w,' W geplant'));
+  }
+  line('Vergleich mit der Prognose zum jeweiligen Messzeitpunkt. Nur gemeinsame Messzeiträume, Lücken über 10 Minuten ausgelassen. Leistungswerte werden zwischen Messpunkten angenähert. PV-Eingangsleistung ist DC, die Prognose AC: keine exakte Wirkungsgradbewertung.');
+  line('Grundlast und Kochen sind nicht separat messbar. Auto und andere Verbraucher zählen mit. Einstellungen werden nicht automatisch verändert.');
+  const title=document.createElement('h3');title.textContent='SOC während bestätigter Entladesperren';box.append(title);
+  if(!d.hold_spans.length)line('Keine ausreichend dokumentierte Sperrphase im Zeitraum.');
+  for(const s of d.hold_spans){line(journalTime(s.start)+' – '+journalTime(s.end)+' · '+journalNumber(s.start_soc,' %')+' → '+journalNumber(s.end_soc,' %')+' · Abnahme '+journalNumber(s.soc_drop,' Prozentpunkte')+' · höchste gemeldete Entladung '+journalNumber(s.max_discharge_w,' W'));}
+  line('SOC-Abnahme bei 0 W ist ein Befund, kein Nachweis für Hausverbrauch oder einen Defekt. Eigenbedarf, SOC-Korrekturen und nicht erfasste Vorgänge lassen sich daraus nicht trennen.');
+  for(const s of d.limit_mismatches)line('⚠ '+journalTime(s.time)+': Sperre zuletzt bestätigt, ausgelesene Entladegrenze aber '+journalNumber(s.limit_w,' W')+'. Zeitpunkt einer möglichen externen Änderung unbekannt.');
+ }catch(e){box.textContent=e.message;}finally{button.disabled=false;button.classList.remove('button-loading');}
+}
+document.addEventListener('DOMContentLoaded',()=>{
+ const panel=document.getElementById('diagnosispanel');
+ panel.addEventListener('toggle',()=>{if(panel.open)loadDiagnosis();});
+ document.getElementById('diagnosisrefresh').onclick=loadDiagnosis;
+ document.getElementById('journalhours').addEventListener('change',()=>{if(panel.open)loadDiagnosis();});
+});
