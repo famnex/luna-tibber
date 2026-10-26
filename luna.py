@@ -246,6 +246,24 @@ class Huawei:
         result["battery_status"] = int(result["battery_status"])
         result["ac_charge_enabled"] = bool(result["ac_charge_enabled"])
         return result
+    async def meter_test(self):
+        from huawei_solar import register_names as rn
+        fields=[('Zählerstatus','METER_STATUS'),('Zählertyp','METER_TYPE'),
+                ('Netzleistung','POWER_METER_ACTIVE_POWER'),('Netzeinspeisung Zähler','GRID_EXPORTED_ENERGY'),
+                ('Netzbezug Zähler','GRID_ACCUMULATED_ENERGY'),('PV-Eingangsleistung','INPUT_POWER'),
+                ('Wechselrichter AC-Leistung','ACTIVE_POWER'),('Ertrag gesamt','ACCUMULATED_YIELD_ENERGY')]
+        rows=[]
+        for label,name in fields:
+            try:
+                key=getattr(rn,name)
+                values=await asyncio.wait_for(self.device.batch_update([key]),8)
+                result=values[key];value=result.value
+                if isinstance(value,(int,float)) and not math.isfinite(value):raise ValueError()
+                rows.append(dict(label=label,register=name,value=str(value),unit=str(getattr(result,'unit','') or ''),ok=True))
+            except Exception as exc:
+                rows.append(dict(label=label,register=name,ok=False,error=type(exc).__name__))
+        return rows
+
     async def login(self):
         missing = [label for key, label in (("expected_serial", "Wechselrichter-Seriennummer"), ("password", "Huawei-Installateurpasswort")) if not self.c[key]]
         if missing:
@@ -308,6 +326,9 @@ async def operate(args, c, folder):
         loop.add_signal_handler(sig, stop_event.set)
     try:
         await hw.connect()
+        if args.command == "meter-test":
+            emit("meter_test", rows=await hw.meter_test())
+            return
         if args.command == "discharge-sync":
             from discharge import sync
             await hw.login()
@@ -475,7 +496,7 @@ async def operate(args, c, folder):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
-    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample", "discharge-sync"])
+    parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample", "discharge-sync", "meter-test"])
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     parser.add_argument("--target-soc", type=float, help="Temporärer Ziel-SOC nur für charge")
     args = parser.parse_args()

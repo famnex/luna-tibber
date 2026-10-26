@@ -221,6 +221,8 @@ class Dashboard:
                     except Exception:self.events.append({'event':'statistics_error','message':'Planstatistik konnte nicht gespeichert werden'})
                 if event.get('event') in ('stopped','stopped_on_exit','target_reached'):
                     self.finish_history(datetime.fromisoformat(event['time']))
+                if event.get('event') == 'meter_test':
+                    luna.write_json(self.folder/'meter-test.json',event)
                 if event.get('event') == 'connected':
                     self.device = event
                 if event.get('event') == 'stop_unconfirmed':
@@ -413,13 +415,13 @@ class Dashboard:
                 if not serial:
                     raise ValueError('Zuerst Gerät auslesen')
                 self.save_settings({'expected_serial':serial})
-            elif name == 'probe':
+            elif name in ('probe','meter-test'):
                 if self.mode != 'off':
                     raise ValueError('Zum Auslesen zuerst auf Aus schalten')
                 if not self.config_path.exists():
                     self.save_settings({})
                 self.fault = ''
-                self.launch('probe')
+                self.launch(name)
             elif name == 'test':
                 if self.mode != 'off':
                     raise ValueError('Zuerst auf Aus schalten')
@@ -613,7 +615,7 @@ class Dashboard:
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
-                    'battery_history':self.journal.soc_series(),'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
+                    'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                     'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
