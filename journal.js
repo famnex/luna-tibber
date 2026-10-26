@@ -103,11 +103,11 @@ async function downloadBody(response){
 }
 async function exportJournal(kind,button){
  if(journalExportBusy)return; journalExportBusy=true;
- const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),90000);
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),240000);
  const status=document.getElementById('journalstatus');
  button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
  exportProgress(null,'1/2 · Protokoll wird zusammengestellt …');
- status.textContent='Export wird erstellt … bei vielen Planständen kann das bis zu einer Minute dauern.';
+ status.textContent='Export wird erstellt … bei vielen Planständen kann das bis zu drei Minuten dauern.';
  try{
   const r=await fetch('/api/journal/'+(kind==='json'?'export':'text')+'?hours='+document.getElementById('journalhours').value,{signal:controller.signal});
   if(!r.ok)throw Error(r.status===401?'Bitte erneut anmelden.':'Export fehlgeschlagen. Bitte 6 Stunden wählen und erneut versuchen.');

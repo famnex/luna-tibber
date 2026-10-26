@@ -186,7 +186,7 @@ class Journal:
             cutoff=datetime.now(timezone.utc).timestamp()-hours*3600
             with self.connect() as db:
                 rows=db.execute('SELECT id,time,kind,mode,job,revision,important,text,data,plan_id FROM events WHERE time>=? ORDER BY id LIMIT 20000',(cutoff,)).fetchall()
-            deadline=time.monotonic()+60
+            deadline=time.monotonic()+180
             def check():
                 if time.monotonic()>deadline:raise TimeoutError('Exportzeit überschritten')
             # Roll to disk after 1 MiB; only one decoded plan is held at a time.
@@ -203,12 +203,18 @@ class Journal:
                         gz.write(b'],"plans":{')
                         ids=sorted({r[9] for r in rows if r[9] is not None})
                         first=True
-                        for key in ids:
-                            check();plan=self.plan(key)
-                            if plan is None:continue
-                            if not first:gz.write(b',')
-                            first=False;write(str(key));gz.write(b':');write(plan)
-                            del plan
+                        # Stored plan payloads are already valid JSON. Copy their
+                        # decompressed bytes without building and serializing huge
+                        # Python objects again; reuse one SQLite connection.
+                        with self.connect() as plans_db:
+                            for key in ids:
+                                check()
+                                row=plans_db.execute('SELECT data FROM plans WHERE id=?',(key,)).fetchone()
+                                if row is None:continue
+                                raw=zlib.decompress(row[0]) if isinstance(row[0],bytes) else row[0].encode()
+                                if not first:gz.write(b',')
+                                first=False;write(str(key));gz.write(b':');gz.write(raw)
+                                del raw
                         gz.write(b'},"limit_reached":');write(len(rows)==20000)
                         gz.write(b',"note":');write('Befehle sind kein Beleg für tatsächlichen Energiefluss. Keine rückwirkende Rekonstruktion.')
                         gz.write(b'}')

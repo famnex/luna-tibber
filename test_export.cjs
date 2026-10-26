@@ -9,10 +9,10 @@ vm.createContext(ctx);vm.runInContext(fs.readFileSync(__dirname+'/journal.js','u
  const button=new El();await ctx.exportJournal('txt',button);
  assert.equal(button.disabled,false);assert.equal(button['aria-busy'],'false');assert.equal(clicked,1);
  const link=get('journalstatus').children[1];assert.match(link.download,/\.txt$/);assert.equal(link.href,'blob:test');assert.ok(!link.removed);
- assert.ok(![...timers.values()].some(t=>t.ms===90000));
+ assert.ok(![...timers.values()].some(t=>t.ms===240000));
  ctx.fetch=async()=>({ok:false,status:401});await ctx.exportJournal('json',button);assert.match(get('journalstatus').textContent,/anmelden/);assert.equal(button.disabled,false);
  ctx.fetch=async(u,o)=>new Promise((resolve,reject)=>o.signal.addEventListener('abort',()=>reject(Object.assign(Error(),{name:'AbortError'}))));
- const pending=ctx.exportJournal('json',button);assert.equal(button.disabled,true);[...timers.values()].find(t=>t.ms===90000).f();await pending;
+ const pending=ctx.exportJournal('json',button);assert.equal(button.disabled,true);[...timers.values()].find(t=>t.ms===240000).f();await pending;
  assert.match(get('journalstatus').textContent,/6 Stunden/);assert.equal(button.disabled,false);
  console.log('Export: persistent Safari link, correct TXT suffix, auth errors, timeout and spinner cleanup passed');
 })().catch(e=>{console.error(e);process.exitCode=1});
