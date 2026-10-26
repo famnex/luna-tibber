@@ -145,23 +145,26 @@ function diagnosisChart(container,title,rows,lines,unit,maxGap){
  function draw(){
   plot.replaceChildren();const ns='http://www.w3.org/2000/svg';
   const el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;};
-  const svg=el('svg',{viewBox:'0 0 760 250',role:'img','aria-label':title+' · '+unit});plot.append(svg);
+  const width=Math.max(360,Math.min(760,panel.clientWidth||760));
+  const svg=el('svg',{viewBox:`0 0 ${width} 250`,role:'img','aria-label':title+' · '+unit});plot.append(svg);
   const lo=data[0].time,hi=data[data.length-1].time;
   const ymax=Math.max(unit==='%'?100:1,...data.flatMap(r=>lines.filter(l=>active.has(l.key)).map(l=>Number.isFinite(r[l.key])?r[l.key]/(unit==='kW'?1000:1):0)))* (unit==='%'?1:1.1);
-  const x=t=>60+(t-lo)/Math.max(1,hi-lo)*680,y=v=>210-v/ymax*180;
-  for(let i=0;i<=4;i++){const v=ymax*i/4;svg.append(el('line',{x1:60,x2:740,y1:y(v),y2:y(v),stroke:'#dbe5de'}));svg.append(el('text',{x:52,y:y(v)+4,'text-anchor':'end',fill:'#61746b','font-size':12},v.toLocaleString('de-DE',{maximumFractionDigits:1})));}
+  const x=t=>60+(t-lo)/Math.max(1,hi-lo)*(width-80),y=v=>210-v/ymax*180;
+  for(let i=0;i<=4;i++){const v=ymax*i/4;svg.append(el('line',{x1:60,x2:width-20,y1:y(v),y2:y(v),stroke:'#dbe5de'}));svg.append(el('text',{x:52,y:y(v)+4,'text-anchor':'end',fill:'#61746b','font-size':12},v.toLocaleString('de-DE',{maximumFractionDigits:1})));}
   svg.append(el('text',{x:60,y:17,fill:'#61746b','font-size':12},unit));
-  for(let i=0;i<3;i++){const t=lo+(hi-lo)*i/2;svg.append(el('text',{x:x(t),y:238,'text-anchor':i===0?'start':i===2?'end':'middle',fill:'#61746b','font-size':12},time(t)));}
+  const ticks=width<500?2:3;for(let i=0;i<ticks;i++){const t=lo+(hi-lo)*i/(ticks-1);svg.append(el('text',{x:x(t),y:238,'text-anchor':i===0?'start':i===ticks-1?'end':'middle',fill:'#61746b','font-size':12},time(t)));}
   for(const l of lines){if(!active.has(l.key))continue;let path='',previous=null;
    for(const r of rows){const v=r[l.key];if(!Number.isFinite(v)){previous=null;continue;}const val=v/(unit==='kW'?1000:1);path+=(previous&&r.time-previous.time<=maxGap?' L':' M')+x(r.time)+' '+y(val);previous=r;}
    svg.append(el('path',{d:path,fill:'none',stroke:l.color,'stroke-width':2.5,'stroke-dasharray':l.dashed?'6 4':'none','stroke-linejoin':'round'}));
   }
-  for(const r of data){
+  const pointLabels=[];for(const r of data){
    const label=time(r.time)+' · '+lines.filter(l=>active.has(l.key)&&Number.isFinite(r[l.key])).map(l=>l.name+': '+journalNumber(r[l.key]/(unit==='kW'?1000:1),' '+unit)).join(' · ');
-   const hit=el('rect',{x:x(r.time)-3,y:28,width:6,height:184,fill:'transparent',tabindex:0,role:'img','aria-label':label});hit.append(el('title',{},label));for(const type of ['click','focus','pointerenter'])hit.addEventListener(type,()=>detail.textContent=label);svg.append(hit);
+   pointLabels.push(label);const hit=el('rect',{x:x(r.time)-3,y:28,width:6,height:184,fill:'transparent',tabindex:0,role:'img','aria-label':label});hit.append(el('title',{},label));for(const type of ['click','focus','pointerenter'])hit.addEventListener(type,()=>detail.textContent=label);svg.append(hit);
   }
+  svg.addEventListener('pointerdown',event=>{const bounds=svg.getBoundingClientRect(),px=(event.clientX-bounds.left)*width/bounds.width;if(px<60||px>width-20)return;const stamp=lo+(px-60)/(width-80)*(hi-lo);let nearest=0;for(let i=1;i<data.length;i++)if(Math.abs(data[i].time-stamp)<Math.abs(data[nearest].time-stamp))nearest=i;detail.textContent=pointLabels[nearest];});
  }
  for(const l of lines){const b=diagnosisElement('button',l.name);b.style.borderColor=l.color;b.setAttribute('aria-pressed','true');b.onclick=()=>{active.has(l.key)?active.delete(l.key):active.add(l.key);b.setAttribute('aria-pressed',String(active.has(l.key)));draw();};controls.append(b);}draw();
+ if(typeof ResizeObserver!=='undefined'){const observer=new ResizeObserver(()=>{if(!panel.isConnected){observer.disconnect();return;}draw();});observer.observe(panel);}
 }
 function renderDiagnosis(box,d){
  box.replaceChildren();const el=diagnosisElement;

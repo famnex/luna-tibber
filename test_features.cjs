@@ -29,7 +29,7 @@ ctx.ledger.months=[{...ctx.ledger.periods.today,period:'2026-10'}];
 vm.runInContext('renderHistory()',ctx);
 const card=elements.periodstats.children[0];
 assert.match(card.children[1].textContent,/-0,12/);
-assert.equal(card.children[2].textContent,'Mehrkosten laut Plan');
+assert.equal(card.children[2].textContent,'Geschätzte Mehrkosten');
 assert.match(card.children[3].textContent,/Verschleiß: 0,02/);
 assert.match(card.children[3].textContent,/Teilbetrag/);
 assert.equal(elements.historyrows.children[0].children.length,4);

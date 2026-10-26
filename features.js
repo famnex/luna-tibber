@@ -73,7 +73,7 @@ function renderHistory(){
   const v=d.periods[key],card=document.createElement('article');card.className='card statcard';
   const h=document.createElement('p');h.className='eyebrow';h.textContent=title;
   const amount=document.createElement('strong');amount.className='big';amount.textContent=money(v,'saving');
-  const label=document.createElement('p');label.textContent=valued(v)&&v.saving<0?'Mehrkosten laut Plan':'Ersparnis laut Plan';
+  const label=document.createElement('p');label.textContent=valued(v)&&v.saving<0?'Geschätzte Mehrkosten':'Geschätzte Ersparnis';
   const detail=document.createElement('p');detail.className='muted';
   detail.textContent=empty(v)?'Keine Ladeaufträge in diesem Zeitraum.':!valued(v)?'Ladeaufträge vorhanden, aber Preise fehlen für die Geldberechnung.':`Vermiedene Stromkosten: ${eur(v.avoided)} · Ladekosten: ${eur(v.cost)} · Verschleiß: ${eur(Math.max(0,v.avoided-v.cost-v.saving))}${partial(v)?' · Teilbetrag: Für weitere Ladeaufträge fehlen Preise.':''}`;
   card.append(h,amount,label,detail);box.append(card);
