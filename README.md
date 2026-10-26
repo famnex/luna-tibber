@@ -844,3 +844,13 @@ Benutzer ausgeschlossen werden. DC-PV wird nicht automatisch auf AC kalibriert.
 `morning_buffer_pct` (Standard 10 %, Bereich 0–100 %) ersetzt den bislang festen
 Zuschlag auf den morgendlichen Hausbedarf; Akku-Eigenverbrauch bleibt separat.
 Der vorhandene `pv_factor` legt den anrechenbaren Anteil der PV-Prognose fest.
+
+Empfehlungen verwenden unabhängig vom Diagramm-Zeitraum die letzten sieben Tage.
+Grundverbrauch: mindestens zwölf erfasste Stunden außerhalb des Abendfensters,
+verteilt auf mindestens zwei Tage mit je zwei Stunden. Abend-Zusatz: mindestens
+zwei Abendfenster mit je 90 % Abdeckung; Vorschlag aus mittlerer gemessener Last
+abzüglich eingestellter Grundlast, auf die Fensterdauer bezogen. Nur Daten mit
+passenden Einstellungen zählen. Fortschritt zeigt fehlende Stunden/Tage/Fenster;
+kein garantierter Fertigstellungstermin bei Messlücken. Numerische Vorschläge
+bleiben von der Abwesenheit von Auto/Sonderlasten abhängig. PV, Morgenpuffer und
+Eigenverbrauch erhalten ohne geeignete Vergleichsbasis keine Empfehlungskarte.

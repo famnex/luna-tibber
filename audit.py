@@ -141,11 +141,15 @@ class Journal:
                 self.maintenance=stamp
         self.last_state=state
     def diagnosis(self,hours,config=None):
-        from diagnosis import summarize
+        from diagnosis import summarize,recommendations
         now=time.time()
         with self.connect() as db:
-            rows=db.execute("SELECT time,data FROM events WHERE time>=? ORDER BY time,id",(now-hours*3600,)).fetchall()
-        return summarize([(t,json.loads(raw)) for t,raw in rows],hours,config)
+            rows=db.execute("SELECT time,data FROM events WHERE time>=? ORDER BY time,id",(now-7*86400,)).fetchall()
+        parsed=[(t,json.loads(raw)) for t,raw in rows]
+        result=summarize([(t,d) for t,d in parsed if t>=now-hours*3600],hours,config)
+        result['recommendations']=recommendations(parsed,config or {})
+        result['advice_days']=7
+        return result
 
     def soc_series(self):
         # Reuse recorded telemetry; no extra inverter requests. One read per minute.

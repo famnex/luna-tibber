@@ -54,9 +54,38 @@ class DiagnosisTests(unittest.TestCase):
         r=summarize(rows,1);self.assertEqual(r['hold_spans'][0]['max_discharge_w'],0)
     def test_recommendations_require_data_and_no_pv_calibration(self):
         r=summarize([(0,self.sample()),(300,self.sample(900))],24,{'base_load_w':500})
-        self.assertIn('weitere Daten',r['recommendations'][0]['title'])
-        self.assertIn('nicht aus DC',r['recommendations'][2]['title'])
+        self.assertIn('Daten sammeln',r['recommendations'][0]['title'])
+        self.assertEqual(len(r['recommendations']),2)
+        self.assertFalse(any(v['setting']=='pv_factor' for v in r['recommendations']))
     def test_zero_forecast_no_percentage_or_crash(self):
         r=self.sample();r['measurement_context']['load_w']=0
         d=summarize([(0,r),(300,r)],24,{'base_load_w':0})
         self.assertIsNone(d['totals']['house']['difference_pct'])
+
+
+    def advice_rows(self,days=2,house=700,evening=False,duration=6):
+        rows=[]
+        for day in range(days):
+            start=datetime(2026,10,24+day,16 if evening else 6,tzinfo=timezone.utc).timestamp()
+            for i in range(int(duration*12)+1):
+                d=self.sample(house,evening=evening)
+                d['measurement_context'].update(base_w=500,extra_hours=2,extra_load_kwh=2)
+                rows.append((start+i*300,d))
+        return rows
+    def test_numeric_base_advice_and_progress(self):
+        from diagnosis import recommendations
+        c={'base_load_w':500,'extra_load_kwh':2}
+        waiting=recommendations(self.advice_rows(days=1),c)[0]
+        self.assertFalse(waiting['ready']);self.assertEqual(waiting['progress_pct'],50)
+        r=recommendations(self.advice_rows(),c)[0]
+        self.assertTrue(r['ready']);self.assertEqual(r['suggested'],700)
+    def test_two_complete_evenings_required_and_numeric_extra(self):
+        from diagnosis import recommendations
+        c={'base_load_w':500,'extra_load_kwh':2}
+        self.assertFalse(recommendations(self.advice_rows(evening=True,duration=1),c)[1]['ready'])
+        r=recommendations(self.advice_rows(house=2000,evening=True,duration=2),c)[1]
+        self.assertTrue(r['ready']);self.assertEqual(r['suggested'],3)
+    def test_changed_base_excluded(self):
+        from diagnosis import recommendations
+        r=recommendations(self.advice_rows(),{'base_load_w':600})[0]
+        self.assertFalse(r['ready']);self.assertEqual(r['progress_pct'],0)

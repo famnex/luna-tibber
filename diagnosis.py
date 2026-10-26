@@ -112,32 +112,55 @@ def summarize(rows,hours,config=None):
         out['actual_mean_w']=out['actual_kwh']*1000/out['hours'] if out['hours'] else None
         out['planned_mean_w']=out['planned_kwh']*1000/out['hours'] if out['hours'] else None
     spans=[{**s,'soc_drop':s['start_soc']-s['end_soc']} for s in spans if s['samples']>=2 and s['end']-s['start']>=60]
-    advice=recommendations(totals,contexts,dates,config)
+    advice=recommendations(rows,config)
     return {'series':series,'soc_series':list(soc_series.values()),'recommendations':advice,'tolerance_pct':config.get('diagnosis_tolerance_pct',10),'totals':totals,'valid_samples':valid,'invalid_samples':invalid,'requested_hours':hours,
             'hold_spans':spans[-30:],'limit_mismatches':limits[-30:]}
 
 
-def recommendations(totals,contexts,dates,c):
-    tolerance=c.get('diagnosis_tolerance_pct',10)
-    result=[]
-    def add(title,text,key,level='info'):
-        result.append(dict(title=title,text=text,setting=key,level=level))
-    outside=totals['outside_evening'];diff=outside['difference_pct']
-    stable=all(x.get('base_w')==c.get('base_load_w') for x in contexts)
-    if diff is not None and abs(diff)<=tolerance:
-        add('Grundverbrauch vorerst beibehalten',f"Ø {fmt(outside['actual_mean_w'])} W statt {fmt(outside['planned_mean_w'])} W ({diff:+.1f} %). Innerhalb der eingestellten ±{tolerance:g} %. Bisher {fmt(outside['hours'])} h erfasst.",'base_load_w','ok')
-    elif diff is None or outside['hours']<12 or len(dates)<2 or not stable:
-        add('Grundverbrauch: weitere Daten sammeln','Für einen Zahlenvorschlag mindestens 12 erfasste Stunden an zwei Tagen bei unveränderter Grundlast-Einstellung abwarten. Auto und andere Sonderlasten vorher ausschließen.','base_load_w')
+def recommendations(rows,c):
+    """Use covered time, not sample counts. Advice is conditional on household-only data."""
+    zone=ZoneInfo(c.get('timezone','Europe/Berlin'));base=c.get('base_load_w',0)
+    extra=c.get('extra_load_kwh',0);window=c.get('extra_load_end_hour',19)-c.get('extra_load_start_hour',17)
+    tolerance=c.get('diagnosis_tolerance_pct',10);days={};previous=None
+    for stamp,d in rows:
+        m=d.get('meter');ctx=d.get('measurement_context') or {}
+        if not m:continue
+        if not m.get('valid') or not finite(m.get('house_w')) or ctx.get('base_w')!=base:
+            previous=None;continue
+        date=datetime.fromtimestamp(stamp,timezone.utc).astimezone(zone).date().isoformat()
+        if previous:
+            t,p,pc,pdate=previous;hours=(stamp-t)/3600
+            if 0<hours<=1/6 and date==pdate and ctx.get('evening')==pc.get('evening'):
+                evening=ctx.get('evening') is True
+                stable=not evening or all(x.get('extra_hours')==window and x.get('extra_load_kwh')==extra for x in (ctx,pc))
+                if stable:
+                    day=days.setdefault(date,{'base_h':0.,'base_kwh':0.,'evening_h':0.,'evening_kwh':0.})
+                    key='evening' if evening else 'base'
+                    day[key+'_h']+=hours;day[key+'_kwh']+=(max(0,p['house_w'])+max(0,m['house_w']))/2000*hours
+        previous=(stamp,m,ctx,date)
+    h=sum(d['base_h'] for d in days.values());kwh=sum(d['base_kwh'] for d in days.values())
+    count=sum(d['base_h']>=2-1e-9 for d in days.values());actual=kwh/h*1000 if h else None
+    ready=h>=12-1e-9 and count>=2 and base>0
+    def record(title,text,key,ready,progress,ratio,value=None,level='info'):
+        return dict(title=title,text=text,setting=key,ready=ready,progress=progress,
+                    progress_pct=round(max(0,min(1,ratio))*100),suggested=value,level=level)
+    progress=f"{fmt(h)} / 12 h · {min(count,2)} / 2 Tage mit je ≥2 h"
+    if ready:
+        diff=(actual/base-1)*100;keep=abs(diff)<=tolerance;target=base if keep else max(0,min(10000,round(actual/10)*10))
+        first=record(f"Grundverbrauch: {base:g} W beibehalten" if keep else f"Grundverbrauch: {base:g} → {target:g} W",
+                     f"Gemessen Ø {fmt(actual)} W · {diff:+.1f} %. Nur ohne Auto/Sonderlasten übernehmen.",'base_load_w',True,progress,1,target,'ok' if keep else 'review')
     else:
-        suggested=round(outside['actual_mean_w']/10)*10
-        add('Grundverbrauch prüfen',f"Abweichung {diff:+.1f} %. Rechnerischer Vergleichswert: {suggested} W (aktuell {c.get('base_load_w',0):g} W). Nur übernehmen, wenn Auto und andere Sonderlasten nicht enthalten sind; dies ist keine isolierte Grundlastmessung.",'base_load_w','review')
-    evening=totals['evening']
-    if evening['hours']<3 or len(dates)<2:
-        add('Abendbedarf noch nicht bewertbar','Mindestens zwei weitgehend erfasste Abendfenster vergleichen. Den Zusatzbedarf nicht aus einer kurzen Kochspitze hochrechnen.','extra_load_kwh')
+        text=(f"Bisher Ø {fmt(actual)} W. " if actual is not None else '')+f"Noch {fmt(max(0,12-h))} Messstunden und {max(0,2-count)} qualifizierte Tage nötig."
+        first=record('Grundverbrauch · Daten sammeln',text,'base_load_w',False,progress,min(h/12,count/2))
+    full=[d for d in days.values() if window>0 and d['evening_h']>=.9*window-1e-9]
+    progress=f"{min(len(full),2)} / 2 Abendfenster · jeweils ≥90 % erfasst"
+    if len(full)>=2:
+        values=[max(0,(d['evening_kwh']/d['evening_h']-base/1000)*window) for d in full]
+        measured=sum(values)/len(values);keep=abs(measured-extra)<=max(.1,extra*tolerance/100)
+        target=extra if keep else min(50,round(measured,1))
+        second=record(f"Abend-Zusatz: {extra:g} kWh beibehalten" if keep else f"Abend-Zusatz: {extra:g} → {target:g} kWh",
+                      f"Ø {fmt(measured)} kWh über der eingestellten Grundlast je Abend. Nur ohne Auto/Sonderlasten übernehmen.",'extra_load_kwh',True,progress,1,target,'ok' if keep else 'review')
     else:
-        add('Abendfenster vergleichen',f"{fmt(evening['actual_kwh'])} kWh gemessen gegenüber {fmt(evening['planned_kwh'])} kWh geplant über {fmt(evening['hours'])} h. Bei wiederholter Mehrlast zuerst Uhrzeiten und dann täglichen Zusatzverbrauch prüfen. Auto und andere Verbraucher zählen mit.",'extra_load_kwh','review')
-    pv=totals['pv']
-    add('PV-Faktor nicht aus DC-Werten kalibrieren',f"Aktueller Faktor {c.get('pv_factor',.7):g}: 0,7 bedeutet 30 % Abschlag. DC-Messung und AC-Prognose sind nicht direkt gleichwertig; deshalb kein automatischer Prozentvorschlag aus dieser Differenz. Mehrtägig Zeitpunkt und Tagesverlauf prüfen.",'pv_factor')
-    add('Morgenpuffer getrennt einstellen',f"Aktuell {c.get('morning_buffer_pct',10):g} % Zuschlag auf den erwarteten Hausbedarf bis zur PV-Deckung. Bei wiederkehrender Unterdeckung erhöhen; die PV-Prognose selbst wird dadurch nicht verändert.",'morning_buffer_pct')
-    add('Akku-Eigenverbrauch bleibt eine Annahme',f"Aktuell {c.get('battery_idle_w',100):g} W. SOC-Verlust unter Sperre kann auch durch SOC-Korrekturen entstehen. Erst mehrere lange, bestätigte Ruhephasen vergleichen; nicht aus einer einzelnen Nacht nachregeln.",'battery_idle_w')
-    return result
+        latest=max((d['evening_h'] for d in days.values() if window>0 and d['evening_h']<.9*window),default=0)
+        second=record('Abend-Zusatz · Daten sammeln',f"Noch {2-len(full)} ausreichend erfasste Abende nötig. Teilfenster bisher maximal {fmt(latest)} / {fmt(max(0,window*.9))} h.",'extra_load_kwh',False,progress,len(full)/2)
+    return [first,second]
