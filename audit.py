@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime,timezone
 from zoneinfo import ZoneInfo
 
-CONFIG_KEYS=('battery_idle_w','target_soc','battery_floor_soc','battery_capacity_kwh','charge_power_w',
+CONFIG_KEYS=('morning_buffer_pct','diagnosis_tolerance_pct','battery_idle_w','target_soc','battery_floor_soc','battery_capacity_kwh','charge_power_w',
  'roundtrip_efficiency','wear_ct_kwh','min_saving_ct_kwh','max_buy_ct_kwh',
  'base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour',
  'night_start_hour','night_end_hour','use_start_hour','use_end_hour','max_session_minutes',
@@ -140,12 +140,12 @@ class Journal:
                 db.execute('DELETE FROM plans WHERE id NOT IN (SELECT DISTINCT plan_id FROM events WHERE plan_id IS NOT NULL)')
                 self.maintenance=stamp
         self.last_state=state
-    def diagnosis(self,hours):
+    def diagnosis(self,hours,config=None):
         from diagnosis import summarize
         now=time.time()
         with self.connect() as db:
             rows=db.execute("SELECT time,data FROM events WHERE time>=? ORDER BY time,id",(now-hours*3600,)).fetchall()
-        return summarize([(t,json.loads(raw)) for t,raw in rows],hours)
+        return summarize([(t,json.loads(raw)) for t,raw in rows],hours,config)
 
     def soc_series(self):
         # Reuse recorded telemetry; no extra inverter requests. One read per minute.

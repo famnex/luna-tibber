@@ -134,28 +134,64 @@ document.addEventListener('DOMContentLoaded',()=>{
 });
 setInterval(()=>{if(journalVisible()&&Date.now()-journalAt>=60000)loadJournal();},1000);
 
+function diagnosisElement(tag,text,cls){const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;}
+function diagnosisChart(container,title,rows,lines,unit,maxGap){
+ const panel=diagnosisElement('section',undefined,'diag-chart');panel.append(diagnosisElement('h3',title));container.append(panel);
+ const data=rows.filter(r=>lines.some(l=>Number.isFinite(r[l.key])));
+ if(data.length<2){panel.append(diagnosisElement('p','Noch nicht genügend Messpunkte.','muted'));return;}
+ const controls=diagnosisElement('div',undefined,'diag-legend'),plot=diagnosisElement('div'),detail=diagnosisElement('p','Punkte antippen oder mit Tab auswählen.','muted diag-detail');panel.append(controls,plot,detail);
+ const active=new Set(lines.map(l=>l.key));
+ const time=t=>new Date(t*1000).toLocaleString('de-DE',{timeZone:typeof lastStatus!=='undefined'?lastStatus?.settings?.timezone||'Europe/Berlin':'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
+ function draw(){
+  plot.replaceChildren();const ns='http://www.w3.org/2000/svg';
+  const el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;};
+  const svg=el('svg',{viewBox:'0 0 760 250',role:'img','aria-label':title+' · '+unit});plot.append(svg);
+  const lo=data[0].time,hi=data[data.length-1].time;
+  const ymax=Math.max(unit==='%'?100:1,...data.flatMap(r=>lines.filter(l=>active.has(l.key)).map(l=>Number.isFinite(r[l.key])?r[l.key]/(unit==='kW'?1000:1):0)))* (unit==='%'?1:1.1);
+  const x=t=>60+(t-lo)/Math.max(1,hi-lo)*680,y=v=>210-v/ymax*180;
+  for(let i=0;i<=4;i++){const v=ymax*i/4;svg.append(el('line',{x1:60,x2:740,y1:y(v),y2:y(v),stroke:'#dbe5de'}));svg.append(el('text',{x:52,y:y(v)+4,'text-anchor':'end',fill:'#61746b','font-size':12},v.toLocaleString('de-DE',{maximumFractionDigits:1})));}
+  svg.append(el('text',{x:60,y:17,fill:'#61746b','font-size':12},unit));
+  for(let i=0;i<3;i++){const t=lo+(hi-lo)*i/2;svg.append(el('text',{x:x(t),y:238,'text-anchor':i===0?'start':i===2?'end':'middle',fill:'#61746b','font-size':12},time(t)));}
+  for(const l of lines){if(!active.has(l.key))continue;let path='',previous=null;
+   for(const r of rows){const v=r[l.key];if(!Number.isFinite(v)){previous=null;continue;}const val=v/(unit==='kW'?1000:1);path+=(previous&&r.time-previous.time<=maxGap?' L':' M')+x(r.time)+' '+y(val);previous=r;}
+   svg.append(el('path',{d:path,fill:'none',stroke:l.color,'stroke-width':2.5,'stroke-dasharray':l.dashed?'6 4':'none','stroke-linejoin':'round'}));
+  }
+  for(const r of data){
+   const label=time(r.time)+' · '+lines.filter(l=>active.has(l.key)&&Number.isFinite(r[l.key])).map(l=>l.name+': '+journalNumber(r[l.key]/(unit==='kW'?1000:1),' '+unit)).join(' · ');
+   const hit=el('rect',{x:x(r.time)-3,y:28,width:6,height:184,fill:'transparent',tabindex:0,role:'img','aria-label':label});hit.append(el('title',{},label));for(const type of ['click','focus','pointerenter'])hit.addEventListener(type,()=>detail.textContent=label);svg.append(hit);
+  }
+ }
+ for(const l of lines){const b=diagnosisElement('button',l.name);b.style.borderColor=l.color;b.setAttribute('aria-pressed','true');b.onclick=()=>{active.has(l.key)?active.delete(l.key):active.add(l.key);b.setAttribute('aria-pressed',String(active.has(l.key)));draw();};controls.append(b);}draw();
+}
+function renderDiagnosis(box,d){
+ box.replaceChildren();const el=diagnosisElement;
+ box.append(el('p',`${d.valid_samples} Messungen · ${d.invalid_samples} ungültig · Toleranz ±${d.tolerance_pct} %`,'diag-quality'));
+ const cards=el('div',undefined,'diag-grid');box.append(cards);
+ for(const [key,title] of [['house','⌂ Hausverbrauch'],['evening','◷ Abendfenster'],['pv','☀ PV-Erzeugung']]){
+  const v=d.totals[key],card=el('article',undefined,'diag-metric');card.append(el('h3',title));cards.append(card);
+  if(!v.hours){card.append(el('p','Noch keine Vergleichsdaten','muted'));continue;}
+  card.append(el('strong',journalNumber(v.actual_kwh,' kWh'),'diag-value'),el('p','≈ Messung · '+journalNumber(v.planned_kwh,' kWh Prognose')));
+  const pct=v.difference_pct,badge=el('span',(pct===null?'Δ '+journalNumber(v.difference_kwh,' kWh'):(pct>0?'+':'')+journalNumber(pct,' %')),'diag-badge '+(key==='pv'?'neutral':pct!==null&&Math.abs(pct)<=d.tolerance_pct?'ok':'review'));card.append(badge);
+  card.append(el('p',journalNumber(v.hours,' h vergleichbar')+(key==='pv'?' · DC / AC':' · Ø '+journalNumber(v.actual_mean_w,' W')),'muted'));
+ }
+ diagnosisChart(box,'Hausverbrauch · Messung & Planung',d.series,[{key:'house_w',name:'Gemessen',color:'#245d46'},{key:'load_w',name:'Geplant',color:'#94704c',dashed:true}],'kW',600);
+ diagnosisChart(box,'PV · Messung & Prognose',d.series,[{key:'pv_dc_w',name:'Gemessen (DC)',color:'#bd801b'},{key:'pv_forecast_w',name:'Prognose (AC)',color:'#7567ac',dashed:true}],'kW',600);
+ const details=el('details'),summary=el('summary','◴ Akku & Entladesperren');details.append(summary);box.append(details);
+ diagnosisChart(details,'Akkustand · gemessener Verlauf',d.soc_series,[{key:'soc',name:'SOC',color:'#7567ac'}],'%',120);
+ if(!d.hold_spans.length)details.append(el('p','Keine ausreichend dokumentierte Sperrphase.','muted'));
+ for(const s of d.hold_spans){const row=el('div',undefined,'diag-hold');row.append(el('strong',journalNumber(s.start_soc,' %')+' → '+journalNumber(s.end_soc,' %')),el('p',journalTime(s.start)+' – '+journalTime(s.end)),el('small','Abnahme '+journalNumber(s.soc_drop,' Prozentpunkte')+' · max. gemeldete Entladung '+journalNumber(s.max_discharge_w,' W')));details.append(row);}
+ for(const s of d.limit_mismatches)details.append(el('p','⚠ '+journalTime(s.time)+': Entladegrenze '+journalNumber(s.limit_w,' W')+' trotz zuvor bestätigter Sperre.','diag-alert'));
+ const advice=el('section',undefined,'diag-advice');advice.append(el('h3','↗ Einstellungen prüfen'),el('p','Vorschläge ändern nichts automatisch.','muted'));box.append(advice);
+ for(const r of d.recommendations){const card=el('article',undefined,'diag-recommendation '+r.level);card.append(el('strong',(r.level==='ok'?'✓ ':r.level==='review'?'↗ ':'ⓘ ')+r.title),el('p',r.text));const b=el('button','Einstellung öffnen');b.onclick=()=>{document.querySelector('[data-tab="settings"]').click();const input=document.querySelector('input[name="'+r.setting+'"]');if(input){const group=input.closest('details');if(group)group.open=true;input.scrollIntoView({behavior:'smooth',block:'center'});input.focus({preventScroll:true});}};card.append(b);advice.append(card);}
+ const notes=el('details');notes.append(el('summary','ⓘ Aussagekraft & Messverfahren'),el('p','Verglichen werden dieselben erfassten Zeiträume mit der jeweiligen Prognose zum Messzeitpunkt. Lücken bleiben offen. Zwischenwerte sind angenähert; kurze Lastspitzen können fehlen. DC-PV und AC-Prognose sind nur orientierend vergleichbar. Hausverbrauch enthält auch Auto und andere Sonderlasten. SOC-Verlust bei 0 W beweist weder Eigenbedarf noch einen Defekt.'));box.append(notes);
+}
 async function loadDiagnosis(){
  const button=document.getElementById('diagnosisrefresh'),box=document.getElementById('diagnosisresult');
- if(button.disabled)return;button.disabled=true;button.classList.add('button-loading');box.textContent='Messwerte werden ausgewertet …';
- try{
-  const response=await fetch('/api/journal/diagnosis?hours='+document.getElementById('journalhours').value);
-  if(!response.ok)throw Error('Diagnose nicht erreichbar.');const d=await response.json();box.replaceChildren();
-  const line=text=>{const p=document.createElement('p');p.textContent=text;box.append(p);};
-  line(d.valid_samples+' gültige Zählermessungen · '+d.invalid_samples+' fehlgeschlagene / unplausible Messungen');
-  const labels={house:'Hausverbrauch gesamt',outside_evening:'Verbrauch außerhalb Abendfenster',evening:'Verbrauch im Abendfenster',pv:'PV: DC-Messung / AC-Prognose (nur Orientierung)'};
-  for(const [key,v] of Object.entries(d.totals)){
-   if(!v.hours){line(labels[key]+': noch keine vergleichbaren Messpaare.');continue;}
-   line(labels[key]+': '+journalNumber(v.actual_kwh,' kWh gemessen ≈')+' / '+journalNumber(v.planned_kwh,' kWh geplant')+' · Δ '+journalNumber(v.difference_kwh,' kWh')+' · '+journalNumber(v.hours,' h erfasst'));
-   if(key!=='pv')line('Ø '+journalNumber(v.actual_mean_w,' W gemessen')+' / '+journalNumber(v.planned_mean_w,' W geplant'));
-  }
-  line('Vergleich mit der Prognose zum jeweiligen Messzeitpunkt. Nur gemeinsame Messzeiträume, Lücken über 10 Minuten ausgelassen. Leistungswerte werden zwischen Messpunkten angenähert. PV-Eingangsleistung ist DC, die Prognose AC: keine exakte Wirkungsgradbewertung.');
-  line('Grundlast und Kochen sind nicht separat messbar. Auto und andere Verbraucher zählen mit. Einstellungen werden nicht automatisch verändert.');
-  const title=document.createElement('h3');title.textContent='SOC während bestätigter Entladesperren';box.append(title);
-  if(!d.hold_spans.length)line('Keine ausreichend dokumentierte Sperrphase im Zeitraum.');
-  for(const s of d.hold_spans){line(journalTime(s.start)+' – '+journalTime(s.end)+' · '+journalNumber(s.start_soc,' %')+' → '+journalNumber(s.end_soc,' %')+' · Abnahme '+journalNumber(s.soc_drop,' Prozentpunkte')+' · höchste gemeldete Entladung '+journalNumber(s.max_discharge_w,' W'));}
-  line('SOC-Abnahme bei 0 W ist ein Befund, kein Nachweis für Hausverbrauch oder einen Defekt. Eigenbedarf, SOC-Korrekturen und nicht erfasste Vorgänge lassen sich daraus nicht trennen.');
-  for(const s of d.limit_mismatches)line('⚠ '+journalTime(s.time)+': Sperre zuletzt bestätigt, ausgelesene Entladegrenze aber '+journalNumber(s.limit_w,' W')+'. Zeitpunkt einer möglichen externen Änderung unbekannt.');
- }catch(e){box.textContent=e.message;}finally{button.disabled=false;button.classList.remove('button-loading');}
+ if(button.disabled)return;const hours=document.getElementById('journalhours').value;button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
+ const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
+ try{const response=await fetch('/api/journal/diagnosis?hours='+hours,{signal:controller.signal});if(!response.ok)throw Error('Diagnose nicht erreichbar.');const d=await response.json();if(hours===document.getElementById('journalhours').value)renderDiagnosis(box,d);}
+ catch(e){box.append(diagnosisElement('p',e.name==='AbortError'?'Diagnose dauert zu lange. Erneut versuchen.':e.message,'diag-alert'));}
+ finally{clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');if(hours!==document.getElementById('journalhours').value)loadDiagnosis();}
 }
 document.addEventListener('DOMContentLoaded',()=>{
  const panel=document.getElementById('diagnosispanel');

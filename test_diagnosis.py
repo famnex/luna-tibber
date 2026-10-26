@@ -40,3 +40,23 @@ class DiagnosisTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as path:
             j=Journal(Path(path));j.record({'base_load_w':500,'timezone':'Europe/Berlin'},{'event':'snapshot',**self.sample()})
             e=j.entries(all_checks=True)['events'][0]['data'];self.assertIn('meter',e);self.assertEqual(e['measurement_context']['load_w'],500)
+
+    def test_series_preserves_invalid_gap_and_percent(self):
+        r=summarize([(0,self.sample()),(300,self.sample(600)),(450,{'meter':{'valid':False}}),(600,self.sample())],1)
+        self.assertEqual(len(r['series']),4);self.assertIsNone(r['series'][2]['house_w'])
+        self.assertAlmostEqual(r['totals']['house']['difference_pct'],10)
+    def test_presync_power_not_counted_in_hold(self):
+        start=datetime(2026,10,26,tzinfo=timezone.utc).timestamp()
+        confirmation={'locked':True,'time':'2026-10-26T00:00:05+00:00'}
+        rows=[(start,{'soc':26,'battery_power_w':-400,'discharge_confirmation':confirmation}),
+              (start+20,{'soc':26,'battery_power_w':0,'discharge_confirmation':confirmation}),
+              (start+90,{'soc':25,'battery_power_w':0,'discharge_confirmation':confirmation})]
+        r=summarize(rows,1);self.assertEqual(r['hold_spans'][0]['max_discharge_w'],0)
+    def test_recommendations_require_data_and_no_pv_calibration(self):
+        r=summarize([(0,self.sample()),(300,self.sample(900))],24,{'base_load_w':500})
+        self.assertIn('weitere Daten',r['recommendations'][0]['title'])
+        self.assertIn('nicht aus DC',r['recommendations'][2]['title'])
+    def test_zero_forecast_no_percentage_or_crash(self):
+        r=self.sample();r['measurement_context']['load_w']=0
+        d=summarize([(0,r),(300,r)],24,{'base_load_w':0})
+        self.assertIsNone(d['totals']['house']['difference_pct'])

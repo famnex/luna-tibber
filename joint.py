@@ -72,7 +72,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
             pv_start=r['start'];break
         if not s[4]:bridge_ac+=s[0]
         bridge_idle+=max(0,-s[1])
-    buffer=bridge_ac*.1 # Automatic forecast allowance, not a permanent SOC floor.
+    buffer=bridge_ac*c.get('morning_buffer_pct',10)/100 # Time-specific allowance, not a permanent SOC floor.
     required=(bridge_ac+buffer)/eta+bridge_idle
     minimum=min(limit,required)
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)

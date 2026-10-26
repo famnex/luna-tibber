@@ -828,3 +828,19 @@ bereits diesen zeitabhängigen Verlust, muss eine Doppelzählung vermieden werde
 Die konstante Annahme gilt bis zur rechnerischen Geräte-Untergrenze; das reale
 Verhalten bei leerem Akku und die tatsächliche Versorgung der Elektronik bleiben
 geräteabhängig. Laufende Messwerte setzen die weitere Prognose jeweils neu auf.
+
+### Grafische Diagnose und Empfehlungen
+
+Verlauf → Diagnose zeigt Vergleichskarten sowie interaktive Linien für Hauslast,
+PV und SOC. Legenden schalten Linien um; Punkte sind per Touch und Tastatur
+auswählbar. Haus/PV-Lücken über zehn Minuten und SOC-Lücken über zwei Minuten
+werden nicht verbunden. Keine zusätzlichen Geräteabfragen durch die Diagramme.
+
+`diagnosis_tolerance_pct` (Standard 10 %) steuert nur Hinweise. Ein numerischer
+Grundlast-Vergleichsvorschlag benötigt mindestens zwölf erfasste Stunden an
+zwei Tagen und unveränderte Grundlast-Einstellungen; Sonderlasten müssen vom
+Benutzer ausgeschlossen werden. DC-PV wird nicht automatisch auf AC kalibriert.
+„Einstellung öffnen“ navigiert zum Feld, speichert aber nichts.
+`morning_buffer_pct` (Standard 10 %, Bereich 0–100 %) ersetzt den bislang festen
+Zuschlag auf den morgendlichen Hausbedarf; Akku-Eigenverbrauch bleibt separat.
+Der vorhandene `pv_factor` legt den anrechenbaren Anteil der PV-Prognose fest.

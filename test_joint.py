@@ -228,3 +228,11 @@ class ContinuousChargeTests(unittest.TestCase):
             solar=sum(max(0,(min(b,v['end'])-max(a,v['start'])).total_seconds())/3600*max(0,v['kw']-.5)*.9 for v in c['_pv']['rows'])
             expected=max(0,min(8,t['start_kwh']+solar-t['idle_kwh'])+t['grid_charge_kwh']-t['discharge_kwh']/.9)
             self.assertAlmostEqual(t['end_kwh'],expected,places=6)
+
+    def test_configurable_morning_buffer(self):
+        c,p,n,s=JointTests().setup_case(soc=0)
+        c['morning_buffer_pct']=0;a=joint.plan(c,p,n,s)
+        c['morning_buffer_pct']=25;b=joint.plan(c,p,n,s)
+        self.assertEqual(a['bridge']['buffer_kwh'],0)
+        self.assertAlmostEqual(b['bridge']['buffer_kwh'],b['bridge']['demand_kwh']*.25)
+        self.assertGreater(b['bridge']['required_kwh'],a['bridge']['required_kwh'])

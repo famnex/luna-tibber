@@ -721,7 +721,7 @@ class Handler(BaseHTTPRequestHandler):
                 if hours not in (6,12,24,48) or before<0:raise ValueError()
             except (ValueError,TypeError):return self.send(400,{'error':'Ungültiger Zeitraum'})
             journal=self.server.app.journal;path=self.path.split('?',1)[0]
-            if path=='/api/journal/diagnosis':return self.send(200,journal.diagnosis(hours))
+            if path=='/api/journal/diagnosis':return self.send(200,journal.diagnosis(hours,self.server.app.config()))
             if path in ('/api/journal/export','/api/journal/text'):
                 try:
                     with journal.download(hours,path.endswith('/export'),self.server.app.config()['timezone']) as stream:

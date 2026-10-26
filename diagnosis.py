@@ -49,17 +49,26 @@ def sample_context(c,pv,stamp):
             if left<=stamp<right:forecast=r['kw']*1000;break
         except (ValueError,KeyError,TypeError):continue
     return {'load_w':load,'base_w':base,'evening':evening,'pv_forecast_w':forecast,
-            'capacity_kwh':c.get('battery_capacity_kwh')}
+            'capacity_kwh':c.get('battery_capacity_kwh'),'date':local.date().isoformat(),
+            'extra_load_kwh':extra,'extra_hours':b-a,'pv_factor':c.get('pv_factor'),'battery_idle_w':c.get('battery_idle_w')}
 
 
-def summarize(rows,hours):
+def summarize(rows,hours,config=None):
+    config=config or {}
+    series=[];soc_series={};dates=set();contexts=[]
     totals={key:{'actual_kwh':0.,'planned_kwh':0.,'hours':0.} for key in ('house','outside_evening','evening','pv')}
     previous=None;valid=0;invalid=0;limits=[];spans=[];span=None
     for stamp,d in rows:
         soc,power=d.get('soc'),d.get('battery_power_w')
         confirmation=d.get('discharge_confirmation') or {}
         if finite(soc) and finite(power):
+            soc_series[int(stamp//60)]={'time':stamp,'soc':soc}
             locked=confirmation.get('locked') is True
+            # A decision contains telemetry read BEFORE sync. Do not attribute
+            # the pre-command power to the subsequently confirmed hold.
+            try:
+                if datetime.fromisoformat(confirmation['time']).timestamp()>stamp:locked=False
+            except (ValueError,KeyError,TypeError):pass
             if locked:
                 if span is None or stamp-span['end']>120:
                     if span:spans.append(span)
@@ -72,7 +81,7 @@ def summarize(rows,hours):
         m=d.get('meter')
         if not m:continue
         if not m.get('valid') or not all(finite(m.get(k)) for k in ('house_w','pv_dc_w')):
-            invalid+=1;previous=None;continue
+            invalid+=1;series.append({'time':stamp,'house_w':None,'pv_dc_w':None,'load_w':None,'pv_forecast_w':None});previous=None;continue
         valid+=1
         try:
             confirmed_at=datetime.fromisoformat(confirmation['time']).timestamp()
@@ -82,6 +91,10 @@ def summarize(rows,hours):
         if confirmed_before_read and confirmation.get('locked') is True and m.get('discharge_limit_w',0)>0:
             limits.append({'time':stamp,'limit_w':m['discharge_limit_w']})
         context=d.get('measurement_context') or {}
+        series.append({'time':stamp,'house_w':max(0,m['house_w']),'pv_dc_w':max(0,m['pv_dc_w']),
+                       'load_w':context.get('load_w'),'pv_forecast_w':context.get('pv_forecast_w')})
+        contexts.append(context)
+        dates.add(context.get('date') or datetime.fromtimestamp(stamp,timezone.utc).astimezone(ZoneInfo(config.get('timezone','Europe/Berlin'))).date().isoformat())
         if previous:
             t,p,pc=previous;dt=(stamp-t)/3600
             # Never fill gaps or aggregate across changed assumptions / load windows.
@@ -94,9 +107,37 @@ def summarize(rows,hours):
         previous=(stamp,m,context)
     if span:spans.append(span)
     for out in totals.values():
+        out['difference_pct']=(out['actual_kwh']/out['planned_kwh']-1)*100 if out['planned_kwh']>.01 else None
         out['difference_kwh']=out['actual_kwh']-out['planned_kwh']
         out['actual_mean_w']=out['actual_kwh']*1000/out['hours'] if out['hours'] else None
         out['planned_mean_w']=out['planned_kwh']*1000/out['hours'] if out['hours'] else None
     spans=[{**s,'soc_drop':s['start_soc']-s['end_soc']} for s in spans if s['samples']>=2 and s['end']-s['start']>=60]
-    return {'totals':totals,'valid_samples':valid,'invalid_samples':invalid,'requested_hours':hours,
+    advice=recommendations(totals,contexts,dates,config)
+    return {'series':series,'soc_series':list(soc_series.values()),'recommendations':advice,'tolerance_pct':config.get('diagnosis_tolerance_pct',10),'totals':totals,'valid_samples':valid,'invalid_samples':invalid,'requested_hours':hours,
             'hold_spans':spans[-30:],'limit_mismatches':limits[-30:]}
+
+
+def recommendations(totals,contexts,dates,c):
+    tolerance=c.get('diagnosis_tolerance_pct',10)
+    result=[]
+    def add(title,text,key,level='info'):
+        result.append(dict(title=title,text=text,setting=key,level=level))
+    outside=totals['outside_evening'];diff=outside['difference_pct']
+    stable=all(x.get('base_w')==c.get('base_load_w') for x in contexts)
+    if diff is not None and abs(diff)<=tolerance:
+        add('Grundverbrauch vorerst beibehalten',f"Ø {fmt(outside['actual_mean_w'])} W statt {fmt(outside['planned_mean_w'])} W ({diff:+.1f} %). Innerhalb der eingestellten ±{tolerance:g} %. Bisher {fmt(outside['hours'])} h erfasst.",'base_load_w','ok')
+    elif diff is None or outside['hours']<12 or len(dates)<2 or not stable:
+        add('Grundverbrauch: weitere Daten sammeln','Für einen Zahlenvorschlag mindestens 12 erfasste Stunden an zwei Tagen bei unveränderter Grundlast-Einstellung abwarten. Auto und andere Sonderlasten vorher ausschließen.','base_load_w')
+    else:
+        suggested=round(outside['actual_mean_w']/10)*10
+        add('Grundverbrauch prüfen',f"Abweichung {diff:+.1f} %. Rechnerischer Vergleichswert: {suggested} W (aktuell {c.get('base_load_w',0):g} W). Nur übernehmen, wenn Auto und andere Sonderlasten nicht enthalten sind; dies ist keine isolierte Grundlastmessung.",'base_load_w','review')
+    evening=totals['evening']
+    if evening['hours']<3 or len(dates)<2:
+        add('Abendbedarf noch nicht bewertbar','Mindestens zwei weitgehend erfasste Abendfenster vergleichen. Den Zusatzbedarf nicht aus einer kurzen Kochspitze hochrechnen.','extra_load_kwh')
+    else:
+        add('Abendfenster vergleichen',f"{fmt(evening['actual_kwh'])} kWh gemessen gegenüber {fmt(evening['planned_kwh'])} kWh geplant über {fmt(evening['hours'])} h. Bei wiederholter Mehrlast zuerst Uhrzeiten und dann täglichen Zusatzverbrauch prüfen. Auto und andere Verbraucher zählen mit.",'extra_load_kwh','review')
+    pv=totals['pv']
+    add('PV-Faktor nicht aus DC-Werten kalibrieren',f"Aktueller Faktor {c.get('pv_factor',.7):g}: 0,7 bedeutet 30 % Abschlag. DC-Messung und AC-Prognose sind nicht direkt gleichwertig; deshalb kein automatischer Prozentvorschlag aus dieser Differenz. Mehrtägig Zeitpunkt und Tagesverlauf prüfen.",'pv_factor')
+    add('Morgenpuffer getrennt einstellen',f"Aktuell {c.get('morning_buffer_pct',10):g} % Zuschlag auf den erwarteten Hausbedarf bis zur PV-Deckung. Bei wiederkehrender Unterdeckung erhöhen; die PV-Prognose selbst wird dadurch nicht verändert.",'morning_buffer_pct')
+    add('Akku-Eigenverbrauch bleibt eine Annahme',f"Aktuell {c.get('battery_idle_w',100):g} W. SOC-Verlust unter Sperre kann auch durch SOC-Korrekturen entstehen. Erst mehrere lange, bestätigte Ruhephasen vergleichen; nicht aus einer einzelnen Nacht nachregeln.",'battery_idle_w')
+    return result
