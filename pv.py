@@ -126,7 +126,7 @@ def night_target(c,start,power_w):
         generation+=solar*h;direct+=min(solar,load)*h
         charge=min(max(0,solar-load)*eta,power_w/1000)*h
         surplus+=charge
-        net.append(max(0,load-solar)/eta*h-charge)
+        net.append(max(0,load-solar)/eta*h-charge+c.get('battery_idle_w',0)/1000*h)
     required=0;feasible=True
     for delta in reversed(net):
         required=max(0,required+delta)

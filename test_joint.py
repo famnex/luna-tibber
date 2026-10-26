@@ -7,7 +7,7 @@ import luna,smart,dispatch,joint
 class JointTests(unittest.TestCase):
     def setup_case(self, hour=0, soc=0):
         a=datetime(2026,10,24,tzinfo=timezone.utc)
-        c={**luna.DEFAULT,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
+        c={**luna.DEFAULT,'battery_idle_w':0,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'smart_discharge_enabled':True,
            'battery_capacity_kwh':10,'target_soc':80,'base_load_w':500,
            'charge_power_w':5000,'roundtrip_efficiency':.81,'wear_ct_kwh':0,'min_saving_ct_kwh':0}
         c['_pv']={'rows':[{'start':a+timedelta(hours=i),'end':a+timedelta(hours=i+1),'kw':4 if 10<=i%24<15 else 0} for i in range(72)]}
@@ -203,3 +203,28 @@ class ContinuousChargeTests(unittest.TestCase):
         self.assertTrue(any(abs(w['battery_kwh']-1.25)<1e-7 for w in r['charges']))
         for w in r['phases']:
             self.assertLess(w['start'],w['end'])
+
+    def test_idle_consumes_energy_during_manual_hold(self):
+        c,p,n,s=JointTests().setup_case(soc=80);c['battery_idle_w']=100;c['max_buy_ct_kwh']=0
+        r=joint.plan(c,p,n,s,hold_until=n+timedelta(hours=6))
+        six=[t for t in r['trace'] if datetime.fromisoformat(t['end'])<=n+timedelta(hours=6)]
+        self.assertAlmostEqual(six[-1]['end_kwh'],7.4,places=6)
+        self.assertTrue(all(t['discharge_kwh']==0 for t in six))
+        self.assertAlmostEqual(sum(t['idle_kwh'] for t in six),.6)
+
+    def test_idle_adds_morning_bridge_and_more_charge(self):
+        c,p,n,s=JointTests().setup_case(soc=0);base=joint.plan(c,p,n,s)
+        c['battery_idle_w']=100;r=joint.plan(c,p,n,s)
+        self.assertAlmostEqual(r['bridge']['idle_kwh'],.4)
+        self.assertGreater(r['bridge']['required_kwh'],base['bridge']['required_kwh'])
+        self.assertGreater(r['planned_kwh'],base['planned_kwh'])
+        self.assertGreaterEqual(r['morning_soc']+1e-6,r['bridge']['required_soc'])
+
+    def test_idle_energy_balance_including_empty_and_charge(self):
+        c,p,n,s=JointTests().setup_case(soc=0);c['battery_idle_w']=100
+        r=joint.plan(c,p,n,s)
+        for t in r['trace']:
+            a=datetime.fromisoformat(t['start']);b=datetime.fromisoformat(t['end'])
+            solar=sum(max(0,(min(b,v['end'])-max(a,v['start'])).total_seconds())/3600*max(0,v['kw']-.5)*.9 for v in c['_pv']['rows'])
+            expected=max(0,min(8,t['start_kwh']+solar-t['idle_kwh'])+t['grid_charge_kwh']-t['discharge_kwh']/.9)
+            self.assertAlmostEqual(t['end_kwh'],expected,places=6)

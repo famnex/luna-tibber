@@ -50,7 +50,10 @@ def plan(c, prices, now, soc, hold_until=None):
         out['reason']='Aktuellen Akkustand abwarten';return out
     eta=math.sqrt(c['roundtrip_efficiency'])
     usable=soc/100*capacity
-    budget=usable*eta
+    reserve_start,reserve_end=night_bounds(c,now)
+    if now<reserve_start:reserve_end=reserve_start
+    idle=c.get('battery_idle_w',0)/1000*max(0,(reserve_end-now).total_seconds())/3600
+    budget=max(0,usable-idle)*eta
     out.update(stored_kwh=usable,available_kwh=budget,reserved_later_kwh=0)
     if not c.get('_legacy_dispatch'):
         from joint import plan as joint_plan
@@ -74,8 +77,8 @@ def plan(c, prices, now, soc, hold_until=None):
         return out
     end=night_a
     if budget<=1e-9:
-        out.update(hold=False,complete=True,reason='Keine Energie mehr eingeplant · normale Gerätegrenzen',windows=[{
-            'start':now.isoformat(),'end':end.isoformat(),'action':'discharge','allocated_kwh':0,'surplus_only':True}])
+        out.update(hold=bool(idle>0 and usable>0),complete=True,reason='Verbleibende Energie für Akku-Eigenverbrauch' if idle>0 and usable>0 else 'Keine Energie mehr eingeplant · normale Gerätegrenzen',windows=[{
+            'start':now.isoformat(),'end':end.isoformat(),'action':'hold' if idle>0 and usable>0 else 'discharge','allocated_kwh':0,'surplus_only':True}])
         return out
     if not covers(prices,now,end):
         out['reason']='Tagespreise unvollständig · normale Entladung';return out
@@ -119,7 +122,8 @@ def projected_soc(c,prices,now,soc,until,hold_until=None):
         a,b=datetime.fromisoformat(w['start']),datetime.fromisoformat(w['end'])
         fraction=max(0,(min(b,until)-a).total_seconds())/(b-a).total_seconds()
         used+=w.get('allocated_kwh',0)*min(1,fraction)
-    return max(0,soc-used/math.sqrt(c['roundtrip_efficiency'])/c['battery_capacity_kwh']*100),True
+    idle=c.get('battery_idle_w',0)/1000*max(0,(until-now).total_seconds())/3600
+    return max(0,soc-(used/math.sqrt(c['roundtrip_efficiency'])+idle)/c['battery_capacity_kwh']*100),True
 
 
 def timeline(c,prices,now,soc,charge_preview,hold_until=None):
@@ -140,7 +144,7 @@ def timeline(c,prices,now,soc,charge_preview,hold_until=None):
         rows.append({'start':night_a.isoformat(),'end':night_b.isoformat(),'action':'hold','projected':True,'allocated_kwh':0})
     projected=charge_preview.get('planning_soc',soc)
     if c['battery_capacity_kwh']>0:
-        projected=min(100,projected+charge_preview.get('planned_kwh',0)/c['battery_capacity_kwh']*100)
+        projected=max(c.get('battery_floor_soc',0),min(100,projected+(charge_preview.get('planned_kwh',0)-charge_preview.get('idle_kwh',0))/c['battery_capacity_kwh']*100))
     future=plan(c,prices,night_b,projected,hold_until)
     if future['complete']:
         rows += [{**w,'projected':True} for w in future['windows']]

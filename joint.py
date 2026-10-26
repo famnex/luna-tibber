@@ -56,6 +56,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         seconds=(r['end']-r['start']).total_seconds();hours=seconds/3600
         load=r['load_kw']*hours
         solar=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)*hours
+        solar-=c.get('battery_idle_w',0)/1000*hours
         following=rows[index+1] if index+1<len(rows) else None
         continues=bool(following and following['start']==r['end'] and following['start']<night_b and following['ct']<=c['max_buy_ct_kwh'])
         margin_seconds=0 if continues else 130
@@ -65,13 +66,14 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     # Morning energy is a time-specific minimum, released for consumption after
     # night-end. Stop bridging only once PV covers the configured household load.
     morning_rows=[(r,s) for r,s in zip(rows,specs) if r['start']>=bridge_start]
-    bridge_ac=0.;pv_start=None
+    bridge_ac=0.;bridge_idle=0.;pv_start=None
     for r,s in morning_rows:
-        if r['pv_kw']>=r['gross_load_kw'] and r['pv_kw']>0:
+        if r['pv_kw']>=r['gross_load_kw']+c.get('battery_idle_w',0)/1000/eta and r['pv_kw']>0:
             pv_start=r['start'];break
         if not s[4]:bridge_ac+=s[0]
+        bridge_idle+=max(0,-s[1])
     buffer=bridge_ac*.1 # Automatic forecast allowance, not a permanent SOC floor.
-    required=(bridge_ac+buffer)/eta
+    required=(bridge_ac+buffer)/eta+bridge_idle
     minimum=min(limit,required)
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)
     if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:-1],minimum)
@@ -91,7 +93,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         if r['start']<=night_a:at_night=energy
         if r['start']<=night_b:at_morning=energy
         _,after,charge,used=_choose(energy,spec,values[i+1],ceiling,limit,eta,wear,margin)
-        trace.append({'start':r['start'].isoformat(),'end':r['end'].isoformat(),'start_kwh':energy,'end_kwh':after,'grid_charge_kwh':charge,'discharge_kwh':used})
+        trace.append({'start':r['start'].isoformat(),'end':r['end'].isoformat(),'start_kwh':energy,'end_kwh':after,'grid_charge_kwh':charge,'discharge_kwh':used,'idle_kwh':c.get('battery_idle_w',0)/1000*(r['end']-r['start']).total_seconds()/3600})
         actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
         a,b=r['start'],r['end']
         if charge>1e-7:
@@ -122,7 +124,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         economics=dict(ok=saving>0,reason='Gemeinsamer Plan gegenüber gleicher Planung ohne Netzladung',
                        effective_ct_kwh=effective,reference_ct_kwh=effective+saving,saving_ct_kwh=saving,
                        window_start=now.isoformat(),window_end=end.isoformat())
-    bridge=dict(demand_kwh=bridge_ac,buffer_kwh=buffer,required_kwh=required,
+    bridge=dict(idle_kwh=bridge_idle,demand_kwh=bridge_ac,buffer_kwh=buffer,required_kwh=required,
                 required_soc=floor+required/capacity*100,available_kwh=at_morning if night_complete else initial,
                 shortfall_kwh=max(0,required-(at_morning if night_complete else initial)),
                 pv_start=pv_start.isoformat() if pv_start else None,
@@ -147,7 +149,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
                 old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
             else:phases.append(item)
     solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start))
-    return dict(night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
+    return dict(idle_w=c.get('battery_idle_w',0),idle_kwh=c.get('battery_idle_w',0)/1000*(end-now).total_seconds()/3600,night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
                 planning_soc=floor+at_night/capacity*100,morning_soc=(floor+at_morning/capacity*100) if night_complete else None,
                 power_w=power*1000,night_start=max(now,night_a).isoformat(),night_end=night_b.isoformat(),
                 reason='Gemeinsamer Energieplan: Verbrauch, Nachtpreise und zeitliche PV-Erzeugung' if night_complete else 'Tagesplan aktiv · Preise für nächste Nacht noch offen')
@@ -162,7 +164,8 @@ def _interpolate(values,energy,ceiling):
 
 def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin,partial_discharge=False):
     load,solar,price,max_charge,blocked,min_charge,required=spec
-    stored=min(ceiling,energy+solar)
+    raw=min(ceiling,energy+solar)
+    stored=max(0,raw)
     # Holding avoids needless cycling on equal costs. PV first supplies the house.
     best=(load*price+_interpolate(next_values,stored,ceiling),stored,0.,0.)
     step=ceiling/(len(next_values)-1) if ceiling else 1
@@ -178,11 +181,11 @@ def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin,partial_discha
             used=(stored-after)*eta
             cost=(load-used)*price+used*wear+_interpolate(next_values,after,ceiling)
             if cost<best[0]-1e-8:best=(cost,after,0.,used)
-    maximum=min(limit,stored+max_charge)
+    maximum=min(limit,raw+max_charge)
     if max_charge>0 and maximum>stored:
         targets=[maximum]+[j*step for j in range(math.floor(stored/step)+1,math.ceil(maximum/step))]
         for after in targets:
-            charge=after-stored
+            charge=after-raw
             if charge<min_charge-1e-9:continue
             cost=load*price+charge/eta*price+charge*eta*margin+_interpolate(next_values,after,ceiling)
             if cost<best[0]-1e-8:best=(cost,after,charge,0.)

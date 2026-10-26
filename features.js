@@ -37,7 +37,7 @@ function renderExtras(d){
  const g=j?.guard||q?.guard;
  const protection=g?.unavailable?'🔒 Daten fehlen · Entladung vorläufig gesperrt':g?`🔒 Jetzt benötigt: ${num(g.required_kwh)} kWh Akku · Sperrgrenze ${num(g.threshold_soc)} % SOC\n${num(g.surplus_kwh)} kWh oberhalb der Schutzgrenze · ${g.hold?'Entladung gesperrt':'Entladung nach Preisplan'}${d.mode==='smart'?'':' · Vorschau, Smart nicht aktiv'}`:'Schutzberechnung noch nicht verfügbar';
  document.getElementById('dispatchsummary').textContent=b?
-  `${num(b.demand_kwh)} kWh Bedarf + ${num(b.buffer_kwh)} kWh automatischer Wetterpuffer\n${j.night_complete===false?'Für verbleibenden Bedarf':'Am Nachtende benötigt'}: ${num(b.required_soc)} % SOC inkl. ${num(b.floor_soc)} % Gerätegrenze\n${b.shortfall_kwh>.02?'⚠ Planlücke '+num(b.shortfall_kwh)+' kWh · Kaufgrenze, Ladezeit und Ziel prüfen':'✓ Morgenversorgung laut Plan gedeckt'}\n${protection}${j.pv_available===false?'\n☁ PV-Daten fehlen · gerechnet ohne Solarertrag':''}`:
+  `${num(b.demand_kwh)} kWh Bedarf + ${num(b.buffer_kwh)} kWh Wetterpuffer + ${num(b.idle_kwh||0)} kWh Akku-Eigenverbrauch\n${j.night_complete===false?'Für verbleibenden Bedarf':'Am Nachtende benötigt'}: ${num(b.required_soc)} % SOC inkl. ${num(b.floor_soc)} % Gerätegrenze\n${b.shortfall_kwh>.02?'⚠ Planlücke '+num(b.shortfall_kwh)+' kWh · Kaufgrenze, Ladezeit und Ziel prüfen':'✓ Morgenversorgung laut Plan gedeckt'}\n${protection}${j.pv_available===false?'\n☁ PV-Daten fehlen · gerechnet ohne Solarertrag':''}`:
   protection;
  if(!window.isSecureContext)document.getElementById('pushstatus').textContent='🔒 HTTPS für Installation und Push erforderlich.';
  else if(d.push?.error)document.getElementById('pushstatus').textContent=d.push.error;
@@ -315,7 +315,7 @@ function batterySeries(d,now=Date.now()){
     const extra=Number(local)>=c.extra_load_start_hour&&Number(local)<c.extra_load_end_hour?c.extra_load_kwh/(c.extra_load_end_hour-c.extra_load_start_hour):0;
     const net=row.kw-c.base_load_w/1000-extra,held=Date.parse(d.discharge?.request?.until)>a;
     const energy=net>=0?Math.min(net*eta,c.charge_power_w/1000):held?0:net/eta;
-    soc=Math.max(floor,Math.min(100,soc+energy*(b-a)/3600000/capacity*100));forecast.push({time:b,soc});a=b;
+    soc=Math.max(floor,Math.min(100,soc+(energy-(c.battery_idle_w||0)/1000)*(b-a)/3600000/capacity*100));forecast.push({time:b,soc});a=b;
    }
    cursor=end;
   }

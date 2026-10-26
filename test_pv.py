@@ -13,7 +13,7 @@ class PvTests(unittest.TestCase):
     def setUp(self):
         self.tmp=tempfile.TemporaryDirectory();self.folder=Path(self.tmp.name)
         self.now=datetime(2026,10,24,tzinfo=timezone.utc)
-        self.c={**luna.DEFAULT,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'pv_kwp':8,
+        self.c={**luna.DEFAULT,'battery_idle_w':0,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'pv_kwp':8,
                 'pv_latitude':51.2,'pv_longitude':10.0,'pv_factor':.7,
                 'battery_capacity_kwh':10,'base_load_w':500,'charge_power_w':5000,
                 'smart_discharge_enabled':True,'roundtrip_efficiency':1}

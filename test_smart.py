@@ -5,7 +5,7 @@ from smart import plan
 
 class SmartTests(unittest.TestCase):
     def setUp(self):
-        self.c={**luna.DEFAULT,'timezone':'UTC','battery_capacity_kwh':10,
+        self.c={**luna.DEFAULT,'battery_idle_w':0,'timezone':'UTC','battery_capacity_kwh':10,
                 'target_soc':80,'charge_power_w':2000,'night_start_hour':0,'night_end_hour':6,
                 'use_start_hour':6,'use_end_hour':9,'max_buy_ct_kwh':20}
         self.now=datetime(2026,10,24,tzinfo=timezone.utc)

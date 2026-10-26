@@ -810,3 +810,21 @@ die ausgelesene maximale Entladeleistung gegen eine zeitlich vorher bestätigte
 Sperre geprüft. SOC-Abnahme trotz 0 W belegt weder einen Defekt noch eine
 Entladung ins Haus. Planänderungen nennen veränderte Eingaben, Netzlademenge
 vorher/nachher und den geplanten Morgenbedarf.
+
+### Akku-Eigenverbrauch in der Planung
+
+`battery_idle_w` (Einstellungen → Smart-Entladung & Bedarf) modelliert einen
+zusätzlichen konstanten Verbrauch auf der Batterieseite, auch bei Entladesperre.
+Vorläufiger Standard: **100 W**, abgeleitet aus dem beobachteten SOC-Rückgang
+(3 Prozentpunkte von 10 kWh in etwa 3 Stunden), kein gemessener Herstellerwert.
+Vorhandene Konfigurationen ohne diesen Schlüssel erhalten diesen Standard.
+Der Wert ist von 0 bis 300 W einstellbar; 0 deaktiviert den Zusatz.
+
+Smart berücksichtigt ihn zeitlich in Energiezuständen, Morgenversorgung,
+Ladeplanung und SOC-Kurve. Die Morgenübersicht nennt die zusätzliche Energie.
+Keine weiteren Geräteabfragen oder Registeränderungen dafür. Nicht nochmals
+als Haus-Grundverbrauch eintragen; enthält der eingestellte Gesamtwirkungsgrad
+bereits diesen zeitabhängigen Verlust, muss eine Doppelzählung vermieden werden.
+Die konstante Annahme gilt bis zur rechnerischen Geräte-Untergrenze; das reale
+Verhalten bei leerem Akku und die tatsächliche Versorgung der Elektronik bleiben
+geräteabhängig. Laufende Messwerte setzen die weitere Prognose jeweils neu auf.

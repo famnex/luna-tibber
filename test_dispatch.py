@@ -5,7 +5,7 @@ from dispatch import plan,timeline,demand_rows
 
 class DispatchTests(unittest.TestCase):
     def setUp(self):
-        self.c={**luna.DEFAULT,'smart_discharge_enabled':True,'battery_capacity_kwh':10,'base_load_w':500,'reserve_soc':20,'roundtrip_efficiency':1,'min_saving_ct_kwh':2}
+        self.c={**luna.DEFAULT,'battery_idle_w':0,'smart_discharge_enabled':True,'battery_capacity_kwh':10,'base_load_w':500,'reserve_soc':20,'roundtrip_efficiency':1,'min_saving_ct_kwh':2}
         self.now=datetime(2026,10,24,10,tzinfo=timezone.utc) # noon local, 12 h until next night
         self.prices=[{'start':self.now+timedelta(hours=i),'end':self.now+timedelta(hours=i+1),'ct':50 if i in (6,7) else 20} for i in range(12)]
     def test_reserves_for_evening_and_releases_then(self):

@@ -46,6 +46,10 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     pv=night_target(c,end,power)
     out.update(pv=pv,effective_target_soc=pv['target_soc'])
     need = max(0, pv['target_soc'] - planning_soc) * c['battery_capacity_kwh'] / 100
+    idle=c.get('battery_idle_w',0)/1000*max(0,(b-a).total_seconds())/3600
+    if not out['projected']:idle+=c.get('battery_idle_w',0)/1000*max(0,(a-now).total_seconds())/3600
+    need+=idle
+    out['idle_kwh']=idle
     out['needed_kwh'] = need
     out['duration_minutes'] = need / (power / 1000) * 60
     if need <= 0:
