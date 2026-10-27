@@ -202,3 +202,84 @@ document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('diagnosisrefresh').onclick=loadDiagnosis;
  document.getElementById('journalhours').addEventListener('change',()=>{if(panel.open)loadDiagnosis();});
 });
+
+// Dashboard history: journal reads only, independent from live control and planning.
+const dashboardHistory={day:false,price:false,date:null,cache:new Map(),pending:new Set(),errors:new Map(),pv:true,soc:true};
+const historyLabel=p=>({charge:'↑ Ladung gemessen',discharge:'↓ Entladung gemessen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Akku ruht',unknown:'· Keine Beobachtung'}[p.action]||'· Keine Beobachtung')+(p.locked&&['charge','discharge'].includes(p.action)?' · Sperre bestätigt':'');
+const historyColor=p=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#758c97',idle:'#becbbf',unknown:'#e9ede9'}[p.action]);
+function historyTime(t,zone,seconds=false){return new Date(t*1000).toLocaleTimeString('de-DE',{timeZone:zone,hour:'2-digit',minute:'2-digit',...(seconds?{second:'2-digit',timeZoneName:'shortOffset'}:{})});}
+function renderDashboardHistory(d){
+ if(!d)return;
+ const state=dashboardHistory,zone=d.settings.timezone;
+ if(!state.date)state.date=planDayKey(d,Date.now(),-1);
+ for(const name of ['day','price']){
+  const select=document.getElementById(name+'-history-day');if(!select)return;
+  const today=planDayKey(d,Date.now());
+  if(select.dataset.today!==today){select.replaceChildren();for(let i=0;i<7;i++){const key=planDayKey(d,Date.now(),-i),opt=diagnosisElement('option',(i===0?'Heute':i===1?'Gestern':key.slice(8)+'.'+key.slice(5,7)+'.'));opt.value=key;select.append(opt);}select.dataset.today=today;}
+  if(![...select.options].some(o=>o.value===state.date))state.date=today;
+  select.value=state.date;select.onchange=()=>{state.date=select.value;renderDashboardHistory(lastStatus);};
+  for(const mode of ['plan','history']){const b=document.getElementById(name+'-'+mode);b.setAttribute('aria-pressed',String(state[name]===(mode==='history')));b.onclick=()=>{state[name]=mode==='history';renderDashboardHistory(lastStatus);if(name==='price'&&!state.price){chartSignature='';renderPrices(lastStatus);}if(name==='day'&&!state.day)renderTodayPlan(lastStatus);};}
+  document.getElementById(name+'-plan-view').hidden=state[name];document.getElementById(name+'-history-view').hidden=!state[name];
+  const refresh=document.getElementById(name+'-history-refresh');refresh.onclick=()=>loadDashboardHistory(d,true);refresh.disabled=state.pending.has(state.date);refresh.classList.toggle('button-loading',refresh.disabled);
+  const cached=state.cache.get(state.date),error=state.errors.get(state.date);
+  document.getElementById(name+'-history-state').textContent=error||(state.pending.has(state.date)?'Protokoll wird geladen …':cached?'Protokoll · '+cached.data.samples+' SOC-Messpunkte · Lücken bleiben offen':'Noch nicht geladen.');
+  const root=document.getElementById(name+'-history-content');
+  if(state[name]){
+   if(!cached){root.replaceChildren();delete root.dataset.historySignature;}
+   else{const signature=state.date+':'+cached.at+':'+state.pv+':'+state.soc;if(root.dataset.historySignature!==signature){root.dataset.historySignature=signature;if(name==='day')drawHistoryPhases(root,cached.data);else drawHistoryChart(root,cached.data);}}
+  }
+ }
+ document.getElementById('dayplanbadge').textContent=state.day?'Protokoll':'Vorschau';
+ document.getElementById('dayplantitle').textContent=state.day?'Tagesverlauf':(typeof selectedPlanDay!=='undefined'&&selectedPlanDay?'Morgen':'Heute')+' geplant';
+ const cached=state.cache.get(state.date),ttl=state.date===planDayKey(d,Date.now())?60000:600000;
+ if((state.day||state.price)&&!document.hidden&&!document.getElementById('overview').hidden&&(!cached||Date.now()-cached.at>=ttl)&&!state.errors.has(state.date))loadDashboardHistory(d);
+}
+async function loadDashboardHistory(d,force=false){
+ const state=dashboardHistory,key=state.date;
+ if(state.pending.has(key)||document.hidden)return;
+ state.pending.add(key);state.errors.delete(key);renderDashboardHistory(d);
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),25000);
+ try{const r=await fetch('/api/journal/timeline?day='+encodeURIComponent(key),{signal:controller.signal});if(!r.ok)throw Error(r.status===401?'Bitte erneut anmelden.':'Verlauf nicht verfügbar. Mit ↻ erneut versuchen.');const data=await r.json();state.cache.set(key,{at:Date.now(),data});}
+ catch(e){state.errors.set(key,e.name==='AbortError'?'Laden dauert zu lange. Mit ↻ erneut versuchen.':e.message);}
+ finally{clearTimeout(timer);state.pending.delete(key);if(!document.hidden)renderDashboardHistory(lastStatus||d);}
+}
+function drawHistoryPhases(root,data){
+ root.replaceChildren();const rows=data.phases||[],bar=diagnosisElement('div',undefined,'plan-strip'),list=diagnosisElement('ol',undefined,'plan-steps history-steps');
+ for(const p of rows){const part=diagnosisElement('span');part.style.flex=String(p.end-p.start);part.style.background=historyColor(p);part.title=historyLabel(p);bar.append(part);}
+ root.append(bar);
+ const visible=rows.filter(p=>p.action!=='unknown');
+ if(!visible.length)root.append(diagnosisElement('p','Keine beobachteten Zustandsintervalle für diesen Tag.','muted'));
+ const more=diagnosisElement('details'),summary=diagnosisElement('summary','Weitere Abschnitte ('+Math.max(0,visible.length-6)+')'),rest=diagnosisElement('ol',undefined,'plan-steps history-steps');more.append(summary,rest);
+ visible.forEach((p,i)=>{const item=diagnosisElement('li');const time=diagnosisElement('strong',historyTime(p.start,data.timezone,p.end-p.start<60).replace(/ GMT.*$/,'')+'–'+historyTime(p.end,data.timezone,p.end-p.start<60).replace(/ GMT.*$/,''));time.title=historyTime(p.start,data.timezone,true)+' – '+historyTime(p.end,data.timezone,true);item.append(time,diagnosisElement('small',historyLabel(p)));(i<6?list:rest).append(item);});root.append(list);if(visible.length>6)root.append(more);
+ const detail=diagnosisElement('details'),head=diagnosisElement('summary','Schaltpunkte ('+data.switches.length+')'),events=diagnosisElement('ol',undefined,'history-switches');detail.append(head,events);
+ for(const e of data.switches){const item=diagnosisElement('li');item.append(diagnosisElement('time',historyTime(e.time,data.timezone,true)),diagnosisElement('span',e.label));events.append(item);}if(data.switches.length)root.append(detail);
+ root.append(diagnosisElement('p','Zwischen Messungen höchstens 2 Min. fortgeführt. Exakte Schaltpunkte unten; Ladebefehl ≠ Ladung.','muted history-note'));
+}
+function drawHistoryChart(root,data){
+ root.replaceChildren();const state=dashboardHistory,controls=diagnosisElement('div',undefined,'diag-legend');
+ for(const [key,label] of [['pv','PV gemessen · DC kW'],['soc','Akku · %']]){const button=diagnosisElement('button',label);button.type='button';button.setAttribute('aria-pressed',String(state[key]));button.onclick=()=>{state[key]=!state[key];renderDashboardHistory(lastStatus);};controls.append(button);}
+ root.append(controls,diagnosisElement('p','↑ Laden · ↓ Entladen · 🔒 Sperre · helle Lücken = unbekannt','muted history-note'),diagnosisElement('p','↔ Wischen · Zeitbereich antippen','muted history-note'));
+ const plot=diagnosisElement('div',undefined,'history-chart'),detail=diagnosisElement('p','Messwerte und Zustände durch Antippen anzeigen.','diag-detail');plot.tabIndex=0;plot.setAttribute('role','region');plot.setAttribute('aria-label','Historische Strompreise und gemessene PV- und Akkuwerte, horizontal scrollbar');root.append(plot,detail);
+ if(data.end<=data.start)return;
+ const ns='http://www.w3.org/2000/svg',el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;};
+ const width=680,left=48,right=550,bottom=220,top=30,x=t=>left+(t-data.start)/(data.end-data.start)*(right-left);
+ const prices=data.prices.filter(p=>p.start<data.end&&p.end>data.start),low=Math.min(0,...prices.map(p=>p.ct)),high=Math.max(1,...prices.map(p=>p.ct)),y=v=>bottom-(v-low)/(high-low)*(bottom-top);
+ const svg=el('svg',{viewBox:`0 0 ${width} 265`,role:'group','aria-label':'Historischer Tagesverlauf'});plot.append(svg);
+ for(const p of data.phases){svg.append(el('rect',{x:x(p.start),y:top,width:Math.max(0,x(p.end)-x(p.start)),height:bottom-top,fill:historyColor(p),opacity:.13}));svg.append(el('rect',{x:x(p.start),y:226,width:Math.max(0,x(p.end)-x(p.start)),height:7,fill:historyColor(p)}));}
+ for(let i=0;i<=4;i++){const v=low+(high-low)*i/4;svg.append(el('line',{x1:left,x2:right,y1:y(v),y2:y(v),stroke:'#dce5dd'}),el('text',{x:left-8,y:y(v)+4,'text-anchor':'end'},v.toLocaleString('de-DE',{maximumFractionDigits:1})));}
+ svg.append(el('text',{x:left,y:16},'ct/kWh'));
+ for(const p of prices)svg.append(el('rect',{x:x(Math.max(data.start,p.start)),y:Math.min(y(0),y(p.ct)),width:Math.max(1,x(Math.min(data.end,p.end))-x(Math.max(data.start,p.start))-1),height:Math.max(1,Math.abs(y(p.ct)-y(0))),fill:'#edb85f'}));
+ if(!prices.length)root.append(diagnosisElement('p','Keine archivierten Preise für diesen Tag. Messverlauf bleibt sichtbar.','muted history-note'));
+ for(let i=0;i<5;i++){const t=data.start+(data.end-data.start)*i/4;svg.append(el('text',{x:x(t),y:253,'text-anchor':i===0?'start':i===4?'end':'middle'},historyTime(t,data.timezone)));}
+ for(const [key,rows,value,peak,color,axis,gap] of [['pv',data.pv,'kw',Math.max(.5,...data.pv.map(r=>r.kw)),'#22734e',565,600],['soc',data.soc,'soc',100,'#6864b4',625,4500]]){
+  if(!state[key]||!rows.length)continue;svg.append(el('text',{x:axis,y:16},key==='pv'?'DC kW':'Akku %'));
+  for(let i=0;i<=4;i++)svg.append(el('text',{x:axis,y:bottom-i/4*(bottom-top)+4,fill:color},(peak*i/4).toLocaleString('de-DE',{maximumFractionDigits:1})));
+  let path='',previous=null;for(const r of rows){if(r.time<data.start||r.time>data.end)continue;path+=(previous&&r.time-previous.time<=gap?' L':' M')+x(r.time)+' '+(bottom-r[value]/peak*(bottom-top));previous=r;}
+  svg.append(el('path',{d:path,fill:'none',stroke:color,'stroke-width':2.5,'stroke-linejoin':'round','pointer-events':'none'}));
+ }
+ const cursor=el('line',{x1:left,x2:left,y1:top,y2:233,stroke:'#244c3d','stroke-dasharray':'3 3',visibility:'hidden'});svg.append(cursor);
+ function inspect(t){const phase=data.phases.find(p=>p.start<=t&&t<p.end),price=prices.find(p=>p.start<=t&&t<p.end);const values=[historyTime(t,data.timezone,true),phase?historyLabel(phase):'Keine Beobachtung',price?price.ct.toLocaleString('de-DE',{maximumFractionDigits:2})+' ct/kWh':null];for(const [key,rows,field,unit,gap] of [['pv',data.pv,'kw',' kW PV (DC)',600],['soc',data.soc,'soc',' % SOC',4500]]){if(!state[key])continue;const nearest=rows.reduce((a,b)=>!a||Math.abs(b.time-t)<Math.abs(a.time-t)?b:a,null);if(nearest&&Math.abs(nearest.time-t)<=gap)values.push(nearest[field].toLocaleString('de-DE',{maximumFractionDigits:2})+unit+' · Messung '+historyTime(nearest.time,data.timezone));}detail.textContent=values.filter(Boolean).join(' · ');cursor.setAttribute('x1',x(t));cursor.setAttribute('x2',x(t));cursor.setAttribute('visibility','visible');}
+ const slices=Math.max(1,Math.ceil((data.end-data.start)/900));for(let i=0;i<slices;i++){const a=data.start+(data.end-data.start)*i/slices,b=data.start+(data.end-data.start)*(i+1)/slices,hit=el('rect',{x:x(a),y:top,width:x(b)-x(a),height:203,fill:'transparent',tabindex:0,role:'button','aria-label':'Werte um '+historyTime(a,data.timezone,true)});hit.addEventListener('focus',()=>inspect(a));hit.addEventListener('click',()=>inspect(a));svg.append(hit);}
+ svg.addEventListener('pointerdown',event=>{const b=svg.getBoundingClientRect(),px=(event.clientX-b.left)*width/b.width;if(px>=left&&px<=right)inspect(data.start+(px-left)/(right-left)*(data.end-data.start));});
+ root.append(diagnosisElement('p','PV: gemessene DC-Eingangsleistung · Akku: gespeicherte SOC-Messpunkte · keine rückwirkende Prognose.','muted history-note'));
+}

@@ -854,3 +854,9 @@ passenden Einstellungen zählen. Fortschritt zeigt fehlende Stunden/Tage/Fenster
 kein garantierter Fertigstellungstermin bei Messlücken. Numerische Vorschläge
 bleiben von der Abwesenheit von Auto/Sonderlasten abhängig. PV, Morgenpuffer und
 Eigenverbrauch erhalten ohne geeignete Vergleichsbasis keine Empfehlungskarte.
+
+### Historie in der Übersicht
+
+„Plan / Verlauf“ ist in Tagesplanung und Preisdiagramm separat umschaltbar. Die Tagesauswahl im Verlauf gilt für beide Karten (heute und sechs vorherige Tage, soweit noch gespeichert). Angezeigt werden gespeicherte SOC-/PV-DC-Messungen und beobachtete Lade-/Entlade-/Sperrzustände; Befehle erscheinen als separate Schaltpunkte. Wiederholte Sperrbestätigungen ohne Zustandswechsel werden zusammengefasst. Zwischen Beobachtungen wird ein Zustand höchstens zwei Minuten fortgeführt, nach dem letzten Beobachtungszeitpunkt bleibt der Verlauf unbekannt. Messzeiten und Schaltpunkte sind keine sekundengenaue Dauermessung.
+
+Die Historie liest ausschließlich die bestehende Diagnose-Datenbank über `/api/journal/timeline?day=YYYY-MM-DD` (Anmeldung erforderlich). Keine zusätzlichen Geräteabfragen, kein Einfluss auf Steuerung oder Planung. Daten werden kurz zwischengespeichert; bei ausgeblendeter Seite werden keine neuen Historienabrufe gestartet. Preise stammen aus archivierten Planständen und können fehlen; PV wird hier als gemessene DC-Eingangsleistung statt als AC-Prognose bezeichnet. Es werden keine vergangenen Planphasen als tatsächlich ausgeführte Aktionen dargestellt.

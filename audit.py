@@ -151,6 +151,26 @@ class Journal:
         result['advice_days']=7
         return result
 
+    def timeline(self,day,zone='Europe/Berlin'):
+        from past import day_bounds,summarize,epoch,finite
+        now=time.time();start,end=day_bounds(day,zone,now);key=(day,zone)
+        cached=getattr(self,'timeline_cache',None)
+        if cached and cached[0]==key and now-cached[1]<60:return cached[2]
+        with self.connect() as db:
+            rows=db.execute('SELECT time,kind,data FROM events WHERE time>=? AND time<=? ORDER BY time,id',(start-120,min(end,now))).fetchall()
+            # A few latest archived price sets suffice; do not unpack thousands of plans.
+            plans=db.execute('SELECT data FROM plans WHERE time<? ORDER BY id DESC LIMIT 8',(min(end,now),)).fetchall()
+        result=summarize([(t,k,json.loads(raw)) for t,k,raw in rows],start,end,now)
+        prices={}
+        for (raw,) in plans:
+            for p in self.decode(raw).get('prices',[]):
+                a,b=epoch(p.get('start')),epoch(p.get('end'))
+                if a is not None and b is not None and b>a and a<end and b>start and finite(p.get('ct')):
+                    prices.setdefault(a,{'start':a,'end':b,'ct':p['ct']})
+        result.update(day=day,timezone=zone,prices=sorted(prices.values(),key=lambda p:p['start']),retention_days=7)
+        self.timeline_cache=(key,now,result)
+        return result
+
     def soc_series(self):
         # Reuse recorded telemetry; no extra inverter requests. One read per minute.
         now=time.time()

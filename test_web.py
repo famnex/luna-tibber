@@ -211,7 +211,7 @@ class HTTPTests(unittest.TestCase):
         for path,kind in [('/manifest.webmanifest','application/manifest+json'),('/sw.js','application/javascript'),('/icon-192.png','image/png')]:
             conn.request('GET',path);r=conn.getresponse()
             self.assertEqual(r.status,200);self.assertIn(kind,r.getheader('Content-Type'));self.assertTrue(r.read())
-        for path in ('/api/history','/api/update','/api/journal','/api/journal/export','/api/journal/text','/api/journal/plan?id=1'):
+        for path in ('/api/history','/api/update','/api/journal','/api/journal/export','/api/journal/text','/api/journal/plan?id=1','/api/journal/timeline?day=2026-10-26'):
             conn.request('GET',path);r=conn.getresponse();self.assertEqual(r.status,401);r.read()
         conn.request('GET','/healthz');r=conn.getresponse();self.assertEqual(r.status,200)
         self.assertEqual(set(json.loads(r.read())),{'ok','pid','revision'})
@@ -230,8 +230,12 @@ class HTTPTests(unittest.TestCase):
         self.server.app.journal.download.side_effect=download
         self.server.app.config.return_value={'timezone':'Europe/Berlin'}
         self.server.app.journal.plan.return_value={'config':{}}
-        for path in ('/api/journal?hours=12','/api/journal/plan?id=1'):
+        self.server.app.journal.timeline.return_value={'phases':[]}
+        for path in ('/api/journal?hours=12','/api/journal/plan?id=1','/api/journal/timeline?day=2026-10-26'):
             conn.request('GET',path,headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,200);r.read()
+        self.server.app.journal.timeline.assert_called_once_with('2026-10-26','Europe/Berlin')
+        self.server.app.journal.timeline.side_effect=ValueError('Invalid day')
+        conn.request('GET','/api/journal/timeline?day=invalid',headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,400);r.read()
         conn.request('GET','/api/journal/export?hours=24',headers={'Cookie':cookie})
         r=conn.getresponse();self.assertEqual(r.status,200);self.assertIn('attachment',r.getheader('Content-Disposition'));self.assertEqual(json.loads(gzip.decompress(r.read())),{'plans':{},'events':[]})
         conn.request('GET','/api/journal?hours=999',headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,400);r.read()

@@ -705,6 +705,14 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/api/update':
             return self.send(200,self.server.app.update_status())
+        if self.path.split('?',1)[0]=='/api/journal/timeline':
+            from urllib.parse import urlsplit,parse_qs
+            try:
+                day=parse_qs(urlsplit(self.path).query).get('day',[''])[0]
+                result=self.server.app.journal.timeline(day,self.server.app.config()['timezone'])
+            except (ValueError,TypeError):return self.send(400,{'error':'Bitte einen Tag aus den letzten sieben Tagen wählen.'})
+            except Exception:return self.send(503,{'error':'Historie derzeit nicht lesbar. Bitte erneut versuchen.'})
+            return self.send(200,result)
         if self.path.split('?',1)[0]=='/api/journal/plan':
             from urllib.parse import urlsplit,parse_qs
             try:

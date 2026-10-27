@@ -411,6 +411,7 @@ function renderOverview(d){
  const next=overviewNext(d);
  $('nexttime').textContent=next.time?new Date(next.time).toLocaleString('de-DE',{...fmt,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'—';
  $('nextaction').textContent=next.label;$('nextreason').textContent=next.reason;
+ if(typeof renderDashboardHistory==='function')renderDashboardHistory(d);
 }
 
 

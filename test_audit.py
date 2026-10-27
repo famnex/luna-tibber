@@ -61,7 +61,10 @@ class AuditTests(unittest.TestCase):
     def test_dst_prose_disambiguates_repeated_hour(self):
         for hour in (0,1):
             self.log.record(self.c,self.event(time=datetime(2026,10,25,hour,30,tzinfo=timezone.utc).isoformat()))
-        text=self.log.prose(48)
+        from unittest.mock import patch
+        with patch('audit.datetime',wraps=datetime) as clock:
+            clock.now.return_value=datetime(2026,10,26,tzinfo=timezone.utc)
+            text=self.log.prose(48)
         self.assertIn('02:30:00+02:00',text);self.assertIn('02:30:00+01:00',text)
 
     def test_retired_controller_stop_event_is_not_lost(self):
