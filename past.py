@@ -86,9 +86,10 @@ def summarize(rows,start,end,now):
 
 
 def infer_sources(phases,switches=()):
-    """Display-only source continuity, bounded to ten minutes from real evidence.
+    """Display-only source continuity, bounded to thirty minutes from real evidence.
 
-    No inference across gaps, noncharging phases, lock changes or explicit stops.
+    No inference across gaps or noncharging phases. A discharge lock does not
+    prohibit charging. Allow up to 120 seconds of delayed telemetry after a stop.
     Disagreeing neighboring sources remain unknown. Never chain estimated evidence.
     """
     result=[dict(p) for p in phases]
@@ -96,8 +97,7 @@ def infer_sources(phases,switches=()):
     groups=[]
     for i,p in enumerate(phases):
         if p['action']!='charge':continue
-        if (groups and groups[-1][-1]==i-1 and phases[i-1]['end']==p['start']
-                and phases[i-1]['locked']==p['locked']):groups[-1].append(i)
+        if (groups and groups[-1][-1]==i-1 and phases[i-1]['end']==p['start']):groups[-1].append(i)
         else:groups.append([i])
     for group in groups:
         anchors=[i for i in group if phases[i].get('source') in ('grid','pv')]
@@ -111,7 +111,11 @@ def infer_sources(phases,switches=()):
                 if a is None:continue
                 q=phases[a]
                 distance=max(0,p['end']-q['end'],q['start']-p['start'])
-                if distance<=600 and not any(min(p['start'],q['start'])<=t<max(p['end'],q['end']) for t in stops):nearby.append(q['source'])
+                # A stop is a command boundary, not instantaneous meter evidence.
+                # Only a preceding anchor can explain a short trailing reading.
+                crossed=[t for t in stops if min(p['start'],q['start'])<=t<max(p['end'],q['end'])]
+                delayed_tail=all(a<i and q['end']<=t and p['end']<=t+120 for t in crossed)
+                if distance<=1800 and delayed_tail:nearby.append(q['source'])
             # Even a distant disagreeing neighbor indicates a possible source change.
             conflict=left is not None and right is not None and phases[left]['source']!=phases[right]['source']
             if nearby and len(set(nearby))==1 and not conflict:

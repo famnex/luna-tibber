@@ -107,7 +107,7 @@ class PastTests(unittest.TestCase):
         rows[1]['source']='pv'
         self.assertEqual(compact_phases(infer_sources(rows))[0]['source'],'pv')
         self.assertEqual(infer_sources(rows,[dict(time=120,label='Stopp bestätigt')])[0]['source'],'unknown')
-        rows[2]['end']=2000
+        rows[2]['end']=2100
         self.assertEqual(infer_sources(rows)[2]['source'],'unknown')
 
     def test_source_inference_never_invents_daytime_pv_or_bridges_changes(self):
@@ -117,3 +117,28 @@ class PastTests(unittest.TestCase):
         self.assertEqual(infer_sources([phase(0,300,'unknown')])[0]['source'],'unknown')
         rows=[phase(0,60,'grid'),phase(60,100,None,'unknown'),phase(100,200,'unknown')]
         self.assertEqual(infer_sources(rows)[2]['source'],'unknown')
+
+
+    def test_delayed_stop_tail_keeps_source_and_compacts(self):
+        rows=[dict(start=0,end=30,action='charge',locked=True,source='grid'),
+              dict(start=30,end=900,action='charge',locked=True,source='unknown')]
+        out=compact_phases(infer_sources(rows,[dict(time=856,label='Stopp bestätigt')]))
+        self.assertEqual(len(out),1)
+        self.assertEqual(out[0]['source'],'grid')
+        self.assertTrue(out[0]['source_estimated'])
+        self.assertEqual(rows[1]['source'],'unknown')
+        # A sustained observation after stopping needs new source evidence.
+        self.assertEqual(infer_sources(rows,[dict(time=779,label='Stopp bestätigt')])[1]['source'],'unknown')
+
+    def test_discharge_lock_is_not_a_charge_source_boundary(self):
+        rows=[dict(start=0,end=60,action='charge',locked=False,source='grid'),
+              dict(start=60,end=180,action='charge',locked=True,source='unknown')]
+        out=infer_sources(rows)
+        self.assertEqual(out[1]['source'],'grid')
+        self.assertTrue(out[1]['locked'])
+        self.assertEqual(len(compact_phases(out)),2)  # retain the real lock change
+
+    def test_later_source_cannot_explain_charge_before_stop(self):
+        rows=[dict(start=0,end=60,action='charge',locked=True,source='unknown'),
+              dict(start=60,end=90,action='charge',locked=True,source='pv')]
+        self.assertEqual(infer_sources(rows,[dict(time=40,label='Stopp bestätigt')])[0]['source'],'unknown')
