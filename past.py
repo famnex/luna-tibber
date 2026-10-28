@@ -19,6 +19,16 @@ def day_bounds(day,zone,now):
     return start,end
 
 
+def charge_source(data,stamp):
+    """Only near-simultaneous, valid meter evidence identifies historical supply."""
+    meter=data.get('meter') or {};at=epoch(meter.get('measured_at'))
+    grid=meter.get('grid_w');solar=meter.get('pv_dc_w')
+    if not meter.get('valid') or at is None or abs(stamp-at)>30 or not finite(grid) or not finite(solar):return 'unknown'
+    if grid< -100 and 0<=solar<=20:return 'grid'
+    if grid>=-20 and solar>100:return 'pv'
+    return 'unknown' # Import and PV together do not identify the battery's share.
+
+
 def summarize(rows,start,end,now):
     end=min(end,now);updates={};soc={};pv={};switches=[];confirmations={}
     for stamp,kind,d in rows:
@@ -31,7 +41,7 @@ def summarize(rows,start,end,now):
             updates.setdefault(max(start-120,confirmed),{})['locked']=c['locked']
         power=d.get('battery_power_w')
         if kind in ('snapshot','decision','test_sample') and finite(power):
-            updates.setdefault(stamp,{})['power']=power
+            updates.setdefault(stamp,{}).update(power=power,source=charge_source(d,stamp))
         if start<=stamp<=end:
             value=d.get('soc')
             if finite(value) and 0<=value<=100:soc[int(stamp//60)]={'time':stamp,'soc':value}
@@ -53,11 +63,11 @@ def summarize(rows,start,end,now):
     times=sorted(t for t in updates if start-120<=t<=end)
     last=times[-1] if times else start
     boundaries=sorted({start,end,*[t for t in times if t>=start],*[min(end,t+120) for t in times if t>=start-120]})
-    power=None;power_at=None;locked=None;confirmation_at=None;lock_changed_at=None;index=0;phases=[]
+    power=None;power_at=None;source='unknown';locked=None;confirmation_at=None;lock_changed_at=None;index=0;phases=[]
     for left,right in zip(boundaries,boundaries[1:]):
         while index<len(times) and times[index]<=left:
             t=times[index];u=updates[t];index+=1
-            if 'power' in u:power=u['power'];power_at=t
+            if 'power' in u:power=u['power'];power_at=t;source=u.get('source','unknown')
             if 'locked' in u:
                 # A renewed confirmation is not a new control state. Only a
                 # real change invalidates telemetry sampled before the change.
@@ -66,8 +76,8 @@ def summarize(rows,start,end,now):
         fresh=power_at is not None and left-power_at<120 and finite(power) and left<last and (lock_changed_at is None or lock_changed_at<=power_at)
         held=locked is True and left<last and (fresh or (confirmation_at is not None and left-confirmation_at<120))
         action='charge' if fresh and power>100 else 'discharge' if fresh and power< -100 else 'hold' if held else 'idle' if fresh else 'unknown'
-        state={'action':action,'locked':held}
-        if phases and phases[-1]['action']==action and phases[-1]['locked']==held:phases[-1]['end']=right
+        state={'action':action,'locked':held,'source':source if action=='charge' else None}
+        if phases and phases[-1]['action']==action and phases[-1]['locked']==held and phases[-1].get('source')==state['source']:phases[-1]['end']=right
         else:phases.append({'start':left,'end':right,**state})
     switches=sorted(switches,key=lambda x:x['time'])
     return {'start':start,'end':end,'phases':phases,'summary':compact_phases(phases),
@@ -87,11 +97,12 @@ def compact_phases(phases):
         while len(result)>=3:
             a,b,c=result[-3:]
             if not (a['end']==b['start'] and b['end']==c['start']
-                    and a['action']==c['action'] and a['locked']==b['locked']==c['locked']
+                    and a.get('source')==c.get('source') and a['action']==c['action'] and a['locked']==b['locked']==c['locked']
                     and b['end']-b['start']<60
                     and min(a['end']-a['start'],c['end']-c['start'])>=60
                     and all(x['action']!='unknown' for x in (a,b,c))
-                    and not (b['action']=='discharge' and b['locked'])):break
+                    and not (b['action']=='discharge' and b['locked'])
+                    and not (b['action']=='charge' and b.get('source')!=a.get('source'))):break
             result[-3:] = [{**a,'end':c['end'],
                 'brief_count':a['brief_count']+b['brief_count']+c['brief_count']+1,
                 'brief_seconds':a['brief_seconds']+b['end']-b['start']+c['brief_seconds']}]

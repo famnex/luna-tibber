@@ -67,3 +67,9 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 @media(max-width:400px){.history-steps li{grid-template-columns:1fr;gap:3px}.history-steps li>strong{font-size:12px}.history-switches li{display:grid;gap:3px}}
 
 .history-steps li.history-more-row{display:block;grid-column:1 / -1}.history-switches li.history-more-row{border:0}
+
+/* A continuous, duration-proportional band: no minimum widths or separator gaps. */
+.history-strip{gap:0}.history-strip span{min-width:0;flex-basis:0}
+.plan-strip .phase-charge{background:#2f8d62}.plan-strip .phase-pv_charge{background:#b18a24}
+.phase-pv_charge .plan-symbol{color:#9b761a}.legend .legend-pv:before,.legend .legend-pv-charge:before{background:#b18a24}.chart text.pv-axis{fill:#9b761a}
+.history-steps li{grid-template-columns:minmax(0,1fr);gap:4px}.history-steps li>strong{white-space:normal;overflow-wrap:anywhere}

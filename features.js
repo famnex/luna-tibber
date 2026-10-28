@@ -1,9 +1,13 @@
 'use strict';
-const phaseColor=action=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#8c9da2'}[action]||'#91af83');
-const phaseLabel=action=>({charge:'↗ Laden',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
+const phaseColor=action=>({charge:'#2f8d62',pv_charge:'#b18a24',discharge:'#ce732a',hold:'#8c9da2'}[action]||'#91af83');
+const phaseLabel=action=>({charge:'↗ Netzladung',pv_charge:'☀ PV-Ladung',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
 function chartPhases(d){
  if(d.mode!=='smart')return [];
  const rows=(d.dispatch_preview?.windows||[]).map(w=>({...w}));
+ // Display-only PV charging from positive stored-energy change without a grid purchase.
+ for(const t of d.smart_preview?.joint?.trace||[]){
+  if(t.grid_charge_kwh<=1e-7&&t.end_kwh-t.start_kwh>.001)rows.push({start:t.start,end:t.end,action:'pv_charge',projected:true});
+ }
  const until=d.discharge?.request?.until;
  if(until&&Date.parse(until)>Date.now())rows.push({start:new Date(Date.now()).toISOString(),end:until,action:'hold'});
  // Charge rows are drawn last and take precedence over hold rows.
@@ -277,7 +281,7 @@ function renderTodayPlan(d){
  const bar=document.createElement('div');bar.className='plan-strip';bar.setAttribute('aria-hidden','true');
  const list=document.createElement('ol');list.className='plan-steps';
  const fmt=t=>new Date(t).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'});
- const labels={charge:['↑','Laden'],discharge:['↓','Entladung frei'],hold:['Ⅱ','Pause'],unknown:['·','Keine Planung']};
+ const labels={charge:['↑','Netzladung'],pv_charge:['☀','PV-Ladung'],discharge:['↓','Entladung frei'],hold:['Ⅱ','Pause'],unknown:['·','Keine Planung']};
  for(const row of rows){
   const [icon,label]=labels[row.action],part=document.createElement('span');part.className='phase-'+row.action;part.style.flex=String(row.end-row.start);bar.append(part);
   const li=document.createElement('li');li.className='phase-'+row.action;

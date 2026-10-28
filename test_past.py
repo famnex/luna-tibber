@@ -2,7 +2,7 @@ import unittest,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 from unittest.mock import patch
-from past import summarize,day_bounds,compact_phases,compact_switches
+from past import summarize,day_bounds,compact_phases,compact_switches,charge_source
 from audit import Journal
 
 class PastTests(unittest.TestCase):
@@ -84,3 +84,14 @@ class PastTests(unittest.TestCase):
         self.assertEqual(len(groups),4);self.assertEqual(groups[0]['count'],3)
         self.assertEqual(groups[0]['end'],214);self.assertEqual(groups[1]['label'],'Stopp bestätigt')
         self.assertEqual(len(commands),6)
+
+    def test_source_requires_fresh_valid_unambiguous_meter_evidence(self):
+        def data(grid,pv,at=100,valid=True):return {'meter':{'valid':valid,'measured_at':datetime.fromtimestamp(at,timezone.utc).isoformat(),'grid_w':grid,'pv_dc_w':pv}}
+        self.assertEqual(charge_source(data(-1200,0),100),'grid')
+        self.assertEqual(charge_source(data(600,3000),100),'pv')
+        for d in ({},data(-1500,2000),data(-1200,0,at=1),data(-1200,0,valid=False),data(float('nan'),0)):
+            self.assertEqual(charge_source(d,100),'unknown')
+        rows=[(t,'snapshot',{'battery_power_w':1000,**data(-1200 if t<60 else 600,0 if t<60 else 3000,at=t)}) for t in (10,40,60,90)]
+        phases=summarize(rows,0,100,100)['phases']
+        self.assertTrue(any(p.get('source')=='grid' for p in phases))
+        self.assertTrue(any(p.get('source')=='pv' for p in phases))

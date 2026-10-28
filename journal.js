@@ -205,8 +205,9 @@ document.addEventListener('DOMContentLoaded',()=>{
 
 // Dashboard history: journal reads only, independent from live control and planning.
 const dashboardHistory={day:false,price:false,date:null,cache:new Map(),pending:new Set(),errors:new Map(),pv:true,soc:true};
-const historyLabel=p=>({charge:'↑ Ladung gemessen',discharge:'↓ Entladung gemessen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Akku ruht',unknown:'· Keine Beobachtung'}[p.action]||'· Keine Beobachtung')+(p.locked&&['charge','discharge'].includes(p.action)?' · Sperre bestätigt':'');
-const historyColor=p=>({charge:'#2f8d62',discharge:'#ce732a',hold:'#758c97',idle:'#becbbf',unknown:'#e9ede9'}[p.action]);
+const chargeSourceLabel=p=>({grid:'↑ Netzladung',pv:'☀ PV-Ladung'}[p.source]||'↑ Laden · Quelle unklar');
+const historyLabel=p=>({charge:chargeSourceLabel(p),discharge:'↓ Entladung gemessen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Akku ruht',unknown:'· Keine Beobachtung'}[p.action]||'· Keine Beobachtung')+(p.locked&&['charge','discharge'].includes(p.action)?' · Sperre bestätigt':'');
+const historyColor=p=>({charge:({grid:'#2f8d62',pv:'#b18a24'}[p.source]||'#939da5'),discharge:'#ce732a',hold:'#758c97',idle:'#becbbf',unknown:'#e9ede9'}[p.action]);
 function historyTime(t,zone,seconds=false){return new Date(t*1000).toLocaleTimeString('de-DE',{timeZone:zone,hour:'2-digit',minute:'2-digit',...(seconds?{second:'2-digit',timeZoneName:'shortOffset'}:{})});}
 function renderDashboardHistory(d){
  if(!d)return;
@@ -254,13 +255,13 @@ function historyPage(list,rows,render,size=8){
 function historyPhaseItem(p,data,exact=false){
  const item=diagnosisElement('li'),short=p.end-p.start<60,time=diagnosisElement('strong',historyTime(p.start,data.timezone,exact||short).replace(/ GMT.*$/,'')+'–'+historyTime(p.end,data.timezone,exact||short).replace(/ GMT.*$/,''));
  time.title=historyTime(p.start,data.timezone,true)+' – '+historyTime(p.end,data.timezone,true);
- const warning=p.locked&&p.action==='discharge',label=warning?'⚠ Entladung gemeldet · Sperre bestätigt':exact?historyLabel(p):({charge:'↑ Laden',discharge:'↓ Entladen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Ruhe',unknown:'· Messlücke'}[p.action]);
+ const warning=p.locked&&p.action==='discharge',label=warning?'⚠ Entladung gemeldet · Sperre bestätigt':exact?historyLabel(p):({charge:chargeSourceLabel(p),discharge:'↓ Entladen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Ruhe',unknown:'· Messlücke'}[p.action]);
  const info=diagnosisElement('div');info.append(diagnosisElement('span',label));
  info.append(diagnosisElement('small',historyDuration(p.end-p.start)+(p.brief_count?' · '+p.brief_count+' kurze Ausschläge':'')+(!exact&&p.locked&&p.action==='charge'?' · Entladesperre aktiv':''),'muted'));
  item.append(time,info);if(warning)item.className='history-warning';return item;
 }
 function drawHistoryPhases(root,data){
- root.replaceChildren();const rows=data.summary||data.phases||[],bar=diagnosisElement('div',undefined,'plan-strip'),list=diagnosisElement('ol',undefined,'plan-steps history-steps');
+ root.replaceChildren();const rows=data.summary||data.phases||[],bar=diagnosisElement('div',undefined,'plan-strip history-strip'),list=diagnosisElement('ol',undefined,'plan-steps history-steps');
  for(const p of rows){const part=diagnosisElement('span');part.style.flex=String(p.end-p.start);part.style.background=historyColor(p);part.title=historyLabel(p);bar.append(part);}
  root.append(bar);
  const visible=rows.filter(p=>p.action!=='unknown');
@@ -268,17 +269,17 @@ function drawHistoryPhases(root,data){
  historyPage(list,visible,p=>historyPhaseItem(p,data),6);root.append(list);
  const groups=data.switch_groups||data.switches||[];
  if(groups.length){const detail=diagnosisElement('details'),head=diagnosisElement('summary','Befehle & Stopps ('+groups.length+')'),events=diagnosisElement('ol',undefined,'history-switches');detail.append(head,events);let loaded=false;
-  detail.ontoggle=()=>{if(!detail.open||loaded)return;loaded=true;historyPage(events,groups,e=>{const item=diagnosisElement('li'),count=e.count||1;item.append(diagnosisElement('time',historyTime(e.time,data.timezone)+(e.end>e.time?'–'+historyTime(e.end,data.timezone):'')),diagnosisElement('span',count>1?'↻ Ladebefehl '+count+'× gesendet':e.label));return item;});};root.append(detail);
+  detail.ontoggle=()=>{if(!detail.open||loaded)return;loaded=true;historyPage(events,groups,e=>{const item=diagnosisElement('li'),count=e.count||1;item.append(diagnosisElement('time',historyTime(e.time,data.timezone)+(e.end>e.time?'–'+historyTime(e.end,data.timezone):'')),diagnosisElement('span',count>1?'↻ Ladeauftrag · '+count+' befristete Befehle':e.label));return item;});};root.append(detail);
  }
  const detail=diagnosisElement('details'),head=diagnosisElement('summary','Messdetails'),raw=diagnosisElement('ol',undefined,'plan-steps history-steps');
  detail.append(head,diagnosisElement('p',(data.samples||0)+' SOC-Messpunkte · '+(data.phases||[]).length+' Messabschnitte. Kurze Ausschläge werden nur in der Übersicht zusammengefasst. Messlücken und Entladung bei bestätigter Sperre bleiben sichtbar.','muted history-note'),raw);
  let loaded=false;detail.ontoggle=()=>{if(!detail.open||loaded)return;loaded=true;historyPage(raw,data.phases||[],p=>historyPhaseItem(p,data,true),12);};root.append(detail);
- root.append(diagnosisElement('p','Messlücken bleiben offen. Wiederholte Ladebefehle sind keine neuen Ladevorgänge.','muted history-note'));
+ root.append(diagnosisElement('p','Messlücken bleiben offen. Ladebefehle gelten höchstens 2 Min. und werden während des Ladens erneuert. Grün: Netz · Gelb: PV · Grau: Quelle unklar.','muted history-note'));
 }
 function drawHistoryChart(root,data){
  root.replaceChildren();const state=dashboardHistory,controls=diagnosisElement('div',undefined,'diag-legend');
  for(const [key,label] of [['pv','PV gemessen · DC kW'],['soc','Akku · %']]){const button=diagnosisElement('button',label);button.type='button';button.setAttribute('aria-pressed',String(state[key]));button.onclick=()=>{state[key]=!state[key];renderDashboardHistory(lastStatus);};controls.append(button);}
- root.append(controls,diagnosisElement('p','↑ Laden · ↓ Entladen · 🔒 Sperre · helle Lücken = unbekannt','muted history-note'),diagnosisElement('p','↔ Wischen · Zeitbereich antippen','muted history-note'));
+ root.append(controls,diagnosisElement('p','Grün: Netz · Gelb: PV · Grau: Quelle unklar · helle Lücken = unbekannt','muted history-note'),diagnosisElement('p','↔ Wischen · Zeitbereich antippen','muted history-note'));
  const plot=diagnosisElement('div',undefined,'history-chart'),detail=diagnosisElement('p','Messwerte und Zustände durch Antippen anzeigen.','diag-detail');plot.tabIndex=0;plot.setAttribute('role','region');plot.setAttribute('aria-label','Historische Strompreise und gemessene PV- und Akkuwerte, horizontal scrollbar');root.append(plot,detail);
  if(data.end<=data.start)return;
  const ns='http://www.w3.org/2000/svg',el=(tag,attrs,text)=>{const n=document.createElementNS(ns,tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,String(v));if(text!==undefined)n.textContent=text;return n;};
@@ -291,7 +292,7 @@ function drawHistoryChart(root,data){
  for(const p of prices)svg.append(el('rect',{x:x(Math.max(data.start,p.start)),y:Math.min(y(0),y(p.ct)),width:Math.max(1,x(Math.min(data.end,p.end))-x(Math.max(data.start,p.start))-1),height:Math.max(1,Math.abs(y(p.ct)-y(0))),fill:'#edb85f'}));
  if(!prices.length)root.append(diagnosisElement('p','Keine archivierten Preise für diesen Tag. Messverlauf bleibt sichtbar.','muted history-note'));
  for(let i=0;i<5;i++){const t=data.start+(data.end-data.start)*i/4;svg.append(el('text',{x:x(t),y:253,'text-anchor':i===0?'start':i===4?'end':'middle'},historyTime(t,data.timezone)));}
- for(const [key,rows,value,peak,color,axis,gap] of [['pv',data.pv,'kw',Math.max(.5,...data.pv.map(r=>r.kw)),'#22734e',565,600],['soc',data.soc,'soc',100,'#6864b4',625,4500]]){
+ for(const [key,rows,value,peak,color,axis,gap] of [['pv',data.pv,'kw',Math.max(.5,...data.pv.map(r=>r.kw)),'#b18a24',565,600],['soc',data.soc,'soc',100,'#6864b4',625,4500]]){
   if(!state[key]||!rows.length)continue;svg.append(el('text',{x:axis,y:16},key==='pv'?'DC kW':'Akku %'));
   for(let i=0;i<=4;i++)svg.append(el('text',{x:axis,y:bottom-i/4*(bottom-top)+4,fill:color},(peak*i/4).toLocaleString('de-DE',{maximumFractionDigits:1})));
   let path='',previous=null;for(const r of rows){if(r.time<data.start||r.time>data.end)continue;path+=(previous&&r.time-previous.time<=gap?' L':' M')+x(r.time)+' '+(bottom-r[value]/peak*(bottom-top));previous=r;}

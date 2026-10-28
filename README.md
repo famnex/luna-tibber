@@ -33,6 +33,18 @@ Morgenversorgung bestehen; es begrenzt die Smart-Ladezeiten nicht mehr.
 Unbekannte oder lückenhafte Preise werden nicht geschätzt. Manuelle/geplante
 Aufträge und die befristeten Gerätebefehle behalten ihre bisherigen Grenzen.
 
+### Farben und Ladebefehle
+
+Netzladung im Plan ist grün, reine PV-Ladung im Plan und die PV-Linie gedeckt gelb.
+Historische Ladequellen benötigen zeitnahe, gültige Zählerwerte: Netzbezug ohne
+nennenswerte PV bzw. PV bei praktisch keinem Netzbezug. Bei fehlenden Daten oder
+gleichzeitigem Bezug und PV bleibt die Quelle unklar (grau); keine erfundene
+Aufteilung. Der Tagesbalken verwendet echte Zeitanteile ohne Mindestbreiten und
+Zwischenräume. Exakte Messabschnitte bleiben erhalten.
+
+Mehrere Ladebefehle erneuern die jeweils auf höchstens zwei Minuten begrenzte
+Ladezeit. Sie sind keine zusätzlichen Ladevorgänge. Explizite Stopps bleiben separat.
+
 ### Kompakter Tagesverlauf
 
 Erneute Bestätigungen derselben Entladesperre erzeugen keinen künstlichen Wechsel

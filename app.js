@@ -195,11 +195,11 @@ function formatPriceAge(seconds){
  svg.append(el('text',{x:55,y:16},'ct/kWh'));
  if(solar.length){
   const peak=Math.max(.5,Math.ceil(Math.max(...solar.map(r=>r.kw))*2)/2),sy=v=>235-v/peak*205;
-  svg.append(el('text',{x:right+12,y:16,class:'pv-axis'},'PV · kW'),el('line',{x1:right,x2:right,y1:30,y2:235,stroke:'#22734e'}));
+  svg.append(el('text',{x:right+12,y:16,class:'pv-axis'},'PV · kW'),el('line',{x1:right,x2:right,y1:30,y2:235,stroke:'#b18a24'}));
   for(let i=0;i<=4;i++){const v=peak*i/4;svg.append(el('text',{x:right+12,y:sy(v)+4,class:'pv-axis'},v.toLocaleString('de-DE',{maximumFractionDigits:2})));}
   const path=smoothSolarPath(solar,first,last,t=>x(new Date(t).toISOString()),sy);
   svg.append(el('path',{d:path,fill:'none',stroke:'#fff','stroke-width':6,'stroke-opacity':.85,'vector-effect':'non-scaling-stroke','pointer-events':'none','aria-hidden':'true'}));
-  const line=el('path',{d:path,fill:'none',stroke:'#22734e','stroke-width':3,'vector-effect':'non-scaling-stroke','pointer-events':'none',class:'pv-line'});
+  const line=el('path',{d:path,fill:'none',stroke:'#b18a24','stroke-width':3,'vector-effect':'non-scaling-stroke','pointer-events':'none',class:'pv-line'});
   line.append(el('title',{},'PV-Prognose · geglättete Darstellung der Stundenmittel · rechte Achse; Tooltips zeigen Originalwerte'));svg.append(line);
  }
  const legend=$('pvlegend');if(legend)legend.hidden=!allSolar.length;
