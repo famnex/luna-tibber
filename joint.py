@@ -2,17 +2,17 @@
 
 Piecewise-linear dynamic programming (81 SOC knots). Energy transitions remain
 continuous: interpolation never rounds away household demand or creates energy.
-Only self-consumption is discharged; grid charging is restricted to the night.
+Only self-consumption is discharged; grid charging can use any known economically suitable price interval.
 """
 import math
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 from functools import lru_cache
-from price_cache import covers
+from price_cache import planning_end
 
 
 def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
-    if not (c.get('smart_discharge_enabled') and c.get('pv_enabled')):
+    if not c.get('smart_discharge_enabled'):
         return None
     if type(soc) not in (int,float) or not math.isfinite(soc) or not 0<=soc<=100:
         return None
@@ -22,12 +22,9 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     from pv import rows_for
     from protection import reserve
     night_a,night_b=night_bounds(c,now)
-    end,_=night_bounds(c,night_b)
-    night_complete=covers(prices,now,end)
-    if not night_complete:
-        local=now.astimezone(ZoneInfo(c['timezone']))
-        end=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1)).astimezone(timezone.utc)
-        if not covers(prices,now,end):return None
+    end=planning_end(prices,now)
+    if end is None:return None
+    night_complete=night_b<end
     bridge_start=night_b if night_complete else now
     solar_available=bool(rows_for(c,now,end))
     if not solar_available:
@@ -51,18 +48,21 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     limit=capacity*max(0,c['target_soc']-floor)/100
     initial=capacity*max(0,soc-floor)/100
     ceiling=max(limit,initial) # An existing SOC above the configured target is usable.
-    specs=[]
+    specs=[];grid_powers=[]
     for index,r in enumerate(rows):
         seconds=(r['end']-r['start']).total_seconds();hours=seconds/3600
         load=r['load_kw']*hours
-        solar=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)*hours
+        solar_power=min(max(0,r['pv_kw']-r['gross_load_kw'])*eta,power)
+        solar=solar_power*hours
+        grid_power=max(0,power-solar_power)
+        grid_powers.append(grid_power)
         solar-=c.get('battery_idle_w',0)/1000*hours
         following=rows[index+1] if index+1<len(rows) else None
-        continues=bool(following and following['start']==r['end'] and following['start']<night_b and following['ct']<=c['max_buy_ct_kwh'])
+        continues=bool(following and following['start']==r['end'] and following['ct']<=c['max_buy_ct_kwh'])
         margin_seconds=0 if continues else 130
-        can_charge=night_a<=r['start']<night_b and r['ct']<=c['max_buy_ct_kwh'] and seconds>=margin_seconds+60
-        charge=power*max(0,seconds-margin_seconds)/3600 if can_charge else 0
-        specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),power/60,0.))
+        can_charge=r['ct']<=c['max_buy_ct_kwh'] and seconds>=margin_seconds+60
+        charge=grid_power*max(0,seconds-margin_seconds)/3600 if can_charge else 0
+        specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),grid_power/60,0.))
     # Morning energy is a time-specific minimum, released for consumption after
     # night-end. Stop bridging only once PV covers the configured household load.
     morning_rows=[(r,s) for r,s in zip(rows,specs) if r['start']>=bridge_start]
@@ -97,8 +97,8 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
         a,b=r['start'],r['end']
         if charge>1e-7:
-            stop=a+timedelta(seconds=charge/power*3600+130)
-            charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge})
+            stop=a+timedelta(seconds=charge/grid_powers[i]*3600+130)
+            charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge,'grid_power_w':grid_powers[i]*1000})
             windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
         elif used>1e-7:
             # Permission lasts for the row, even if the battery reaches its
@@ -148,11 +148,11 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
             if phases and phases[-1]['action']==item['action'] and phases[-1]['reason']==reason and phases[-1]['end']==item['start']:
                 old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
             else:phases.append(item)
-    solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows if r['start']>=bridge_start))
-    return dict(idle_w=c.get('battery_idle_w',0),idle_kwh=c.get('battery_idle_w',0)/1000*(end-now).total_seconds()/3600,night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
+    solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows))
+    return dict(rolling=True,plan_start=now.isoformat(),idle_w=c.get('battery_idle_w',0),idle_kwh=c.get('battery_idle_w',0)/1000*(end-now).total_seconds()/3600,night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
                 planning_soc=floor+at_night/capacity*100,morning_soc=(floor+at_morning/capacity*100) if night_complete else None,
                 power_w=power*1000,night_start=max(now,night_a).isoformat(),night_end=night_b.isoformat(),
-                reason='Gemeinsamer Energieplan: Verbrauch, Nachtpreise und zeitliche PV-Erzeugung' if night_complete else 'Tagesplan aktiv · Preise für nächste Nacht noch offen')
+                reason='Fortlaufender Energieplan · alle bekannten Preisstunden, Verbrauch und PV')
 
 
 def _interpolate(values,energy,ceiling):

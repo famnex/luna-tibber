@@ -37,7 +37,7 @@ function renderExtras(d){
  const g=j?.guard||q?.guard;
  const protection=g?.unavailable?'🔒 Daten fehlen · Entladung vorläufig gesperrt':g?`🔒 Jetzt benötigt: ${num(g.required_kwh)} kWh Akku · Sperrgrenze ${num(g.threshold_soc)} % SOC\n${num(g.surplus_kwh)} kWh oberhalb der Schutzgrenze · ${g.hold?'Entladung gesperrt':'Entladung nach Preisplan'}${d.mode==='smart'?'':' · Vorschau, Smart nicht aktiv'}`:'Schutzberechnung noch nicht verfügbar';
  document.getElementById('dispatchsummary').textContent=b?
-  `${num(b.demand_kwh)} kWh Bedarf + ${num(b.buffer_kwh)} kWh Wetterpuffer + ${num(b.idle_kwh||0)} kWh Akku-Eigenverbrauch\n${j.night_complete===false?'Für verbleibenden Bedarf':'Am Nachtende benötigt'}: ${num(b.required_soc)} % SOC inkl. ${num(b.floor_soc)} % Gerätegrenze\n${b.shortfall_kwh>.02?'⚠ Planlücke '+num(b.shortfall_kwh)+' kWh · Kaufgrenze, Ladezeit und Ziel prüfen':'✓ Morgenversorgung laut Plan gedeckt'}\n${protection}${j.pv_available===false?'\n☁ PV-Daten fehlen · gerechnet ohne Solarertrag':''}`:
+  `${num(b.demand_kwh)} kWh Bedarf + ${num(b.buffer_kwh)} kWh Wetterpuffer + ${num(b.idle_kwh||0)} kWh Akku-Eigenverbrauch\n${j.night_complete===false?'Für verbleibenden Bedarf':'Am Nachtende benötigt'}: ${num(b.required_soc)} % SOC inkl. ${num(b.floor_soc)} % Gerätegrenze\n${b.shortfall_kwh>.02?'⚠ Planlücke '+num(b.shortfall_kwh)+' kWh · Kaufgrenze, Ladezeit und Ziel prüfen':'✓ Morgenversorgung laut Plan gedeckt'}\n${protection}${d.settings.pv_enabled&&j.pv_available===false?'\n☁ PV-Daten fehlen · gerechnet ohne Solarertrag':''}`:
   protection;
  if(!window.isSecureContext)document.getElementById('pushstatus').textContent='🔒 HTTPS für Installation und Push erforderlich.';
  else if(d.push?.error)document.getElementById('pushstatus').textContent=d.push.error;
@@ -47,8 +47,8 @@ function renderPv(d){
  card.hidden=!d.settings.pv_enabled;if(card.hidden)return;
  const p=d.smart_preview?.pv,forecast=d.pv_forecast||{},num=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
  document.getElementById('pvstatus').textContent=p?.reason||forecast.reason||'Wetterprognose wird geladen …';
- const start=d.smart_preview?.joint?.bridge?.night_end||d.smart_preview?.night_end;
- document.getElementById('pvday').textContent=start?'Für den Tag ab '+new Date(start).toLocaleString('de-DE',{timeZone:d.settings.timezone}):'Nächster Tag nach dem Nachtfenster';
+ const start=d.smart_preview?.joint?.plan_start||d.smart_preview?.night_end;
+ document.getElementById('pvday').textContent=start?'Bekannter Plan ab '+new Date(start).toLocaleString('de-DE',{timeZone:d.settings.timezone}):'Bekannter Planzeitraum';
  const j=d.smart_preview?.joint;
  document.getElementById('pvsummary').textContent=j?`☀ ${num(j.solar?.generation_kwh)} kWh Erzeugung\n⌂ ${num(j.solar?.direct_kwh)} kWh direkt für das Haus\n↗ ${num((j.solar?.generation_kwh||0)-(j.solar?.direct_kwh||0))} kWh Überschuss vor Speicherverlusten und Kapazitätsgrenze`:p?.applied?`☀ ${num(p.generation_kwh)} kWh Erzeugung · ${num(p.direct_kwh)} kWh direkt\n☾ ${num(p.target_soc)} % statt ${num(d.settings.target_soc)} % · ${num(p.reduction_kwh)} kWh weniger Nachtladung`:'Vollständige Wetterdaten und aktuellen Akkustand abwarten.';
  document.getElementById('pvage').textContent=typeof forecast.age_seconds==='number'?`Aktualisiert vor ${Math.floor(forecast.age_seconds/60)} min`:'Noch keine gültigen Wetterdaten.';

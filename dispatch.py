@@ -63,7 +63,7 @@ def plan(c, prices, now, soc, hold_until=None):
                        complete=True,reason='Automatisch benötigte Energie schützen' if joint['guard']['hold'] else joint['reason'],joint=True,guard=joint['guard'],
                        reserved_later_kwh=None)
             return out
-        if c.get('pv_enabled'):
+        if c.get('smart_discharge_enabled'):
             _,until=night_bounds(c,now)
             out.update(hold=True,reason='Preisdaten unvollständig · benötigte Energie vorläufig schützen',
                        guard={'hold':True,'unavailable':True},

@@ -3,9 +3,10 @@ from datetime import datetime,timedelta,timezone
 import luna
 from dispatch import plan,timeline,demand_rows
 
-class DispatchTests(unittest.TestCase):
+class LegacyDispatchTests(unittest.TestCase):
+    """The retained allocator still supplies the comparison-only economics model."""
     def setUp(self):
-        self.c={**luna.DEFAULT,'battery_idle_w':0,'smart_discharge_enabled':True,'battery_capacity_kwh':10,'base_load_w':500,'reserve_soc':20,'roundtrip_efficiency':1,'min_saving_ct_kwh':2}
+        self.c={**luna.DEFAULT,'_legacy_dispatch':True,'battery_idle_w':0,'smart_discharge_enabled':True,'battery_capacity_kwh':10,'base_load_w':500,'reserve_soc':20,'roundtrip_efficiency':1,'min_saving_ct_kwh':2}
         self.now=datetime(2026,10,24,10,tzinfo=timezone.utc) # noon local, 12 h until next night
         self.prices=[{'start':self.now+timedelta(hours=i),'end':self.now+timedelta(hours=i+1),'ct':50 if i in (6,7) else 20} for i in range(12)]
     def test_reserves_for_evening_and_releases_then(self):
@@ -76,25 +77,25 @@ class DispatchTests(unittest.TestCase):
         rows=demand_rows(c,[{'start':a,'end':b,'ct':20}],a,b)
         self.assertAlmostEqual(sum((r['end']-r['start']).total_seconds()/3600*r['load_kw'] for r in rows),1)
 
-    def test_daytime_forecast_includes_tomorrow_and_whole_dst_night(self):
+    def test_rolling_forecast_includes_known_dst_day(self):
         from smart import plan as charge_plan
         from zoneinfo import ZoneInfo
-        c={**self.c,'roundtrip_efficiency':.85,'charge_power_w':5000}
+        c={**self.c,'_legacy_dispatch':False,'roundtrip_efficiency':.85,'charge_power_w':5000}
         a=datetime(2026,10,23,22,tzinfo=timezone.utc)
         rows=[]
         for i in range(196):
             start=a+timedelta(minutes=15*i);hour=start.astimezone(ZoneInfo(c['timezone'])).hour
             rows.append({'start':start,'end':start+timedelta(minutes=15),'ct':10 if hour<6 else 40 if 18<=hour<20 else 25})
         charge=charge_plan(c,rows,self.now,48)
-        self.assertTrue(charge['projected']);self.assertAlmostEqual(charge['planning_soc'],0)
-        self.assertAlmostEqual(charge['needed_kwh'],8)
+        self.assertTrue(charge['projected']);self.assertGreaterEqual(charge['planning_soc'],c['battery_floor_soc'])
+        self.assertGreater(charge['needed_kwh'],0)
+        self.assertEqual(datetime.fromisoformat(charge['joint']['plan_end']),rows[-1]['end'])
         p=timeline(c,rows,self.now,48,charge)
-        self.assertTrue(p['future_complete']);self.assertAlmostEqual(p['future_soc'],80)
+        self.assertTrue(p['future_complete']);self.assertGreaterEqual(p['future_soc'],c['battery_floor_soc']);self.assertLessEqual(p['future_soc'],c['target_soc'])
         tomorrow=datetime(2026,10,25,5,tzinfo=timezone.utc)
         self.assertTrue(any(datetime.fromisoformat(w['start'])>=tomorrow and w['action']=='discharge' for w in p['windows']))
-        night=[w for w in p['windows'] if w['action']=='hold' and w['start']=='2026-10-24T22:00:00+00:00']
-        self.assertEqual(datetime.fromisoformat(night[0]['end'])-datetime.fromisoformat(night[0]['start']),timedelta(hours=7))
-        self.assertTrue(plan(c,rows,datetime(2026,10,25,4,tzinfo=timezone.utc),80)['hold'])
+        elapsed=sum((datetime.fromisoformat(w['end'])-datetime.fromisoformat(w['start'])).total_seconds() for w in p['windows'])
+        self.assertEqual(elapsed,(rows[-1]['end']-self.now).total_seconds())
 
     def test_missing_tomorrow_never_invents_forecast(self):
         p=timeline(self.c,self.prices,self.now,48,{'planned_kwh':0})

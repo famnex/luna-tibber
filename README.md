@@ -2,6 +2,39 @@
 
 Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 
+## Smart über den gesamten bekannten Preiszeitraum
+
+Smart berücksichtigt alle lückenlos veröffentlichten Preise ab jetzt, höchstens 48 Stunden.
+Günstige Tagesstunden können Energie für den teuren Folgetag liefern. Sobald die
+Folgetagspreise eintreffen, wird auch der Rest des gerade laufenden Preisintervalls
+neu bewertet. Zwischen 13 und 16 Uhr wird bei fehlenden Folgetagspreisen minütlich
+nachgefragt; vollständige Preise bleiben im Cache. Änderungen des gemeinsamen
+Preiscaches werden vom laufenden Controller im nächsten regulären Durchlauf übernommen.
+Keine zusätzlichen Wechselrichterabfragen.
+
+Die Kaufpreisgrenze gilt weiterhin: Bei einer Grenze von 20 ct/kWh wird auch bei
+37 ct am Folgetag nicht zu 27 ct geladen. Wer dieses Fenster zulassen möchte,
+muss die Grenze selbst auf mindestens 27 ct/kWh setzen. Ziel-SOC bleibt die
+Obergrenze. Verbrauch, zeitliche PV-Prognose, Verluste, Mindestvorteil, verfügbare
+Ladeleistung und dynamischer Entladeschutz bestimmen die tatsächliche Menge.
+Ohne Smart-Entladeoptimierung werden günstige Ladezeiten ebenfalls über den
+bekannten Zeitraum gesucht, mit dem eingestellten Ziel-SOC.
+
+Das Nachtfenster bleibt für den Preisvergleich und den Zeitpunkt der berechneten
+Morgenversorgung bestehen; es begrenzt die Smart-Ladezeiten nicht mehr.
+Unbekannte oder lückenhafte Preise werden nicht geschätzt. Manuelle/geplante
+Aufträge und die befristeten Gerätebefehle behalten ihre bisherigen Grenzen.
+
+### Kompakter Tagesverlauf
+
+Erneute Bestätigungen derselben Entladesperre erzeugen keinen künstlichen Wechsel
+mehr in der Messanzeige. Kurze Ausschläge zwischen gleichen stabilen Phasen
+werden nur in der Übersicht zusammengefasst. Messlücken, bestätigte Sperrwechsel
+und gemeldete Entladung unter einer Sperre bleiben sichtbar. Wiederholte
+Ladebefehle werden gruppiert; Stopps und Neustarts bleiben getrennt.
+Messdetails und Befehle werden auf Wunsch in kleinen Seiten eingeblendet.
+Das vollständige Protokoll und der Export bleiben unverändert.
+
 ## Was diese Version kann
 
 - Lokale Huawei-Telemetrie lesen, einschließlich SOC und Ladeleistung.
@@ -565,7 +598,7 @@ Unveränderte Entladesperren benötigen jetzt nur eine Kontrollabfrage pro Abgle
 
 ### Verbleibende Grenzen der Planung
 
-Die Rechnung kennt kein gelerntes Lastprofil. Die optionale PV-Prognose modelliert eine Dachfläche mit Sicherheitsabschlag. Die Geräte-Untergrenze muss passend zum Wechselrichter eingestellt werden (nur Rechenwert, vorbelegt mit 5 %); sie wird im gemeinsamen PV-Plan vom nutzbaren SOC abgezogen. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Die Optimierung erfolgt innerhalb des eingestellten Nachtfensters und ist kein frei über 24 Stunden optimierter Ladeplan.
+Die Rechnung kennt kein gelerntes Lastprofil. Die optionale PV-Prognose modelliert eine Dachfläche mit Sicherheitsabschlag. Die Geräte-Untergrenze muss passend zum Wechselrichter eingestellt werden (nur Rechenwert, vorbelegt mit 5 %); sie wird im gemeinsamen PV-Plan vom nutzbaren SOC abgezogen. Eingestellter Grund- und Zusatzverbrauch sowie Wirkungsgrad bleiben Annahmen. Smart optimiert über alle lückenlos bekannten Preisstunden ab jetzt, höchstens 48 Stunden; das Nachtfenster begrenzt den Einkauf nicht.
 
 Eine Entladesperre wird durch Wiederherstellen des ursprünglichen maximalen Entladewerts aufgehoben. Anders als ein auf zwei Minuten begrenzter Ladeauftrag hat dieser Gerätewert keine autonome Ablaufzeit. Bei ausgefallenem Server oder unterbrochener Verbindung kann die Sperre deshalb bis zur erfolgreichen Wiederherstellung bestehen bleiben. Das Journal wird dafür dauerhaft gespeichert; eine lokale Kontrolle kann notwendig sein. Nach einem Neustart beginnt der Webdienst im Modus Aus, automatische Fortsetzung von Smart ist noch nicht vorgesehen.
 

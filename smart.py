@@ -1,6 +1,6 @@
 """Battery-side energy allocation to cheapest eligible tariff intervals."""
 import math
-from datetime import timedelta
+from datetime import datetime,timedelta
 
 
 def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
@@ -24,27 +24,32 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     joint=joint_plan(c,prices,now,soc,power,hold_until)
     if joint is not None:
         out.update(windows=joint['charges'],needed_kwh=joint['planned_kwh'],
-                   duration_minutes=joint['planned_kwh']/(power/1000)*60,
+                   duration_minutes=sum((datetime.fromisoformat(w['end'])-datetime.fromisoformat(w['start'])).total_seconds()-130 for w in joint['charges'])/60,
                    planned_kwh=joint['planned_kwh'],complete=True,projected=True,
                    projection_complete=True,planning_soc=joint['planning_soc'],
                    effective_target_soc=joint['morning_soc'],joint=joint,
                    night_start=joint['night_start'],night_end=joint['night_end'])
-        if joint['charges'] or not joint['night_complete']:return finish(joint['reason'])
+        if joint['charges']:return finish(joint['reason'])
+        known=[p['ct'] for p in prices if p['end']>now and p['start']<datetime.fromisoformat(joint['plan_end'])]
+        if known and min(known)>c['max_buy_ct_kwh']:
+            from diagnosis import fmt
+            return finish(f"Keine Netzladung: günstigster bekannter Preis {fmt(min(known))} ct/kWh > Kaufgrenze {fmt(c['max_buy_ct_kwh'])} ct/kWh")
+        if not joint['night_complete']:return finish('Keine wirtschaftliche Netzladung im bekannten Zeitraum')
         from diagnosis import fmt
         bridge=joint['bridge']
         status='Morgenbedarf gedeckt' if bridge['shortfall_kwh']<.001 else 'Morgenbedarf nicht vollständig gedeckt'
-        return finish(f"0 kWh Netzladung geplant · {status}: erwartet {fmt(joint['morning_soc'])} %, benötigt {fmt(bridge['required_soc'])} % SOC inkl. Puffer/Gerätegrenze · PV-Prognose {fmt(joint['solar']['generation_kwh'])} kWh")
-    from dispatch import night_bounds,projected_soc
+        return finish(f"0 kWh Netzladung im bekannten Zeitraum · {status}: erwartet {fmt(joint['morning_soc'])} %, benötigt {fmt(bridge['required_soc'])} % SOC inkl. Puffer/Gerätegrenze · PV-Prognose {fmt(joint['solar']['generation_kwh'])} kWh")
+    from dispatch import night_bounds
     start,end=night_bounds(c,now)
-    a,b=max(now,start),end
-    out.update(night_start=a.isoformat(),night_end=b.isoformat())
+    from price_cache import planning_end
+    a,b=now,planning_end(prices,now)
+    out.update(night_start=start.isoformat(),night_end=end.isoformat(),plan_start=now.isoformat(),plan_end=b.isoformat() if b else None)
+    if b is None:return finish('Preislücke · keine verlässliche Planung')
+    # Without Smart discharge, retain the configured target. There is no
+    # controllable load model with which to promise a reduced PV-based target.
     planning_soc=soc
-    if now<start and c.get('smart_discharge_enabled'):
-        planning_soc,confirmed=projected_soc(c,prices,now,soc,start,hold_until)
-        out.update(planning_soc=planning_soc,projected=confirmed,projection_complete=confirmed)
-    from pv import night_target
-    pv=night_target(c,end,power)
-    out.update(pv=pv,effective_target_soc=pv['target_soc'])
+    pv={'target_soc':c['target_soc'],'reduction_kwh':0,'applied':False}
+    out.update(effective_target_soc=pv['target_soc'])
     need = max(0, pv['target_soc'] - planning_soc) * c['battery_capacity_kwh'] / 100
     idle=c.get('battery_idle_w',0)/1000*max(0,(b-a).total_seconds())/3600
     if not out['projected']:idle+=c.get('battery_idle_w',0)/1000*max(0,(a-now).total_seconds())/3600
@@ -60,10 +65,10 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     for row in rows:
         left, right = max(a, row['start']), min(b, row['end'])
         if left != cursor or right <= left:
-            return finish('Preislücke im Nachtfenster; keine verlässliche Planung')
+            return finish('Preislücke; keine verlässliche Planung')
         cursor = right
     if cursor != b:
-        return finish('Preise des Nachtfensters noch nicht vollständig verfügbar')
+        return finish('Bekannter Preiszeitraum unvollständig')
     candidates = []
     for row in rows:
         left, right = max(a, row['start']), min(b, row['end'])
@@ -86,7 +91,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     out['complete'] = remaining < 1e-8
     out['planned_kwh'] = need-max(0,remaining)
     return finish('Günstigste geeignete Abschnitte ausgewählt' if out['complete'] else
-                  'Ziel voraussichtlich nicht erreichbar: zu wenig geeignete Ladezeit innerhalb der Preisgrenzen')
+                  'Ziel voraussichtlich nicht erreichbar: zu wenig geeignete Ladezeit innerhalb der bekannten Preise und Preisgrenzen')
 
 
 def planned_economics(c,prices,preview):
@@ -104,5 +109,5 @@ def planned_economics(c,prices,preview):
     if total<=0:return {'ok':False,'reason':preview.get('reason','Kein Netzladeabschnitt geplant')}
     result={k:sum(n*e[k] for n,e in values)/total for k in ('effective_ct_kwh','reference_ct_kwh','saving_ct_kwh')}
     return {**result,'ok':result['saving_ct_kwh']>0 and result['saving_ct_kwh']>=c['min_saving_ct_kwh'],
-            'reason':'Preisvergleich der geplanten Nachtladeabschnitte'+(' · Teilplan' if not preview.get('complete') else ''),
+            'reason':'Preisvergleich der geplanten Ladeabschnitte'+(' · Teilplan' if not preview.get('complete') else ''),
             'window_start':values[0][1]['window_start'],'window_end':values[-1][1]['window_end']}

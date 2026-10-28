@@ -415,6 +415,7 @@ async def operate(args, c, folder):
             if not commissioned.exists() or json.loads(commissioned.read_text())["serial"] != hw.device.serial_number:
                 raise ValueError("Erst charge-test --execute erfolgreich durchführen")
         prices, fetched, attempted = [], 0.0, -300.0
+        price_revision=None;pv_attempted=-300.0
         deadline, session_start = 0.0, None
         no_charge_samples = 0
         while not stop_event.is_set():
@@ -432,16 +433,23 @@ async def operate(args, c, folder):
                 c=fresh;hw.c=c
                 emit('settings_applied',fields=sorted(changed))
             mono = time.monotonic()
-            if not c.get("_manual") and mono - attempted >= 300:
+            from price_cache import revision,poll_interval
+            observed_revision=revision(folder)
+            if not c.get("_manual") and (mono-attempted>=poll_interval(c) or observed_revision!=price_revision):
                 attempted = mono
                 from pv import refresh as refresh_pv
-                await asyncio.to_thread(refresh_pv,c,folder)
+                if mono-pv_attempted>=300:
+                    pv_attempted=mono
+                    await asyncio.to_thread(refresh_pv,c,folder)
                 try:
                     prices = await asyncio.to_thread(cached_prices, c, folder)
                     fetched = time.monotonic()
                 except Exception as exc:
                     prices = []
                     emit("price_error", error_type=type(exc).__name__)
+                # A concurrent publication during the read must be picked up
+                # next loop, rather than acknowledged without being loaded.
+                price_revision=observed_revision
             if c.get("wifi_enabled"):
                 await asyncio.to_thread(check_app, c["host"])
             snapshot = await hw.snapshot()

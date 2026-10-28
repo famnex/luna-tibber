@@ -543,14 +543,19 @@ class Dashboard:
             order['phase'] = 'charging'
 
     def price_worker(self):
+        price_revision=None;pv_at=-300.0
+        from price_cache import revision,poll_interval
         while not self.closed.is_set():
             with self.lock:
                 c = self.config()
-                due = time.monotonic()-self.price_at >= 300
+                observed_revision=revision(self.folder)
+                due = time.monotonic()-self.price_at >= poll_interval(c) or observed_revision!=price_revision
             if due:
                 try:
                     from pv import refresh as refresh_pv
-                    refresh_pv(c,self.folder)
+                    if time.monotonic()-pv_at>=300:
+                        pv_at=time.monotonic()
+                        refresh_pv(c,self.folder)
                 except Exception:pass
                 try:
                     from price_cache import get
@@ -559,6 +564,7 @@ class Dashboard:
                 except Exception:
                     stamp = 0
                     prices,error = [],'Tibber-Preise nicht verfügbar; Token und Zuhause-ID prüfen'
+                price_revision=observed_revision
                 with self.lock:
                     if all(self.config().get(k)==c[k] for k in ('tibber_token','tibber_home_id')):
                         self.price_data,self.price_error,self.price_at = prices,error,time.monotonic()

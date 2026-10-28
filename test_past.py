@@ -2,7 +2,7 @@ import unittest,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 from unittest.mock import patch
-from past import summarize,day_bounds
+from past import summarize,day_bounds,compact_phases,compact_switches
 from audit import Journal
 
 class PastTests(unittest.TestCase):
@@ -41,3 +41,46 @@ class PastTests(unittest.TestCase):
             a=j.timeline('2026-10-26');self.assertEqual(a['prices'][0]['ct'],20);self.assertEqual(a['samples'],1)
             self.assertIs(j.timeline('2026-10-26'),a)
             self.assertFalse(any(p['action']=='hold' for p in a['phases']))
+
+    def test_thousands_of_renewed_confirmations_do_not_split_charging(self):
+        rows=[]
+        for t in range(10,21600,15):
+            rows.append((t,'decision',{'battery_power_w':1500,'soc':40,
+                'discharge_confirmation':{'locked':True,'time':datetime.fromtimestamp(t+3,timezone.utc).isoformat()}}))
+        result=summarize(rows,0,21600,21600)
+        self.assertLessEqual(len(result['phases']),6)
+        charges=[p for p in result['phases'] if p['action']=='charge' and p['locked']]
+        self.assertEqual(len(charges),1)
+        self.assertGreater(charges[0]['end']-charges[0]['start'],21500)
+        self.assertEqual(len(result['switches']),1)
+
+    def test_real_lock_changes_invalidate_prechange_measurements(self):
+        rows=[]
+        for t,locked,power in [(10,False,500),(30,True,500),(50,True,500),(70,False,500),(90,False,500)]:
+            rows.append((t,'decision',{'battery_power_w':power,'discharge_confirmation':{
+                'locked':locked,'time':datetime.fromtimestamp(t+3,timezone.utc).isoformat()}}))
+        result=summarize(rows,0,110,110)
+        self.assertEqual(next(p for p in result['phases'] if p['start']<=35<p['end'])['action'],'hold')
+        self.assertEqual(len(result['switches']),3)
+        self.assertTrue(any(p['action']=='charge' and p['locked'] for p in result['phases']))
+
+    def test_compact_summary_preserves_gaps_locks_and_warning(self):
+        def rows(middle,locked=False):
+            return [dict(start=0,end=600,action='charge',locked=locked),dict(start=600,end=620,action=middle,locked=locked),dict(start=620,end=1200,action='charge',locked=locked)]
+        original=rows('idle');summary=compact_phases(original)
+        self.assertEqual(len(summary),1);self.assertEqual(summary[0]['brief_count'],1)
+        self.assertEqual(summary[0]['brief_seconds'],20);self.assertEqual(len(original),3)
+        self.assertEqual(len(compact_phases(rows('unknown'))),3)
+        self.assertEqual(len(compact_phases(rows('discharge',True))),3)
+        different=rows('hold');different[1]['locked']=True
+        self.assertEqual(len(compact_phases(different)),3)
+        sustained=rows('idle');sustained[1]['end']=720;sustained[2]['start']=720
+        self.assertEqual(len(compact_phases(sustained)),3)
+
+    def test_command_groups_never_hide_stop_restart_or_long_gap(self):
+        commands=[dict(time=t,label='Ladebefehl gesendet') for t in (10,112,214)]
+        commands += [dict(time=250,label='Stopp bestätigt'),dict(time=280,label='Ladebefehl gesendet'),dict(time=600,label='Ladebefehl gesendet')]
+        groups=compact_switches(commands)
+        self.assertEqual(len(groups),4);self.assertEqual(groups[0]['count'],3)
+        self.assertEqual(groups[0]['end'],214);self.assertEqual(groups[1]['label'],'Stopp bestätigt')
+        self.assertEqual(len(commands),6)

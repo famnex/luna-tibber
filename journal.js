@@ -222,7 +222,7 @@ function renderDashboardHistory(d){
   document.getElementById(name+'-plan-view').hidden=state[name];document.getElementById(name+'-history-view').hidden=!state[name];
   const refresh=document.getElementById(name+'-history-refresh');refresh.onclick=()=>loadDashboardHistory(d,true);refresh.disabled=state.pending.has(state.date);refresh.classList.toggle('button-loading',refresh.disabled);
   const cached=state.cache.get(state.date),error=state.errors.get(state.date);
-  document.getElementById(name+'-history-state').textContent=error||(state.pending.has(state.date)?'Protokoll wird geladen …':cached?'Protokoll · '+cached.data.samples+' SOC-Messpunkte · Lücken bleiben offen':'Noch nicht geladen.');
+  document.getElementById(name+'-history-state').textContent=error||(state.pending.has(state.date)?'Protokoll wird geladen …':cached?'Gemessener Verlauf · '+(cached.data.summary||cached.data.phases||[]).filter(p=>p.action!=='unknown').length+' Abschnitte':'Noch nicht geladen.');
   const root=document.getElementById(name+'-history-content');
   if(state[name]){
    if(!cached){root.replaceChildren();delete root.dataset.historySignature;}
@@ -243,17 +243,37 @@ async function loadDashboardHistory(d,force=false){
  catch(e){state.errors.set(key,e.name==='AbortError'?'Laden dauert zu lange. Mit ↻ erneut versuchen.':e.message);}
  finally{clearTimeout(timer);state.pending.delete(key);if(!document.hidden)renderDashboardHistory(lastStatus||d);}
 }
+function historyDuration(seconds){
+ const minutes=Math.round(seconds/60);return seconds<60?Math.round(seconds)+' Sek.':minutes<60?minutes+' Min.':Math.floor(minutes/60)+' Std.'+(minutes%60?' '+minutes%60+' Min.':'');
+}
+function historyPage(list,rows,render,size=8){
+ let offset=0;const more=diagnosisElement('li',undefined,'history-more-row'),button=diagnosisElement('button','Weitere anzeigen','history-more');button.type='button';more.append(button);
+ function next(){more.remove?.();for(const row of rows.slice(offset,offset+size))list.append(render(row));offset+=size;if(offset<rows.length){button.textContent='Weitere '+Math.min(size,rows.length-offset)+' anzeigen';list.append(more);}}
+ button.onclick=next;next();
+}
+function historyPhaseItem(p,data,exact=false){
+ const item=diagnosisElement('li'),short=p.end-p.start<60,time=diagnosisElement('strong',historyTime(p.start,data.timezone,exact||short).replace(/ GMT.*$/,'')+'–'+historyTime(p.end,data.timezone,exact||short).replace(/ GMT.*$/,''));
+ time.title=historyTime(p.start,data.timezone,true)+' – '+historyTime(p.end,data.timezone,true);
+ const warning=p.locked&&p.action==='discharge',label=warning?'⚠ Entladung gemeldet · Sperre bestätigt':exact?historyLabel(p):({charge:'↑ Laden',discharge:'↓ Entladen',hold:'🔒 Entladung gesperrt',idle:'Ⅱ Ruhe',unknown:'· Messlücke'}[p.action]);
+ const info=diagnosisElement('div');info.append(diagnosisElement('span',label));
+ info.append(diagnosisElement('small',historyDuration(p.end-p.start)+(p.brief_count?' · '+p.brief_count+' kurze Ausschläge':'')+(!exact&&p.locked&&p.action==='charge'?' · Entladesperre aktiv':''),'muted'));
+ item.append(time,info);if(warning)item.className='history-warning';return item;
+}
 function drawHistoryPhases(root,data){
- root.replaceChildren();const rows=data.phases||[],bar=diagnosisElement('div',undefined,'plan-strip'),list=diagnosisElement('ol',undefined,'plan-steps history-steps');
+ root.replaceChildren();const rows=data.summary||data.phases||[],bar=diagnosisElement('div',undefined,'plan-strip'),list=diagnosisElement('ol',undefined,'plan-steps history-steps');
  for(const p of rows){const part=diagnosisElement('span');part.style.flex=String(p.end-p.start);part.style.background=historyColor(p);part.title=historyLabel(p);bar.append(part);}
  root.append(bar);
  const visible=rows.filter(p=>p.action!=='unknown');
  if(!visible.length)root.append(diagnosisElement('p','Keine beobachteten Zustandsintervalle für diesen Tag.','muted'));
- const more=diagnosisElement('details'),summary=diagnosisElement('summary','Weitere Abschnitte ('+Math.max(0,visible.length-6)+')'),rest=diagnosisElement('ol',undefined,'plan-steps history-steps');more.append(summary,rest);
- visible.forEach((p,i)=>{const item=diagnosisElement('li');const time=diagnosisElement('strong',historyTime(p.start,data.timezone,p.end-p.start<60).replace(/ GMT.*$/,'')+'–'+historyTime(p.end,data.timezone,p.end-p.start<60).replace(/ GMT.*$/,''));time.title=historyTime(p.start,data.timezone,true)+' – '+historyTime(p.end,data.timezone,true);item.append(time,diagnosisElement('small',historyLabel(p)));(i<6?list:rest).append(item);});root.append(list);if(visible.length>6)root.append(more);
- const detail=diagnosisElement('details'),head=diagnosisElement('summary','Schaltpunkte ('+data.switches.length+')'),events=diagnosisElement('ol',undefined,'history-switches');detail.append(head,events);
- for(const e of data.switches){const item=diagnosisElement('li');item.append(diagnosisElement('time',historyTime(e.time,data.timezone,true)),diagnosisElement('span',e.label));events.append(item);}if(data.switches.length)root.append(detail);
- root.append(diagnosisElement('p','Zwischen Messungen höchstens 2 Min. fortgeführt. Exakte Schaltpunkte unten; Ladebefehl ≠ Ladung.','muted history-note'));
+ historyPage(list,visible,p=>historyPhaseItem(p,data),6);root.append(list);
+ const groups=data.switch_groups||data.switches||[];
+ if(groups.length){const detail=diagnosisElement('details'),head=diagnosisElement('summary','Befehle & Stopps ('+groups.length+')'),events=diagnosisElement('ol',undefined,'history-switches');detail.append(head,events);let loaded=false;
+  detail.ontoggle=()=>{if(!detail.open||loaded)return;loaded=true;historyPage(events,groups,e=>{const item=diagnosisElement('li'),count=e.count||1;item.append(diagnosisElement('time',historyTime(e.time,data.timezone)+(e.end>e.time?'–'+historyTime(e.end,data.timezone):'')),diagnosisElement('span',count>1?'↻ Ladebefehl '+count+'× gesendet':e.label));return item;});};root.append(detail);
+ }
+ const detail=diagnosisElement('details'),head=diagnosisElement('summary','Messdetails'),raw=diagnosisElement('ol',undefined,'plan-steps history-steps');
+ detail.append(head,diagnosisElement('p',(data.samples||0)+' SOC-Messpunkte · '+(data.phases||[]).length+' Messabschnitte. Kurze Ausschläge werden nur in der Übersicht zusammengefasst. Messlücken und Entladung bei bestätigter Sperre bleiben sichtbar.','muted history-note'),raw);
+ let loaded=false;detail.ontoggle=()=>{if(!detail.open||loaded)return;loaded=true;historyPage(raw,data.phases||[],p=>historyPhaseItem(p,data,true),12);};root.append(detail);
+ root.append(diagnosisElement('p','Messlücken bleiben offen. Wiederholte Ladebefehle sind keine neuen Ladevorgänge.','muted history-note'));
 }
 function drawHistoryChart(root,data){
  root.replaceChildren();const state=dashboardHistory,controls=diagnosisElement('div',undefined,'diag-legend');
@@ -265,7 +285,7 @@ function drawHistoryChart(root,data){
  const width=680,left=48,right=550,bottom=220,top=30,x=t=>left+(t-data.start)/(data.end-data.start)*(right-left);
  const prices=data.prices.filter(p=>p.start<data.end&&p.end>data.start),low=Math.min(0,...prices.map(p=>p.ct)),high=Math.max(1,...prices.map(p=>p.ct)),y=v=>bottom-(v-low)/(high-low)*(bottom-top);
  const svg=el('svg',{viewBox:`0 0 ${width} 265`,role:'group','aria-label':'Historischer Tagesverlauf'});plot.append(svg);
- for(const p of data.phases){svg.append(el('rect',{x:x(p.start),y:top,width:Math.max(0,x(p.end)-x(p.start)),height:bottom-top,fill:historyColor(p),opacity:.13}));svg.append(el('rect',{x:x(p.start),y:226,width:Math.max(0,x(p.end)-x(p.start)),height:7,fill:historyColor(p)}));}
+ for(const p of data.summary||data.phases){svg.append(el('rect',{x:x(p.start),y:top,width:Math.max(0,x(p.end)-x(p.start)),height:bottom-top,fill:historyColor(p),opacity:.13}));svg.append(el('rect',{x:x(p.start),y:226,width:Math.max(0,x(p.end)-x(p.start)),height:7,fill:historyColor(p)}));}
  for(let i=0;i<=4;i++){const v=low+(high-low)*i/4;svg.append(el('line',{x1:left,x2:right,y1:y(v),y2:y(v),stroke:'#dce5dd'}),el('text',{x:left-8,y:y(v)+4,'text-anchor':'end'},v.toLocaleString('de-DE',{maximumFractionDigits:1})));}
  svg.append(el('text',{x:left,y:16},'ct/kWh'));
  for(const p of prices)svg.append(el('rect',{x:x(Math.max(data.start,p.start)),y:Math.min(y(0),y(p.ct)),width:Math.max(1,x(Math.min(data.end,p.end))-x(Math.max(data.start,p.start))-1),height:Math.max(1,Math.abs(y(p.ct)-y(0))),fill:'#edb85f'}));

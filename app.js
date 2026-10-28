@@ -28,7 +28,7 @@ const settingHelp={
  pv_ac_limit_kw:'Obergrenze der nutzbaren PV-Ausgangsleistung in kW. Beim SUN2000-5KTL-M1 hier konservativ 5. Sie begrenzt nur die Prognose und verändert keine Einstellung im Wechselrichter.',
  pv_factor:'Welchen Anteil des modellierten Ertrags Smart anrechnet. 0.7 nutzt 70 %, also 30 % Sicherheitsabschlag. Zusätzlich rechnet das einfache Modell mit 15 % Anlagenverlusten. Verschattung, Schnee und individuelle Modulwerte werden nicht automatisch erkannt.',
 
- smart_discharge_enabled:'Smart hält Energie für teure Stunden zurück und gibt die normale Entladung frei. Während des gesamten Nachtfensters bleibt die Entladung gesperrt, auch nach Ladeende. Nach den eingeplanten Entladestunden darf verbleibende Energie bis zur normalen Geräteabschaltung genutzt werden. Nur im Modus Smart aktiv; eine manuelle Sperre hat Vorrang.',
+ smart_discharge_enabled:'Smart plant über alle lückenlos bekannten Preisstunden: Laden tagsüber und nachts, Entladen für teure Verbrauchsstunden und PV berücksichtigen. Die benötigte Energie wird dynamisch geschützt. Nur im Modus Smart aktiv; eine manuelle Entladesperre hat Vorrang.',
  base_load_w:'Erwarteter laufender Hausverbrauch ohne den unten eingetragenen Zusatzverbrauch. Beispiel: 500 W benötigen in zwei Stunden 1 kWh. Es wird ein gleichmäßiger Verbrauch angenommen, keine zusätzliche Messung gestartet. Bei aktivierter PV-Prognose wird erwartete direkte Solardeckung abgezogen.',
  extra_load_kwh:'Zusätzliche Energie pro Tag, z. B. 2 kWh zum Kochen. Sie wird zusätzlich zum Grundverbrauch gleichmäßig auf das eingestellte Zeitfenster verteilt. 0 deaktiviert den Zusatzbedarf. Dies beeinflusst die Auswahl teurer Entladestunden, garantiert aber weder einen bestimmten Energieertrag noch eine feste Leistung.',
  extra_load_start_hour:'Beginn des täglichen Zusatzverbrauchs in deiner Zeitzone, z. B. 17 für Kochen ab 17 Uhr. Das Zeitfenster muss am selben Kalendertag enden.',
@@ -44,8 +44,8 @@ const settingHelp={
  password:'Lokales Huawei-Installateurpasswort. Einfügen ist möglich. Leer lassen behält das gespeicherte Passwort; es wird nicht an den Browser zurückgesendet.',
  tibber_token:'Persönlicher Tibber-API-Token zum Abruf deiner Strompreise. Verdeckte Eingabe erlaubt Einfügen. Leer lassen behält einen vorhandenen Token.',
  tibber_home_id:'Kennung des Tibber-Zuhauses. Bei mehreren Zuhause das richtige auswählen bzw. dessen ID eintragen. Bei nur einem Zuhause kann das Feld leer bleiben.',
- max_buy_ct_kwh:'Obergrenze für Smart-Netzladen inklusive Tarifbestandteilen. Zusätzlich müssen Verluste, Verschleißreserve und Mindestvorteil passen. An und Geplant führen keinen Preisvergleich aus.',
- target_soc:'Gewünschter Ladestand. Das individuelle Ziel eines bereits geplanten Auftrags bleibt erhalten. Smart berechnet daraus den Energiebedarf. Mit PV-Prognose ist dies die Obergrenze; ein erwarteter Solarüberschuss kann das nächtliche Ladeziel senken. Für eine zukünftige Nacht berücksichtigt Smart bei aktivierter Entladeoptimierung den vorher geplanten Verbrauch. Der Plan wird mit dem späteren tatsächlichen SOC neu berechnet.',
+ max_buy_ct_kwh:'Harte Kaufpreisgrenze für Smart, auch tagsüber. Liegt der aktuelle Preis darüber, wird nicht aus dem Netz geladen – auch wenn morgen deutlich teurer ist. Manuelles Laden ist preisunabhängig.',
+ target_soc:'Obergrenze für Netzladung. Smart plant mit aktuellem SOC, Verbrauch, PV, Verlusten und allen bekannten Preisen. Es lädt nur die benötigte bzw. wirtschaftliche Energiemenge. Das Ziel eines bereits bestätigten geplanten Auftrags bleibt erhalten.',
  charge_power_w:'Angeforderte Ladeleistung in Watt, z. B. 5000 W = 5 kW. Die Gerätelimits gelten weiterhin. Dauer ungefähr = benötigte kWh geteilt durch kW; Kommunikationspausen verlängern das Zeitfenster.',
  max_session_minutes:'Harte Zeitgrenze einer zusammenhängenden Ladesitzung. Eine Überschreitung beendet die Automatik. Änderungen verlängern keinen laufenden Timer. Auch manuelle und geplante Aufträge sind zeitlich begrenzt.',
  roundtrip_efficiency:'Annahme für Laden UND Entladen zusammen: 0,85 bedeutet 85 % bzw. insgesamt 15 % Verlust. Für 1 kWh nutzbare Energie werden rechnerisch 1 / 0,85 kWh eingekauft. Das Modell verteilt Verluste gleichmäßig auf beide Richtungen; kein gemessener Wirkungsgrad.',
@@ -53,8 +53,8 @@ const settingHelp={
  min_saving_ct_kwh:'Erforderlicher Vorteil je später nutzbarer kWh nach Verlusten und Verschleiß. Beispiel: 2 bedeutet, dass Smart mindestens 2 ct/kWh Vorteil erwartet.',
  use_start_hour:'Beginn des Verbrauchsfensters für den Preisvergleich, wenn Smart-Entladen ausgeschaltet ist. Bei aktiver Entladeoptimierung werden stattdessen die eingeplanten Entladestunden bewertet.',
  use_end_hour:'Ende des Verbrauchsfensters am selben Tag. Preise werden zeitgewichtet gemittelt. Diese Einstellung hat keinen Einfluss auf die separate 00–24-Uhr-Tagesdurchschnittsanzeige.',
- night_start_hour:'Beginn des täglichen Smart-Ladefensters in lokaler Zeit. Smart darf nur darin laden. Bei aktiver Entladeoptimierung wird innerhalb des gesamten Nachtfensters keine normale Entladung freigegeben.',
- night_end_hour:'Ende des Nachtfensters am selben Tag, z. B. 6 für 06:00 Uhr. Danach beginnt die Tagesplanung. Nach einem früheren Ladeende bleibt die Entladung bis hier gesperrt. Für 00–06 Uhr Start 0, Ende 6 eintragen.',
+ night_start_hour:'Beginn des Nachtfensters für den Preisvergleich in lokaler Zeit. Keine Beschränkung der Smart-Ladezeiten: auch günstige Stunden am Tag werden genutzt.',
+ night_end_hour:'Ende des Nachtvergleichs und Zeitpunkt für die berechnete Morgenversorgung, z. B. 6 für 06:00 Uhr. Smart darf auch außerhalb dieses Fensters laden; Entladeschutz wird laufend nach dem Bedarf berechnet.',
  timezone:'Zeitzone für Preisdiagramm und Zeitfenster, z. B. Europe/Berlin. Zeitumstellungen werden berücksichtigt; eine Nacht kann dann länger oder kürzer sein.',
  wifi_enabled:'Prüft das separat eingerichtete Geräte-WLAN vor dem Laden. Das WLAN-Profil muss bereits über den Connector auf dem Server eingerichtet sein; dieses Feld verbindet kein beliebiges WLAN neu.'
 };
@@ -235,9 +235,9 @@ function renderControl(d){
  const c=d.settings;
  const preview=d.smart_preview;
  const fmt=x=>new Date(x).toLocaleString('de-DE',{timeZone:c.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});
- $('smarttiming').textContent=preview.joint?(preview.joint.night_complete===false?'☀ Tagesplan aktiv · nächste Nacht noch offen':preview.windows.length?'↗ '+preview.planned_kwh.toLocaleString('de-DE',{maximumFractionDigits:2})+' kWh Netzladung geplant':'☾ Keine Netzladung geplant'):preview.reason;
+ $('smarttiming').textContent=preview.windows.length?'↗ '+preview.planned_kwh.toLocaleString('de-DE',{maximumFractionDigits:2})+' kWh Netzladung geplant · Tag & Nacht':preview.reason;
  const number=n=>typeof n==='number'?n.toLocaleString('de-DE',{maximumFractionDigits:2}):'—';
- $('smarttarget').textContent=preview.joint?.night_complete===false?`Plan bis ${fmt(preview.joint.plan_end)}`:preview.joint?`☾ ${fmt(preview.night_end)}: ca. ${number(preview.effective_target_soc)} % SOC${preview.planned_kwh>0?' · '+Math.round(preview.duration_minutes)+' min bei '+number(preview.power_w/1000)+' kW':''}`:`SOC ${number(preview.soc)} → ${number(preview.target_soc)} % · ${number(preview.needed_kwh)} kWh`;
+ $('smarttarget').textContent=preview.joint?`Plan bis ${fmt(preview.joint.plan_end)}${preview.planned_kwh>0?' · ca. '+Math.round(preview.duration_minutes)+' min bei bis zu '+number(preview.power_w/1000)+' kW':''}${preview.joint.night_complete?' · '+fmt(preview.night_end)+': ca. '+number(preview.effective_target_soc)+' % SOC':''}`:`SOC ${number(preview.soc)} → ${number(preview.target_soc)} % · ${number(preview.needed_kwh)} kWh`;
  if(preview.soc===null&&$('smartslots').children.length){
   $('smarttiming').textContent='Messung wird aktualisiert · bisheriger Plan, derzeit nicht bestätigt';
  }else{

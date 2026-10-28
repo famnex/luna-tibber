@@ -53,17 +53,57 @@ def summarize(rows,start,end,now):
     times=sorted(t for t in updates if start-120<=t<=end)
     last=times[-1] if times else start
     boundaries=sorted({start,end,*[t for t in times if t>=start],*[min(end,t+120) for t in times if t>=start-120]})
-    power=None;power_at=None;locked=None;confirmation_at=None;index=0;phases=[]
+    power=None;power_at=None;locked=None;confirmation_at=None;lock_changed_at=None;index=0;phases=[]
     for left,right in zip(boundaries,boundaries[1:]):
         while index<len(times) and times[index]<=left:
             t=times[index];u=updates[t];index+=1
             if 'power' in u:power=u['power'];power_at=t
-            if 'locked' in u:locked=u['locked'];confirmation_at=t
-        fresh=power_at is not None and left-power_at<120 and finite(power) and left<last and (confirmation_at is None or confirmation_at<=power_at)
+            if 'locked' in u:
+                # A renewed confirmation is not a new control state. Only a
+                # real change invalidates telemetry sampled before the change.
+                if u['locked']!=locked:lock_changed_at=t
+                locked=u['locked'];confirmation_at=t
+        fresh=power_at is not None and left-power_at<120 and finite(power) and left<last and (lock_changed_at is None or lock_changed_at<=power_at)
         held=locked is True and left<last and (fresh or (confirmation_at is not None and left-confirmation_at<120))
         action='charge' if fresh and power>100 else 'discharge' if fresh and power< -100 else 'hold' if held else 'idle' if fresh else 'unknown'
         state={'action':action,'locked':held}
         if phases and phases[-1]['action']==action and phases[-1]['locked']==held:phases[-1]['end']=right
         else:phases.append({'start':left,'end':right,**state})
-    return {'start':start,'end':end,'phases':phases,'soc':list(soc.values()),'pv':sorted(pv.values(),key=lambda x:x['time']),
-            'switches':sorted(switches,key=lambda x:x['time']),'samples':len(soc)}
+    switches=sorted(switches,key=lambda x:x['time'])
+    return {'start':start,'end':end,'phases':phases,'summary':compact_phases(phases),
+            'soc':list(soc.values()),'pv':sorted(pv.values(),key=lambda x:x['time']),
+            'switches':switches,'switch_groups':compact_switches(switches),'samples':len(soc)}
+
+
+def compact_phases(phases):
+    """Display-only: absorb brief observations between equal stable phases.
+
+    Never bridge missing telemetry, confirmed lock changes or measured discharge
+    under a lock. The original observations remain available for diagnosis.
+    """
+    result=[]
+    for p in phases:
+        result.append({**p,'brief_count':0,'brief_seconds':0})
+        while len(result)>=3:
+            a,b,c=result[-3:]
+            if not (a['end']==b['start'] and b['end']==c['start']
+                    and a['action']==c['action'] and a['locked']==b['locked']==c['locked']
+                    and b['end']-b['start']<60
+                    and min(a['end']-a['start'],c['end']-c['start'])>=60
+                    and all(x['action']!='unknown' for x in (a,b,c))
+                    and not (b['action']=='discharge' and b['locked'])):break
+            result[-3:] = [{**a,'end':c['end'],
+                'brief_count':a['brief_count']+b['brief_count']+c['brief_count']+1,
+                'brief_seconds':a['brief_seconds']+b['end']-b['start']+c['brief_seconds']}]
+    return result
+
+
+def compact_switches(switches):
+    """Repeated finite charge commands renew one session; stops remain explicit."""
+    result=[]
+    for e in switches:
+        if (result and e['label']=='Ladebefehl gesendet' and result[-1]['label']==e['label']
+                and 0<=e['time']-result[-1]['end']<=180):
+            result[-1]['end']=e['time'];result[-1]['count']+=1
+        else:result.append({**e,'end':e['time'],'count':1})
+    return result

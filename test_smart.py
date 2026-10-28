@@ -44,7 +44,7 @@ class SmartTests(unittest.TestCase):
         self.rows[16]['ct']=-5
         p=plan(self.c,self.rows,self.now,79)
         self.assertEqual(p['windows'][0]['start'],self.rows[16]['start'].isoformat())
-    def test_never_charge_outside_night(self):
+    def test_no_charge_without_a_known_consumption_comparison(self):
         p=plan(self.c,self.rows,self.now+timedelta(hours=7),73)
         self.assertFalse(p['windows'])
     def test_dst_night_uses_real_elapsed_hours(self):
@@ -55,7 +55,7 @@ class SmartTests(unittest.TestCase):
         self.assertTrue(p['complete'])
         self.assertEqual(datetime.fromisoformat(p['night_end'])-now,timedelta(hours=7))
 
-    def test_ui_economics_uses_selected_night_prices_not_daytime_price(self):
+    def test_ui_economics_uses_selected_purchase_prices(self):
         from smart import planned_economics
         from unittest.mock import patch
         a=self.now+timedelta(hours=1);b=self.now+timedelta(hours=2)

@@ -49,7 +49,7 @@ def get(c, folder, fetch, now=None):
             horizon=(local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=2)).astimezone(timezone.utc)
         if covers(rows,now,horizon):
             return rows,stamp,False
-        if rows and 0<=now.timestamp()-attempt<TTL:
+        if rows and 0<=now.timestamp()-attempt<poll_interval(c,now):
             return rows,stamp,now.timestamp()-stamp>=TTL
         fallback=False
         try:
@@ -71,3 +71,27 @@ def get(c, folder, fetch, now=None):
         finally:
             if os.path.exists(tmp):os.unlink(tmp)
         return rows,stamp,fallback
+
+
+def planning_end(rows,now):
+    """Known contiguous prices only, bounded to 48 real hours. Gaps fail closed."""
+    limit=now+timedelta(hours=48);cursor=now
+    for row in sorted(rows,key=lambda r:r['start']):
+        if row['end']<=cursor:continue
+        if row['start']>=limit:break
+        if row['start']>cursor:return None
+        cursor=min(limit,row['end'])
+        if cursor==limit:break
+    return cursor if cursor>now else None
+
+
+def poll_interval(c,now=None):
+    local=(now or datetime.now(timezone.utc)).astimezone(ZoneInfo(c.get('timezone','Europe/Berlin')))
+    # Seek publication more promptly; a complete day is always served from cache.
+    return 60 if 13<=local.hour<16 else TTL
+
+
+def revision(folder):
+    """Cheap shared-cache change detection; never performs network/device IO."""
+    try:return (Path(folder)/'tibber-prices.json').stat().st_mtime_ns
+    except OSError:return None
