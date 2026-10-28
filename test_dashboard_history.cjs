@@ -33,3 +33,5 @@ assert.match(fs.readFileSync('style.css','utf8'),/\.history-strip span\{min-widt
 const pvPlan={mode:'smart',smart_preview:{joint:{trace:[{start:'2026-10-28T10:00:00Z',end:'2026-10-28T11:00:00Z',grid_charge_kwh:0,start_kwh:2,end_kwh:3}]},windows:[]}};
 assert.equal(ctx.chartPhases(pvPlan)[0].action,'pv_charge');
 pvPlan.smart_preview.joint.trace[0].end_kwh=2;assert.equal(ctx.chartPhases(pvPlan).length,0);
+assert.match(vm.runInContext("historyLabel({action:'charge',source:'pv',source_estimated:true})",ctx),/PV-Ladung.*geschätzt/);
+assert.match(fs.readFileSync('journal.js','utf8'),/const phase=\(data.summary\|\|data.phases\).find/);

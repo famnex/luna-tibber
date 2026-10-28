@@ -2,7 +2,7 @@ import unittest,tempfile
 from datetime import datetime,timezone
 from pathlib import Path
 from unittest.mock import patch
-from past import summarize,day_bounds,compact_phases,compact_switches,charge_source
+from past import summarize,day_bounds,compact_phases,compact_switches,charge_source,infer_sources
 from audit import Journal
 
 class PastTests(unittest.TestCase):
@@ -95,3 +95,25 @@ class PastTests(unittest.TestCase):
         phases=summarize(rows,0,100,100)['phases']
         self.assertTrue(any(p.get('source')=='grid' for p in phases))
         self.assertTrue(any(p.get('source')=='pv' for p in phases))
+
+    def test_continuous_charge_infers_source_without_changing_raw_data(self):
+        rows=[dict(start=0,end=240,action='charge',locked=True,source='unknown'),
+              dict(start=240,end=254,action='charge',locked=True,source='grid'),
+              dict(start=254,end=314,action='charge',locked=True,source='unknown')]
+        out=compact_phases(infer_sources(rows))
+        self.assertEqual(len(out),1);self.assertEqual(out[0]['source'],'grid')
+        self.assertTrue(out[0]['source_estimated']);self.assertEqual(out[0]['end'],314)
+        self.assertEqual(rows[0]['source'],'unknown')
+        rows[1]['source']='pv'
+        self.assertEqual(compact_phases(infer_sources(rows))[0]['source'],'pv')
+        self.assertEqual(infer_sources(rows,[dict(time=120,label='Stopp bestätigt')])[0]['source'],'unknown')
+        rows[2]['end']=2000
+        self.assertEqual(infer_sources(rows)[2]['source'],'unknown')
+
+    def test_source_inference_never_invents_daytime_pv_or_bridges_changes(self):
+        def phase(a,b,source,action='charge'):return dict(start=a,end=b,source=source,action=action,locked=False)
+        rows=[phase(0,60,'grid'),phase(60,300,'unknown'),phase(300,360,'pv')]
+        self.assertEqual(infer_sources(rows)[1]['source'],'unknown')
+        self.assertEqual(infer_sources([phase(0,300,'unknown')])[0]['source'],'unknown')
+        rows=[phase(0,60,'grid'),phase(60,100,None,'unknown'),phase(100,200,'unknown')]
+        self.assertEqual(infer_sources(rows)[2]['source'],'unknown')

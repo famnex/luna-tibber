@@ -80,9 +80,43 @@ def summarize(rows,start,end,now):
         if phases and phases[-1]['action']==action and phases[-1]['locked']==held and phases[-1].get('source')==state['source']:phases[-1]['end']=right
         else:phases.append({'start':left,'end':right,**state})
     switches=sorted(switches,key=lambda x:x['time'])
-    return {'start':start,'end':end,'phases':phases,'summary':compact_phases(phases),
+    return {'start':start,'end':end,'phases':phases,'summary':compact_phases(infer_sources(phases,switches)),
             'soc':list(soc.values()),'pv':sorted(pv.values(),key=lambda x:x['time']),
             'switches':switches,'switch_groups':compact_switches(switches),'samples':len(soc)}
+
+
+def infer_sources(phases,switches=()):
+    """Display-only source continuity, bounded to ten minutes from real evidence.
+
+    No inference across gaps, noncharging phases, lock changes or explicit stops.
+    Disagreeing neighboring sources remain unknown. Never chain estimated evidence.
+    """
+    result=[dict(p) for p in phases]
+    stops=[e['time'] for e in switches if e['label'] in ('Stopp bestätigt','Stopp unbestätigt','Ladeziel erreicht')]
+    groups=[]
+    for i,p in enumerate(phases):
+        if p['action']!='charge':continue
+        if (groups and groups[-1][-1]==i-1 and phases[i-1]['end']==p['start']
+                and phases[i-1]['locked']==p['locked']):groups[-1].append(i)
+        else:groups.append([i])
+    for group in groups:
+        anchors=[i for i in group if phases[i].get('source') in ('grid','pv')]
+        for i in group:
+            p=phases[i]
+            if p.get('source') in ('grid','pv'):continue
+            left=next((a for a in reversed(anchors) if a<i),None)
+            right=next((a for a in anchors if a>i),None)
+            nearby=[]
+            for a in (left,right):
+                if a is None:continue
+                q=phases[a]
+                distance=max(0,p['end']-q['end'],q['start']-p['start'])
+                if distance<=600 and not any(min(p['start'],q['start'])<=t<max(p['end'],q['end']) for t in stops):nearby.append(q['source'])
+            # Even a distant disagreeing neighbor indicates a possible source change.
+            conflict=left is not None and right is not None and phases[left]['source']!=phases[right]['source']
+            if nearby and len(set(nearby))==1 and not conflict:
+                result[i].update(source=nearby[0],source_estimated=True)
+    return result
 
 
 def compact_phases(phases):
@@ -93,6 +127,11 @@ def compact_phases(phases):
     """
     result=[]
     for p in phases:
+        if (result and result[-1]['end']==p['start'] and result[-1]['action']==p['action']
+                and result[-1]['locked']==p['locked'] and result[-1].get('source')==p.get('source')):
+            result[-1]['end']=p['end']
+            result[-1]['source_estimated']=bool(result[-1].get('source_estimated') or p.get('source_estimated'))
+            continue
         result.append({**p,'brief_count':0,'brief_seconds':0})
         while len(result)>=3:
             a,b,c=result[-3:]
@@ -103,7 +142,7 @@ def compact_phases(phases):
                     and all(x['action']!='unknown' for x in (a,b,c))
                     and not (b['action']=='discharge' and b['locked'])
                     and not (b['action']=='charge' and b.get('source')!=a.get('source'))):break
-            result[-3:] = [{**a,'end':c['end'],
+            result[-3:] = [{**a,'end':c['end'],'source_estimated':any(x.get('source_estimated') for x in (a,b,c)),
                 'brief_count':a['brief_count']+b['brief_count']+c['brief_count']+1,
                 'brief_seconds':a['brief_seconds']+b['end']-b['start']+c['brief_seconds']}]
     return result

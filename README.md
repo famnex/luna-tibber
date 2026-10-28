@@ -39,7 +39,7 @@ Netzladung im Plan ist grün, reine PV-Ladung im Plan und die PV-Linie gedeckt g
 Historische Ladequellen benötigen zeitnahe, gültige Zählerwerte: Netzbezug ohne
 nennenswerte PV bzw. PV bei praktisch keinem Netzbezug. Bei fehlenden Daten oder
 gleichzeitigem Bezug und PV bleibt die Quelle unklar (grau); keine erfundene
-Aufteilung. Der Tagesbalken verwendet echte Zeitanteile ohne Mindestbreiten und
+Aufteilung. Innerhalb einer durchgehenden Ladung werden unbekannte Quellen aus benachbarten eindeutigen Messungen übernommen (höchstens zehn Minuten Abstand, als geschätzt markiert). Stopps, Messlücken und widersprüchliche Quellen verhindern die Übernahme; Rohdaten bleiben erhalten. Tageszeit oder fehlende App-Befehle allein beweisen keine PV-Ladung. Der Tagesbalken verwendet echte Zeitanteile ohne Mindestbreiten und
 Zwischenräume. Exakte Messabschnitte bleiben erhalten.
 
 Mehrere Ladebefehle erneuern die jeweils auf höchstens zwei Minuten begrenzte
