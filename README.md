@@ -2,6 +2,14 @@
 
 Für Huawei SUN2000-5KTL-M1 mit LUNA und direktem Wechselrichter-WLAN.
 
+## Schnelle Updates auf dem Pi
+
+Beim Update laufen nur Paketprüfung, Syntax- und Importprüfung der Programm-Module
+sowie die Neustart-/Bereitschaftsprüfung. Die vollständige Testsuite läuft vor dem
+Push in der Entwicklung, nicht auf dem Pi. Eine fehlgeschlagene Vorprüfung lässt
+den bisherigen Code stehen; ein fehlgeschlagener Neustart löst weiterhin die
+Rückkehr zur vorherigen Version aus. Ladestopp und Entladefreigabe bleiben Pflicht.
+
 ## Smart über den gesamten bekannten Preiszeitraum
 
 Smart berücksichtigt alle lückenlos veröffentlichten Preise ab jetzt, höchstens 48 Stunden.

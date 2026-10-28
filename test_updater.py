@@ -88,3 +88,21 @@ class UpdaterTests(unittest.TestCase):
         self.assertEqual(python,current);self.assertIsNone(venv)
         self.assertEqual(run.call_count,2)
         self.assertEqual(run.call_args.args[0],[current,'-m','pip','check'])
+
+    def test_update_does_not_execute_test_suite(self):
+        (self.seed/'test_main.py').write_text('raise RuntimeError("tests must not run during update")\n')
+        self.update_remote()
+        self.assertEqual(self.apply()['state'],'done')
+
+    def test_missing_runtime_import_keeps_old_version(self):
+        self.update_remote('import nonexistent_luna_runtime_dependency\n')
+        self.assertEqual(self.apply()['state'],'failed')
+        self.assertEqual(updater.revision(self.app),self.old);self.assertEqual(self.services,[])
+
+    def test_timeout_and_missing_program_are_distinct(self):
+        with patch('updater.subprocess.run',side_effect=subprocess.TimeoutExpired(['python'],120)):
+            with self.assertRaisesRegex(updater.UpdateError,'Zeitlimit von 120 Sekunden'):
+                updater.run(['python'],self.app,timeout=120)
+        with patch('updater.subprocess.run',side_effect=FileNotFoundError(2,'missing')):
+            with self.assertRaisesRegex(updater.UpdateError,'konnte nicht gestartet'):
+                updater.run(['python'],self.app)

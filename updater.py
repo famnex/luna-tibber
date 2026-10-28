@@ -59,8 +59,10 @@ def run(args,cwd,timeout=60,log=None):
     try:
         result=subprocess.run([str(a) for a in args],cwd=cwd,env=env,stdout=subprocess.PIPE if log is None else log,
                               stderr=subprocess.PIPE if log is None else subprocess.STDOUT,text=True,timeout=timeout)
-    except (OSError,subprocess.TimeoutExpired) as exc:
-        raise UpdateError('Befehl nicht verfügbar oder Zeitlimit überschritten: '+Path(str(args[0])).name) from exc
+    except subprocess.TimeoutExpired as exc:
+        raise UpdateError(f'Zeitlimit von {timeout} Sekunden überschritten: '+Path(str(args[0])).name+'; Details in update.log') from exc
+    except OSError as exc:
+        raise UpdateError('Befehl konnte nicht gestartet werden: '+Path(str(args[0])).name+f' (Betriebssystemfehler {exc.errno})') from exc
     if result.returncode:
         raise UpdateError('Schritt fehlgeschlagen: '+Path(str(args[0])).name+'; Details gegebenenfalls in update.log')
     return (result.stdout or '').strip()
@@ -126,8 +128,19 @@ def prepare_python(folder,stage,token,log):
 
 
 def validate_stage(stage,python,log):
-    run([python,'-m','compileall','-q',stage],stage,timeout=120,log=log)
-    run([python,'-m','unittest','discover','-s',stage,'-q'],stage,timeout=300,log=log)
+    # Import modules without starting services, tests or inverter connections.
+    check = """
+import importlib, pathlib, py_compile, sys
+root = pathlib.Path.cwd()
+sys.path.insert(0, str(root))
+modules = sorted(p for p in root.glob('*.py') if not p.name.startswith('test_'))
+print('Python-Syntax prüfen', flush=True)
+for path in modules: py_compile.compile(str(path), doraise=True)
+print('Programm-Module und Abhängigkeiten importieren', flush=True)
+for path in modules: importlib.import_module(path.stem)
+print('Kurzprüfung erfolgreich', flush=True)
+"""
+    run([python,'-I','-c',check],stage,timeout=120,log=log)
     if shutil.which('node'):
         for path in stage.glob('*.js'):run(['node','--check',path],stage,timeout=30,log=log)
 
@@ -192,7 +205,7 @@ def apply(folder,token,port,tls,old_pid):
             git(folder,'worktree','add','--detach',str(stage),target,log=log)
             progress('dependencies','Abhängigkeiten prüfen und bei Bedarf vorbereiten')
             python,new_venv=prepare_python(folder,stage,token,log)
-            progress('testing','Neue Version prüfen')
+            progress('testing','Syntax und Programm-Importe prüfen')
             validate_stage(stage,python,log)
             if inspect_repo(folder)!=original:raise UpdateError('Git-Stand wurde zwischenzeitlich geändert')
             progress('installing','Geprüftes Update übernehmen')

@@ -136,7 +136,7 @@ const updateStates=new Set(['preparing','queued','checking','dependencies','test
 let updateTimer=null,updateWatch=false,updateStarting=false,updateDisconnectedAt=0;
 function renderUpdateProgress(u){
  const wrap=document.getElementById('updateprogresswrap');if(!wrap)return;
- const labels=['Steuerung stoppen','Ladestopp bestätigen','Entladung freigeben','Git prüfen','Abhängigkeiten prüfen','Tests ausführen','Version installieren','Dienst neu starten','Bereitschaft bestätigen'];
+ const labels=['Steuerung stoppen','Ladestopp bestätigen','Entladung freigeben','Git prüfen','Abhängigkeiten prüfen','Kurzprüfung ausführen','Version installieren','Dienst neu starten','Bereitschaft bestätigen'];
  const steps={queued:4,checking:4,dependencies:5,testing:6,installing:7,restarting:8,done:9,current:9};
  const n=u.state==='preparing'?(u.step||1):steps[u.state],active=updateStates.has(u.state);
  wrap.hidden=!active&&!['done','current','failed'].includes(u.state);
