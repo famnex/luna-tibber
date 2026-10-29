@@ -45,6 +45,9 @@ class PlanHistoryTests(unittest.TestCase):
         self.command();r=self.h.summary(self.c,self.now+timedelta(minutes=3))
         self.assertEqual(r['periods']['yesterday']['seconds'],30)
         self.assertEqual(r['periods']['today']['seconds'],90)
+        self.assertEqual([d['period'] for d in r['days']],['2026-10-25','2026-10-24'])
+        self.assertEqual([d['seconds'] for d in r['days']],[90,30])
+        self.assertAlmostEqual(sum(d['saving'] for d in r['days']),r['months'][0]['saving'])
         self.assertEqual(r['months'][0]['seconds'],120)
         self.assertEqual(r['years'][0]['period'],'2026')
     def test_previous_measurements_are_not_mixed(self):

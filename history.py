@@ -75,7 +75,7 @@ class History:
             periods[name]=combine([r for r in rows if start<=r['day']<=today.isoformat()])
         periods['yesterday']=combine([r for r in rows if r['day']==(today-timedelta(days=1)).isoformat()])
         grouped={}
-        for label,n in [('months',7),('years',4)]:
+        for label,n in [('days',10),('months',7),('years',4)]:
             grouped[label]=[{'period':p,**combine([r for r in rows if r['day'][:n]==p])} for p in sorted({r['day'][:n] for r in rows},reverse=True)]
         return {'periods':periods,**grouped,'started':rows[0]['day'] if rows else None,
                 'estimated':True,'source':'plan','enabled':c.get('statistics_enabled',True)}

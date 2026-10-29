@@ -83,8 +83,10 @@ function renderHistory(){
   card.append(h,amount,label,detail);box.append(card);
  }
  const tbody=document.getElementById('historyrows');tbody.replaceChildren();
- const rows=d[document.getElementById('historygroup').value];
- for(const v of rows){const tr=document.createElement('tr');for(const text of [v.period,money(v,'saving')+(partial(v)?' (Teilbetrag)':''),money(v,'cost'),money(v,'avoided')]){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
+ const group=document.getElementById('historygroup').value;
+ const rows=d[group]||[];
+ const periodLabel=p=>group==='days'?p.split('-').reverse().join('.') : p;
+ for(const v of rows){const tr=document.createElement('tr');for(const text of [periodLabel(v.period),money(v,'saving')+(partial(v)?' (Teilbetrag)':''),money(v,'cost'),money(v,'avoided')]){const td=document.createElement('td');td.textContent=text;tr.append(td);}tbody.append(tr);}
  if(!rows.length){const row=document.createElement('tr'),cell=document.createElement('td');cell.colSpan=4;cell.textContent='Noch keine Ladeaufträge erfasst. Frühere Ladungen werden nicht rückwirkend übernommen.';row.append(cell);tbody.append(row);}
 }
 let installPrompt=null,pwaRegistration=null;
