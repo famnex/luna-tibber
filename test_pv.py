@@ -14,7 +14,7 @@ class PvTests(unittest.TestCase):
         self.tmp=tempfile.TemporaryDirectory();self.folder=Path(self.tmp.name)
         self.now=datetime(2026,10,24,tzinfo=timezone.utc)
         self.c={**luna.DEFAULT,'battery_idle_w':0,'battery_floor_soc':0,'timezone':'UTC','pv_enabled':True,'pv_kwp':8,
-                'pv_latitude':51.2,'pv_longitude':10.0,'pv_factor':.7,
+                'pv_buffer_pct':0,'pv_latitude':51.2,'pv_longitude':10.0,'pv_factor':.7,
                 'battery_capacity_kwh':10,'base_load_w':500,'charge_power_w':5000,
                 'smart_discharge_enabled':True,'roundtrip_efficiency':1}
         self.rows=[{'start':self.now+timedelta(hours=i),'end':self.now+timedelta(hours=i+1),
@@ -122,3 +122,24 @@ class PvTests(unittest.TestCase):
         self.assertNotIn('_pv',status['settings']);self.assertNotIn('rows',status['pv_forecast'])
         self.assertEqual(status['pv_forecast']['series'][0]['start'],self.rows[0]['start'].isoformat())
         self.assertEqual(status['pv_forecast']['series'][0]['kw'],self.rows[0]['kw'])
+
+
+    def test_extra_buffer_scales_forecast_once_and_invalidates_cache(self):
+        data={'hourly':{'time':[self.now.timestamp()+3600],'global_tilted_irradiance':[500]}}
+        plain=pv.parse(self.c,data)[0]['kw']
+        buffered={**self.c,'pv_buffer_pct':10}
+        self.assertAlmostEqual(pv.parse(buffered,data)[0]['kw'],plain*.9)
+        self.assertNotEqual(pv.fingerprint(self.c),pv.fingerprint(buffered))
+        self.assertEqual(pv.parse({**self.c,'pv_factor':0,'pv_buffer_pct':10},data)[0]['kw'],0)
+
+    def test_buffer_cannot_increase_credited_solar(self):
+        from joint import plan
+        hourly={'time':[(self.now+timedelta(hours=i+1)).timestamp() for i in range(72)],
+                'global_tilted_irradiance':[400 if 10<=i%24<14 else 0 for i in range(72)]}
+        plans=[]
+        for buffer in (0,10):
+            config={**self.c,'pv_buffer_pct':buffer}
+            config['_pv']={'rows':pv.parse(config,{'hourly':hourly})}
+            plans.append(plan(config,self.prices,self.now,30))
+        self.assertLess(plans[1]['solar']['generation_kwh'],plans[0]['solar']['generation_kwh'])
+        self.assertGreaterEqual(plans[1]['planned_kwh'],plans[0]['planned_kwh']-1e-6)

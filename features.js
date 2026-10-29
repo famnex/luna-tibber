@@ -278,18 +278,8 @@ function renderTodayPlan(d){
  const key=planDayKey(d,now,offset),date=key.slice(8)+'.'+key.slice(5,7)+'.';
  document.getElementById('todayplanhint').textContent=date+' · '+(rows.length?(offset?'Vorschau · geplante Freigaben':'Ab jetzt · geplante Freigaben'):d.mode==='off'?'Aus · kein Ladeplan aktiv':!hasPrices?'Preise noch nicht verfügbar':day+' noch keine bestätigten Planphasen');
  if(!rows.length)return;
- const bar=document.createElement('div');bar.className='plan-strip';bar.setAttribute('aria-hidden','true');
- const list=document.createElement('ol');list.className='plan-steps';
  const fmt=t=>new Date(t).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'});
- const labels={charge:['↑','Netzladung'],pv_charge:['☀','PV-Ladung'],discharge:['↓','Entladung frei'],hold:['Ⅱ','Pause'],unknown:['·','Keine Planung']};
- for(const row of rows){
-  const [icon,label]=labels[row.action],part=document.createElement('span');part.className='phase-'+row.action;part.style.flex=String(row.end-row.start);bar.append(part);
-  const li=document.createElement('li');li.className='phase-'+row.action;
-  const symbol=document.createElement('span');symbol.className='plan-symbol';symbol.textContent=icon;
-  const time=document.createElement('strong');time.textContent=fmt(row.start)+'–'+fmt(row.end);
-  const text=document.createElement('small');text.textContent=label;li.append(symbol,time,text);list.append(li);
- }
- root.append(bar,list);
+ renderPhaseStrip(root,rows,fmt);
 }
 
 const chartVisibility={pv:true,battery:true};
@@ -339,4 +329,34 @@ function socPath(points,first,last,x,y){
   previous=p;
  }
  return path;
+}
+
+// Shared chart interaction: mouse inspection, touch taps, native scrolling.
+function bindPlotInspection(svg,inspect){
+ let start=null;
+ svg.addEventListener('pointermove',e=>{if(e.pointerType==='mouse')inspect(e);});
+ svg.addEventListener('pointerdown',e=>{start={x:e.clientX,y:e.clientY,id:e.pointerId};});
+ svg.addEventListener('pointercancel',()=>{start=null;});
+ svg.addEventListener('pointerup',e=>{const p=start;start=null;if(p&&p.id===e.pointerId&&Math.hypot(e.clientX-p.x,e.clientY-p.y)<=8)inspect(e);});
+}
+function valueBubbles(root,items){
+ root.replaceChildren();root.classList.add('value-bubbles');
+ for(const item of items){if(!item)continue;const b=document.createElement('span');b.className='value-bubble';b.title=item.label;b.setAttribute('aria-label',item.label+': '+item.value);
+ const icon=document.createElement('span');icon.setAttribute('aria-hidden','true');icon.textContent=item.icon;
+ const value=document.createElement('span');value.textContent=item.value;b.append(icon,value);root.append(b);}
+}
+function textBubbles(root,text){
+ valueBubbles(root,text.split(' · ').filter(Boolean).map((value,i)=>({icon:i===0?'◷':/PV|☀/.test(value)?'☀':/Akku|SOC|%/.test(value)?'▰':/ct\/kWh/.test(value)?'€':'↕',label:value,value:value.replace(/^(Akku |PV-Prognose: )/,'').replace('keine Daten','—')})));
+}
+function renderPhaseStrip(root,rows,fmt){
+ const bar=document.createElement('div');bar.className='plan-strip interactive-strip';
+ const detail=document.createElement('div');detail.hidden=true;detail.setAttribute('aria-live','polite');
+ const labels={charge:['↑','Netzladung'],pv_charge:['☀','PV-Ladung'],discharge:['↓','Entladung frei'],hold:['Ⅱ','Pause'],unknown:['·','Keine Planung']};
+ for(const row of rows){const [icon,label]=labels[row.action]||labels.unknown,part=document.createElement('button');part.type='button';part.className='phase-'+row.action;part.style.flex=String(row.end-row.start);part.setAttribute('aria-label',fmt(row.start)+'–'+fmt(row.end)+' '+label);
+ const select=()=>{detail.hidden=false;valueBubbles(detail,[{icon:'◷',label:'Zeitraum',value:fmt(row.start)+'–'+fmt(row.end)},{icon,label:'Aktion',value:label}]);};
+ part.onclick=select;part.addEventListener('focus',select);part.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')select();});bar.append(part);}
+ const axis=document.createElement('div');axis.className='plan-axis';
+ const a=rows[0].start,b=rows[rows.length-1].end;
+ for(let i=0;i<5;i++){const tick=document.createElement('span');tick.textContent=fmt(a+(b-a)*i/4);axis.append(tick);}
+ root.append(bar,axis,detail);
 }

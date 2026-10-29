@@ -104,3 +104,18 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 [data-theme=dark] .diag-badge{background:#373c56;color:#e4e3fc}
 [data-theme=dark] .diag-badge.ok{background:#254a36;color:#d3f4dd}
 [data-theme=dark] .diag-badge.review{background:#44391e;color:#f4d69c}
+/* Compact selected values, shared by mouse and touch chart inspection. */
+.value-bubbles{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-top:14px;min-height:0!important}
+.value-bubble{display:inline-flex;align-items:center;gap:7px;background:#edf3ee;border:1px solid var(--line);border-radius:20px;padding:8px 12px;font-size:12px;color:#244c3d;font-variant-numeric:tabular-nums}
+.value-bubble>span:first-child{font-size:16px}.value-bubble>span:last-child{white-space:normal}
+[data-theme=dark] .value-bubble{background:#243b30;color:#e0eee7}
+.interactive-strip{height:32px;gap:0;margin-bottom:4px;overflow:visible;align-items:center}
+.interactive-strip button{padding:0;border:0;border-radius:0;min-width:0;height:12px;position:relative}
+.interactive-strip button:before{content:'';position:absolute;inset:-12px 0}
+.interactive-strip button:first-child{border-radius:10px 0 0 10px}.interactive-strip button:last-child{border-radius:0 10px 10px 0}
+.interactive-strip button:hover,.interactive-strip button:focus-visible{height:20px;outline:2px solid #71887b;outline-offset:2px}
+.plan-axis{display:flex;justify-content:space-between;font-size:11px;color:#718479;font-variant-numeric:tabular-nums;margin-bottom:8px}
+.plan-strip .phase-discharge{background:#ce732a}.plan-strip .phase-hold{background:#8c9da2}.plan-strip .phase-unknown{background:#c5ceca}
+#pricechart,.history-chart,.diagnosis-plot{overflow-x:auto;touch-action:pan-x pan-y;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.diagnosis-plot svg{min-width:620px}.today-plan:has(.interactive-strip){touch-action:pan-y}
+[data-theme=dark] .interactive-strip .phase-charge{background:#2f8d62}[data-theme=dark] .interactive-strip .phase-pv_charge{background:#b18a24}[data-theme=dark] .interactive-strip .phase-discharge{background:#ce732a}[data-theme=dark] .interactive-strip .phase-hold{background:#8c9da2}

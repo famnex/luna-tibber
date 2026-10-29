@@ -12,14 +12,14 @@ from urllib.parse import urlencode
 from urllib.request import urlopen
 from price_cache import covers
 
-KEYS=('pv_enabled','pv_latitude','pv_longitude','pv_kwp','pv_tilt','pv_azimuth','pv_ac_limit_kw','pv_factor')
+KEYS=('pv_enabled','pv_latitude','pv_longitude','pv_kwp','pv_tilt','pv_azimuth','pv_ac_limit_kw','pv_factor','pv_buffer_pct')
 REFRESH=3*3600
 MAX_AGE=6*3600
 RETRY=900
 
 
 def fingerprint(c):
-    return hashlib.sha256(json.dumps([c[k] for k in KEYS]).encode()).hexdigest()
+    return hashlib.sha256(json.dumps([c.get(k,10.0 if k=='pv_buffer_pct' else None) for k in KEYS]).encode()).hexdigest()
 
 
 def fetch(c):
@@ -42,7 +42,7 @@ def parse(c,data):
         if value is None:continue
         if type(value) not in (int,float) or not math.isfinite(value) or not 0<=value<=2000:
             raise ValueError('Ungültige Strahlungsprognose')
-        kw=min(c['pv_ac_limit_kw'],c['pv_kwp']*value/1000*.85)*c['pv_factor']
+        kw=min(c['pv_ac_limit_kw'],c['pv_kwp']*value/1000*.85)*c['pv_factor']*(1-c.get('pv_buffer_pct',10.0)/100)
         rows.append({'start':end-timedelta(hours=1),'end':end,'kw':kw})
     return rows
 
