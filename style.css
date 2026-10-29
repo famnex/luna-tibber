@@ -73,3 +73,34 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 .plan-strip .phase-charge{background:#2f8d62}.plan-strip .phase-pv_charge{background:#b18a24}
 .phase-pv_charge .plan-symbol{color:#9b761a}.legend .legend-pv:before,.legend .legend-pv-charge:before{background:#b18a24}.chart text.pv-axis{fill:#9b761a}
 .history-steps li{grid-template-columns:minmax(0,1fr);gap:4px}.history-steps li>strong{white-space:normal;overflow-wrap:anywhere}
+
+/* Local light/dark preference. Semantic chart colors stay identifiable. */
+:root{color-scheme:light;--surface:#fff;--line:#dce5dd}
+:root[data-theme=dark]{color-scheme:dark;color:#e0eee7;background:#101a17;--surface:#182620;--line:#354b40}
+.startup{text-align:center}.startup .spinner{width:32px;height:32px;margin:12px}.startup h1{font-size:28px}
+[data-theme=dark] header,[data-theme=dark] .card,[data-theme=dark] .diag-chart,[data-theme=dark] #modedialog{background:var(--surface);color:#e0eee7;border-color:var(--line)}
+[data-theme=dark] button,[data-theme=dark] input,[data-theme=dark] select{background:#20342b;color:#e0eee7;border-color:#496153}
+[data-theme=dark] button:hover{background:#304d3e}
+[data-theme=dark] .primary,[data-theme=dark] button.selected,[data-theme=dark] button.active,[data-theme=dark] button[aria-pressed=true]{background:#326e50;color:#fff;border-color:#579572}
+[data-theme=dark] .bottomnav{background:#14221ef5;border-color:var(--line)}
+[data-theme=dark] .bottomnav button,[data-theme=dark] .bottomnav a{color:#b8cdc0;background:transparent}
+[data-theme=dark] .bottomnav button.selected{background:#294c3b;color:#e6f5eb}
+[data-theme=dark] .muted,[data-theme=dark] small,[data-theme=dark] dt,[data-theme=dark] details p,[data-theme=dark] .eyebrow,[data-theme=dark] #connection,[data-theme=dark] .process-steps,[data-theme=dark] .brand span,[data-theme=dark] th,[data-theme=dark] footer{color:#abc0b2}
+[data-theme=dark] .badge,[data-theme=dark] .activity,[data-theme=dark] .setting-help,[data-theme=dark] #dispatchsummary,[data-theme=dark] .history-toggle,[data-theme=dark] .diag-metric,[data-theme=dark] .diag-recommendation,[data-theme=dark] .event-metrics,[data-theme=dark] .event-icon,[data-theme=dark] .journal-event{background:#21372c;color:#e0eee7;border-color:var(--line)}
+[data-theme=dark] #notice:not(:empty),[data-theme=dark] .diag-badge.ok{background:#254a36;color:#d3f4dd}
+[data-theme=dark] .warning,[data-theme=dark] #notice[data-kind=info],[data-theme=dark] .diag-badge.review{background:#44391e;color:#f4d69c;border-color:#79603a}
+[data-theme=dark] #notice[data-kind=error]{background:#492b29;color:#ffd2c6}
+[data-theme=dark] .danger,[data-theme=dark] .offline,[data-theme=dark] .diag-alert{color:#ffb6a3!important}
+[data-theme=dark] a{color:#96d8b1}
+[data-theme=dark] .chart text,[data-theme=dark] .history-chart text,[data-theme=dark] .diag-chart text{fill:#b8cdc0}
+[data-theme=dark] .chart text.pv-axis,[data-theme=dark] .phase-pv_charge .plan-symbol{fill:#d9b85f;color:#d9b85f}
+[data-theme=dark] #batterylegend,[data-theme=dark] .soc-axis{color:#b2a9ef;fill:#b2a9ef}
+[data-theme=dark] svg line[stroke="#dce5dd"],[data-theme=dark] svg line[stroke="#dbe5de"]{stroke:#354b40}
+[data-theme=dark] svg path[stroke="#fff"],[data-theme=dark] svg path[stroke="white"]{stroke:#182620}
+[data-theme=dark] th,[data-theme=dark] td,[data-theme=dark] .history-switches li,[data-theme=dark] .journalentries li,[data-theme=dark] .settings-group[open]>summary{border-color:var(--line)}
+[data-theme=dark] :focus-visible{outline:2px solid #b0d9ba;outline-offset:3px}
+[data-theme=dark] .journalentries li{background:#21372c}
+[data-theme=dark] .journalentries time,[data-theme=dark] #chartinfo,[data-theme=dark] #chartdetail,[data-theme=dark] .next-card #nextreason,[data-theme=dark] .diag-recommendation small,[data-theme=dark] .chart-scroll-hint{color:#abc0b2}
+[data-theme=dark] .diag-badge{background:#373c56;color:#e4e3fc}
+[data-theme=dark] .diag-badge.ok{background:#254a36;color:#d3f4dd}
+[data-theme=dark] .diag-badge.review{background:#44391e;color:#f4d69c}

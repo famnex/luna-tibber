@@ -697,7 +697,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static.update({
-            '/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
+            '/theme.js':('theme.js','application/javascript'),'/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
             '/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),
             '/offline.html':('offline.html','text/html; charset=utf-8'),'/icon.svg':('icon.svg','image/svg+xml'),
             **{f'/icon-{n}.png':(f'icon-{n}.png','image/png') for n in (180,192,512)}})
