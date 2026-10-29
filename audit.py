@@ -20,7 +20,7 @@ CONFIG_KEYS=('pv_buffer_pct','morning_buffer_pct','diagnosis_tolerance_pct','bat
  'timezone','smart_discharge_enabled','pv_enabled','pv_factor','pv_kwp','pv_tilt','pv_azimuth','pv_ac_limit_kw')
 EVENT_KEYS=('soc','battery_power_w','battery_status','max_charge_power_w','ac_charge_enabled',
  'eligible','reason','app_charging','price_ct_kwh','economics','watts','minutes','fields',
- 'error_type','message','note','action','parameters','returncode','live','discharge_confirmation','meter')
+ 'order_id','orders','error_type','message','note','action','parameters','returncode','live','discharge_confirmation','meter')
 
 
 def clean(value,secrets=()):
@@ -55,6 +55,8 @@ def describe(kind,d):
             if confirmed:text+=f" Letzte Gerätebestätigung: {'gesperrt' if confirmed.get('locked') else 'freigegeben'} ({confirmed.get('time','Zeit unbekannt')})."
             if not d.get('live',True):text+=' Nur Simulation – keine Schreibbefehle.'
         return text
+    if kind=='manual_completed':return '✓ Manueller Eingriff beendet: '+str(d.get('reason','abgeschlossen'))+'.'
+    if kind=='manual_changed':return 'Manuelle Eingriffe aktualisiert: '+str(d.get('action',''))+'.'
     if kind=='charge_command':return f"Ladebefehl gesendet: {number(d.get('watts'),' W')} für {number(d.get('minutes'),' min')}. Tatsächlichen Ladebeginn zeigen die folgenden Messwerte."
     if kind in ('stopped','stopped_on_exit'):return 'Stoppbefehl erfolgreich ausgeführt. '+str(d.get('reason','Steuerung beendet.'))
     if kind=='stop_unconfirmed':return '⚠ Stopp/Freigabe nicht bestätigt. '+str(d.get('note','Gerätezustand prüfen.'))
@@ -121,6 +123,7 @@ class Journal:
                 # share a reference; every decision keeps its own measured values.
                 j=preview.get('joint') or {}
                 payload={'config':inputs,
+                         'manual_orders':event.get('manual_orders',[]),
                          'charging':{k:v for k,v in preview.items() if k!='joint'},
                          'joint':{k:v for k,v in j.items() if k not in ('trace','windows')},
                          'discharge_windows':dispatch.get('windows',[]),'prices':prices,

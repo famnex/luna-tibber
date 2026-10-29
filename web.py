@@ -25,7 +25,7 @@ import luna
 import updater
 
 BASE = Path(__file__).resolve().parent
-MODES = {'off', 'smart', 'on', 'schedule'}
+MODES = {'off', 'smart'}
 SECRETS = {'password', 'tibber_token'}
 
 def read(path, default):
@@ -144,6 +144,7 @@ class Dashboard:
         self.mode = 'off'  # Never resume charging merely because the server rebooted.
         self.until = None
         self.planned = None
+        self.manual_running = None
         self.schedules = validate_schedules(read(folder/'schedules.json', []))
         self.last_slot = None
         self.fault = ''
@@ -169,6 +170,9 @@ class Dashboard:
         self.price_failed_since=None
         self.revision=updater.revision(folder)
         self.update_settings={"port":8099,"tls":False,"old_pid":os.getpid()}
+        (self.folder/'manual-suspended.json').unlink(missing_ok=True)
+        from manual import migrate
+        migrate(self.folder,self.config()['expected_serial'])
         self.audit_event({'event':'service_started'})
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
@@ -194,6 +198,7 @@ class Dashboard:
         cmd = [sys.executable,str(BASE/'luna.py'),'--config',str(self.config_path),job]
         if job in ('run','charge','charge-test','stop','discharge-sync'):
             cmd.append('--execute')
+        if job=='run' and self.mode=='off':cmd.append('--orders-only')
         if target_soc is not None:
             cmd.extend(['--target-soc',str(target_soc)])
         if job == 'probe':
@@ -301,7 +306,8 @@ class Dashboard:
         changed={k for k in luna.DEFAULT if c[k]!=old_prices[k]}
         request=read(self.folder/'discharge-request.json',{})
         hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
-        if changed & luna.CONNECTION_KEYS and (self.proc or self.mode!='off' or hold or
+        from manual import load as load_orders
+        if changed & luna.CONNECTION_KEYS and (load_orders(self.folder,old_serial) or self.proc or self.mode!='off' or hold or
                 any((self.folder/n).exists() for n in ('discharge-restore.json','pending-charge.json'))):
             raise ValueError('Nur Geräteverbindung/Zugang benötigen Aus und bestätigte Freigabe; andere Einstellungen sind im Betrieb änderbar')
         with (self.folder/'controller.lock').open('w') as f:
@@ -327,6 +333,7 @@ class Dashboard:
         try:
             with self.lock:
                 c=self.config()
+                luna.write_json(self.folder/'manual-suspended.json',{'reason':'update'})
                 need_stop=self.mode!='off' or self.job in ('run','charge','charge-test','stop') or (self.folder/'pending-charge.json').exists()
                 request=read(self.folder/'discharge-request.json',{})
                 need_release=bool(request.get('until')) or (self.folder/'discharge-restore.json').exists()
@@ -368,7 +375,9 @@ class Dashboard:
             with self.lock:
                 self.update_progress={'state':'failed','message':str(exc) if isinstance(exc,ValueError) else 'Update-Vorbereitung fehlgeschlagen; Gerät und Verbindung prüfen.'}
         finally:
-            with self.lock:self.update_preparing=False
+            with self.lock:
+                self.update_preparing=False
+                if not updater.busy(self.folder):(self.folder/'manual-suspended.json').unlink(missing_ok=True)
 
     def action(self, name, data):
         with self.lock:
@@ -386,30 +395,23 @@ class Dashboard:
                 self.notifications.unsubscribe(data['endpoint'])
             elif name == 'push-test':
                 self.alert('test','✓ LUNA · Push bereit','Wichtige Meldungen erreichen dieses Gerät.',cooldown=60)
+            elif name in ('manual-save','manual-delete'):
+                from manual import load, upsert
+                c=self.config();self.preflight(c)
+                rows=load(self.folder,c['expected_serial'])
+                if name=='manual-save':rows=upsert(rows,data,c)
+                else:
+                    if not any(r['id']==data.get('id') for r in rows):raise ValueError('Auftrag nicht mehr vorhanden')
+                    rows=[r for r in rows if r['id']!=data['id']]
+                luna.write_json(self.folder/'manual-orders.json',{'serial':c['expected_serial'],'rows':rows})
+                self.fault='';self.discharge_at=-30
+                self.audit_event({'event':'manual_changed','action':name,'orders':rows})
             elif name == 'discharge':
-                c=self.config()
-                self.preflight(c)
-                until=None
-                if data.get('mode')=='hold':
-                    zone=ZoneInfo(c['timezone'])
-                    now=datetime.now(timezone.utc)
-                    local=now.astimezone(zone)
-                    clock=datetime.strptime(data['until'],'%H:%M').time()
-                    end=datetime.combine(local.date(),clock).replace(tzinfo=zone)
-                    if end<=local:end+=timedelta(days=1)
-                    if end.replace(fold=0).utcoffset()!=end.replace(fold=1).utcoffset():
-                        raise ValueError('Endzeit liegt in einer Zeitumstellung')
-                    until=end.astimezone(timezone.utc).isoformat()
-                elif data.get('mode')!='active':raise ValueError('Ungültiger Entlademodus')
-                luna.write_json(self.folder/'discharge-request.json',{'serial':c['expected_serial'],'until':until})
-                self.discharge_at=-30
+                raise ValueError('Entladesperren unter Manuell verwalten')
             elif name == 'settings':
                 self.save_settings(data)
             elif name == 'schedules':
-                rows = validate_schedules(data['rows'])
-                self.stop()
-                self.schedules = rows
-                luna.write_json(self.folder/'schedules.json',self.schedules)
+                raise ValueError('Zeitaufträge unter Manuell anlegen')
             elif name == 'adopt-serial':
                 serial = self.last_probe_serial
                 if not serial:
@@ -429,16 +431,7 @@ class Dashboard:
                 self.fault = ''
                 self.launch('charge-test')
             elif name == 'planned':
-                c = self.config()
-                order = planned_order(data,c)
-                self.preflight(c)
-                self.fault = ''
-                self.stop()
-                if self.fault:
-                    raise ValueError(self.fault)
-                self.save_settings({})
-                self.planned = order
-                self.mode = 'planned'
+                raise ValueError('Ladeaufträge unter Manuell anlegen')
             elif name == 'mode':
                 mode = data['mode']
                 if mode not in MODES:
@@ -474,9 +467,23 @@ class Dashboard:
             with self.lock:
                 try:
                     if self.update_preparing or updater.busy(self.folder):continue
+                    (self.folder/'manual-suspended.json').unlink(missing_ok=True)
+                    if self.fault:continue
+                    from manual import load as load_orders, active as active_order, expire
+                    for expired in expire(self.folder):self.audit_event({'event':'manual_completed','order_id':expired['id'],'reason':'Zeitfenster abgelaufen'})
+                    now=datetime.now(timezone.utc)
+                    orders=load_orders(self.folder,self.config()['expected_serial'],now)
+                    charge=active_order(orders,now,'charge')
+                    if self.mode=='off' and self.job=='run' and (not charge or self.manual_running!=charge['token']):
+                        self.stop();self.manual_running=None
+                        continue
+                    if self.mode=='off' and charge and not self.proc:
+                        self.preflight(self.config());self.save_settings({})
+                        self.manual_running=charge['token'];self.launch('run')
+                        continue
                     request=read(self.folder/'discharge-request.json',{})
                     needs_restore=(self.folder/'discharge-restore.json').exists()
-                    hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
+                    hold=bool(active_order(orders,now,'hold')) or (request.get('until') and datetime.fromisoformat(request['until'])>now)
                     if (hold or needs_restore) and not self.proc and time.monotonic()-self.discharge_at>=30:
                         self.discharge_at=time.monotonic()
                         self.preflight(self.config())
@@ -610,6 +617,9 @@ class Dashboard:
             hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
             prior=read(self.folder/'discharge-status.json',{})
             c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
+            from manual import load as load_orders
+            c['_orders']=load_orders(self.folder,c['expected_serial'],now)
+            if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
             preview=smart_preview(c,prices,now,self.telemetry,hold_until)
             from smart import planned_economics
             plan=planned_economics(c,prices,preview)
@@ -617,7 +627,7 @@ class Dashboard:
             dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
+            return {'manual_orders':c['_orders'],'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
@@ -697,7 +707,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static.update({
-            '/theme.js':('theme.js','application/javascript'),'/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
+            '/manual-ui.js':('manual-ui.js','application/javascript'),'/theme.js':('theme.js','application/javascript'),'/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
             '/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),
             '/offline.html':('offline.html','text/html; charset=utf-8'),'/icon.svg':('icon.svg','image/svg+xml'),
             **{f'/icon-{n}.png':(f'icon-{n}.png','image/png') for n in (180,192,512)}})

@@ -12,12 +12,34 @@ from price_cache import planning_end
 
 
 def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
-    if not c.get('smart_discharge_enabled'):
+    if not c.get('smart_discharge_enabled') and not c.get('_orders') and not c.get('_orders_projected'):
         return None
     if type(soc) not in (int,float) or not math.isfinite(soc) or not 0<=soc<=100:
         return None
     capacity=c['battery_capacity_kwh'];power=min(c['charge_power_w'],max_power_w or c['charge_power_w'])/1000
     if capacity<=0 or power<.2 or c['base_load_w']<=0:return None
+    orders=c.get('_orders',[])
+    if orders and not c.get('_orders_projected') and any(o['kind']=='charge' for o in orders):
+        from manual import stamp
+        baseline=plan({**c,'_orders':[o for o in orders if o['kind']=='hold'],'_orders_projected':True},prices,now,soc,max_power_w,hold_until)
+        if baseline is None:return None
+        result=baseline
+        for _ in range(3):
+            projected=[]
+            for order in orders:
+                if order['kind']!='charge':projected.append(order);continue
+                start=max(now,stamp(order['start']));end=stamp(order['end'])
+                trace=next((t for t in result['trace'] if datetime.fromisoformat(t['start'])<=start<datetime.fromisoformat(t['end'])),None)
+                if not trace or end<=start:projected.append(order);continue
+                energy=trace['start_kwh'];target=capacity*max(0,order['target_soc']-c.get('battery_floor_soc',0))/100
+                # Forecast completion is revised from SOC on every controller cycle.
+                rate=max(.05,power-c.get('battery_idle_w',0)/1000)
+                seconds=max(0,target-energy)/rate*3600
+                if seconds<=0:continue
+                projected.append({**order,'start':start.isoformat(),'end':min(end,start+timedelta(seconds=seconds)).isoformat()})
+            result=plan({**c,'_orders':projected,'_orders_projected':True},prices,now,soc,max_power_w,hold_until)
+        result['manual_orders']=projected
+        return result
     from dispatch import night_bounds,demand_rows
     from pv import rows_for
     from protection import reserve
@@ -39,15 +61,17 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         right=min(end,midnight)
         rows.extend(demand_rows(c,prices,cursor,right));cursor=right
     # Also split at charging/hold boundaries, even for hourly tariff data.
+    from manual import stamp, active as active_order
+    boundaries=[stamp(o[k]) for o in orders for k in ('start','end') if o.get(k)]
     split=[]
     for r in rows:
-        edges=sorted({r['start'],r['end'],*[t for t in (night_a,night_b,hold_until) if t and r['start']<t<r['end']]})
+        edges=sorted({r['start'],r['end'],*[t for t in (night_a,night_b,hold_until,*boundaries) if t and r['start']<t<r['end']]})
         for a,b in zip(edges,edges[1:]):split.append({**r,'start':a,'end':b})
     rows=split;eta=math.sqrt(c['roundtrip_efficiency'])
     floor=c.get('battery_floor_soc',0)
     limit=capacity*max(0,c['target_soc']-floor)/100
     initial=capacity*max(0,soc-floor)/100
-    ceiling=max(limit,initial) # An existing SOC above the configured target is usable.
+    ceiling=max(limit,initial,*[capacity*max(0,o['target_soc']-floor)/100 for o in orders if o['kind']=='charge']) # An existing SOC above the configured target is usable.
     specs=[];grid_powers=[]
     for index,r in enumerate(rows):
         seconds=(r['end']-r['start']).total_seconds();hours=seconds/3600
@@ -62,7 +86,11 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         margin_seconds=0 if continues else 130
         can_charge=r['ct']<=c['max_buy_ct_kwh'] and seconds>=margin_seconds+60
         charge=grid_power*max(0,seconds-margin_seconds)/3600 if can_charge else 0
-        specs.append((load,solar,r['ct'],charge,bool(hold_until and r['start']<hold_until),grid_power/60,0.))
+        manual_charge=active_order(orders,r['start'],'charge')
+        manual_hold=active_order(orders,r['start'],'hold')
+        forced=capacity*max(0,manual_charge['target_soc']-floor)/100 if manual_charge else None
+        if manual_charge:charge=grid_power*hours
+        specs.append((load,solar,r['ct'],charge,bool(manual_hold or (hold_until and r['start']<hold_until)),grid_power/60,0.,forced,bool(c.get('_orders_only')),not c.get('smart_discharge_enabled')))
     # Morning energy is a time-specific minimum, released for consumption after
     # night-end. Stop bridging only once PV covers the configured household load.
     morning_rows=[(r,s) for r,s in zip(rows,specs) if r['start']>=bridge_start]
@@ -76,7 +104,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     required=(bridge_ac+buffer)/eta+bridge_idle
     minimum=min(limit,required)
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)
-    if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:-1],minimum)
+    if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:6],minimum,*specs[checkpoint][7:])
     wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
     values=_values(tuple(specs),ceiling,limit,eta,wear,margin)
     # Protection uses the continuous value curve. Whole-interval dispatch adds
@@ -85,6 +113,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     guard=reserve(guard_values[1],ceiling,specs[0][2],eta,wear,capacity,initial,c.get('_guard_held',False))
     guard['threshold_soc']=floor+guard['trigger_kwh']/capacity*100
     guard['release_soc']=floor+guard['release_kwh']/capacity*100
+    if c.get('_orders_only') or not c.get('smart_discharge_enabled'):guard.update(hold=False,required_kwh=0)
     if guard['hold']:
         first=specs[0];specs[0]=(*first[:4],True,*first[5:])
     energy=initial;windows=[];charges=[];trace=[];actual_cost=0
@@ -98,7 +127,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         a,b=r['start'],r['end']
         if charge>1e-7:
             stop=a+timedelta(seconds=charge/grid_powers[i]*3600+130)
-            charges.append({'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge,'grid_power_w':grid_powers[i]*1000})
+            charges.append({'manual':spec[7] is not None,'start':a.isoformat(),'end':stop.isoformat(),'ct':r['ct'],'battery_kwh':charge,'grid_power_w':grid_powers[i]*1000})
             windows.append({'start':a.isoformat(),'end':b.isoformat(),'action':'hold','allocated_kwh':0,'ct':r['ct']})
         elif used>1e-7:
             # Permission lasts for the row, even if the battery reaches its
@@ -111,8 +140,8 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         energy=after
     total=sum(w['battery_kwh'] for w in charges)
     economics=None
-    if total>0:
-        baseline=tuple((load,solar,price,0,blocked,min_charge,required) for load,solar,price,charge,blocked,min_charge,required in specs)
+    if total>0 and not any(o['kind']=='charge' for o in orders):
+        baseline=tuple((*s[:3],0,*s[4:]) for s in specs)
         base_values=_values(baseline,ceiling,limit,eta,wear,margin)
         base_cost=0;available=initial
         for i,spec in enumerate(baseline):
@@ -133,7 +162,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     for w in windows:
         a=datetime.fromisoformat(w['start']);b=datetime.fromisoformat(w['end'])
         charge=next((x for x in charges if x['start']==w['start']),None)
-        reason='manual' if hold_until and a<hold_until else 'reserve' if guard['hold'] and a==now else 'price'
+        reason='manual' if active_order(orders,a) or (hold_until and a<hold_until) else 'reserve' if guard['hold'] and a==now else 'price'
         parts=[dict(start=w['start'],end=w['end'],action=w['action'],reason=reason,
                     kwh=w['allocated_kwh'],low_ct=w['ct'],high_ct=w['ct'])]
         if charge:
@@ -163,11 +192,24 @@ def _interpolate(values,energy,ceiling):
 
 
 def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin,partial_discharge=False):
-    load,solar,price,max_charge,blocked,min_charge,required=spec
+    load,solar,price,max_charge,blocked,min_charge,required=spec[:7]
+    forced=spec[7] if len(spec)>7 else None
+    if forced is not None:
+        raw=min(ceiling,energy+solar);stored=max(0,raw)
+        charge=max(0,min(max_charge,forced-raw))
+        after=min(ceiling,max(0,raw+charge))
+        return (load*price+charge/eta*price+_interpolate(next_values,after,ceiling)+max(0,required-energy)*1_000_000,after,charge,0.)
     raw=min(ceiling,energy+solar)
     stored=max(0,raw)
+    if len(spec)>8 and spec[8]:
+        used=0 if blocked else min(load,stored*eta)
+        after=stored-used/eta
+        return (load-used)*price+_interpolate(next_values,after,ceiling),after,0.,used
     # Holding avoids needless cycling on equal costs. PV first supplies the house.
     best=(load*price+_interpolate(next_values,stored,ceiling),stored,0.,0.)
+    if len(spec)>9 and spec[9] and not blocked:
+        used=min(load,stored*eta);after=stored-used/eta
+        best=((load-used)*price+used*wear+_interpolate(next_values,after,ceiling),after,0.,used)
     step=ceiling/(len(next_values)-1) if ceiling else 1
     if not blocked and load>0:
         # Choose a full load interval or hold, never a partial discharge to an

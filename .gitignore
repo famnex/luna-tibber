@@ -51,3 +51,7 @@ meter-test.json
 
 meter-sample-at.json
 meter-sample-at.json.tmp
+
+manual-orders.json*
+manual-completed/
+manual-suspended.json

@@ -49,6 +49,7 @@ def runtime_settings(c,path,target_soc=None):
         raise RuntimeError('Geräteverbindung während Steuerung geändert; kontrollierter Abbruch')
     fresh['mode']=c['mode']
     if c.get('_manual'):fresh['_manual']=True
+    if c.get('_orders_only'):fresh['_orders_only']=True
     if target_soc is not None:fresh['target_soc']=target_soc
     changed={k for k in DEFAULT if fresh[k]!=c[k]}
     return fresh,changed
@@ -182,6 +183,18 @@ def economics_plan(c, prices, now):
 def decide(c, snapshot, prices, now):
     c.pop("_diagnostic_plan",None)
     slot = next((p for p in prices if p["start"] <= now < p["end"]), None)
+    from manual import active as active_order, stamp
+    order=active_order(c.get('_orders',[]),now,'charge')
+    if order:
+        slot={'start':now,'end':stamp(order['end']),'ct':slot['ct'] if slot else None}
+        if snapshot['soc']>=order['target_soc']:return False,'Manuelles Ladeziel erreicht',slot
+        if snapshot['battery_status'] not in (1,2,4) or not snapshot['ac_charge_enabled']:return False,'Batterie/AC-Freigabe erlaubt keine Ladung',slot
+        if prices and not c.get('_orders_only'):
+            from smart import plan as smart_plan
+            c['_diagnostic_plan']=smart_plan(c,prices,now,snapshot['soc'],snapshot.get('max_charge_power_w'),c.get('_hold_until'))
+        ready=(slot['end']-now).total_seconds()>=130
+        return ready,'Manueller Ladeauftrag' if ready else 'Manueller Ladeauftrag · Endzeit wird eingehalten',slot
+    if c.get('_orders_only'):return False,'Aus · kein aktiver manueller Ladeauftrag',slot
     if c.get("_manual"):
         slot = {"start": now, "end": now + timedelta(minutes=15), "ct": None}
     if slot is None:
@@ -321,6 +334,7 @@ class Huawei:
             await self.client.disconnect()
 
 async def operate(args, c, folder):
+    if getattr(args,"orders_only",False):c={**c,"_orders_only":True}
     if args.command == "charge":
         c = {**c, "_manual": True, "mode": "auto"}
     if args.command in ("prices", "plan"):
@@ -435,7 +449,7 @@ async def operate(args, c, folder):
             mono = time.monotonic()
             from price_cache import revision,poll_interval
             observed_revision=revision(folder)
-            if not c.get("_manual") and (mono-attempted>=poll_interval(c) or observed_revision!=price_revision):
+            if not c.get("_manual") and not c.get("_orders_only") and (mono-attempted>=poll_interval(c) or observed_revision!=price_revision):
                 attempted = mono
                 from pv import refresh as refresh_pv
                 if mono-pv_attempted>=300:
@@ -461,9 +475,16 @@ async def operate(args, c, folder):
             c['_hold_until']=datetime.fromisoformat(request['until']) if request.get('until') else None
             prior=read_discharge(folder/'discharge-status.json')
             c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
+            from manual import load as load_orders, active as active_order, complete as complete_order
+            c['_orders']=load_orders(folder,c['expected_serial'],now)
+            order=active_order(c['_orders'],now,'charge')
+            if order and snapshot['soc']>=order['target_soc']:
+                complete_order(folder,order)
+                emit('manual_completed',order_id=order['id'],reason='Ziel-SOC erreicht',soc=snapshot['soc'])
+                c['_orders']=load_orders(folder,c['expected_serial'],now)
             eligible, reason, slot = decide(c, snapshot, prices, now)
             from dispatch import plan as discharge_plan
-            dispatch=discharge_plan({**c,'charge_power_w':min(c['charge_power_w'],snapshot.get('max_charge_power_w',c['charge_power_w']))},prices,now,snapshot['soc'],c.get('_hold_until')) if not c.get('_manual') else None
+            dispatch=discharge_plan({**c,'charge_power_w':min(c['charge_power_w'],snapshot.get('max_charge_power_w',c['charge_power_w']))},prices,now,snapshot['soc'],c.get('_hold_until')) if not c.get('_manual') and not c.get('_orders_only') else None
             if live:
                 from discharge import sync
                 await asyncio.wait_for(sync(hw,folder,smart_hold=bool(dispatch and dispatch['hold'])),60)
@@ -473,9 +494,11 @@ async def operate(args, c, folder):
                      "price_ct_kwh": slot["ct"] if slot else None, "eligible": eligible, "reason": reason}
             write_json(status_path, state)
             from audit import CONFIG_KEYS
-            emit("decision", **state, diagnostic_inputs={k:c.get(k) for k in CONFIG_KEYS}, diagnostic_plan=c.get('_diagnostic_plan',{}),
+            emit("decision", **state, manual_orders=c.get("_orders",[]), diagnostic_inputs={k:c.get(k) for k in CONFIG_KEYS}, diagnostic_plan=c.get('_diagnostic_plan',{}),
                  diagnostic_pv=c.get('_pv',{}),
                  discharge_confirmation=read_discharge(folder/'discharge-status.json') if live else {})
+            if c.get("_orders_only") and not active_order(c.get("_orders",[]),now,"charge"):
+                break
             if c.get("_manual") and snapshot["soc"] >= c["target_soc"]:
                 emit("target_reached", soc=snapshot["soc"])
                 break
@@ -529,9 +552,11 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--config", type=Path, default=BASE / "config.json")
     parser.add_argument("command", choices=["setup", "credentials", "wifi-enable", "probe", "prices", "plan", "charge-test", "stop", "run", "charge", "sample", "discharge-sync", "meter-test"])
+    parser.add_argument("--orders-only", action="store_true", help="Nur gespeicherte manuelle Aufträge ausführen")
     parser.add_argument("--execute", action="store_true", help="Schreibzugriff ausdrücklich einschalten")
     parser.add_argument("--target-soc", type=float, help="Temporärer Ziel-SOC nur für charge")
     args = parser.parse_args()
+    if args.orders_only and args.command!="run":raise ValueError("--orders-only nur bei run erlaubt")
     path = args.config.resolve()
     os.umask(0o077)
     if args.command == "setup":

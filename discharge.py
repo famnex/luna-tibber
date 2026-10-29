@@ -16,10 +16,13 @@ async def sync(hw, folder, now=None, smart_hold=False):
     journal=folder/'discharge-restore.json'
     saved=read(journal)
     manual=bool(request.get('until') and datetime.fromisoformat(request['until'])>now)
+    from manual import load, active as active_order
+    order=active_order(load(folder,hw.device.serial_number,now),now,'hold')
+    manual=manual or bool(order)
     active=manual or smart_hold
     if not active and not saved:return
     serial=hw.device.serial_number
-    if (manual and request['serial']!=serial) or (saved and saved['serial']!=serial):
+    if (request.get('until') and request.get('serial')!=serial) or (saved and saved['serial']!=serial):
         raise ValueError('Entladesperre: Seriennummer weicht ab; Wiederherstellung nicht ausgeführt')
     async def value():
         result=await hw.device.batch_update([rn.STORAGE_MAXIMUM_DISCHARGING_POWER])
@@ -46,5 +49,5 @@ async def sync(hw, folder, now=None, smart_hold=False):
         await hw.write(rn.STORAGE_MAXIMUM_DISCHARGING_POWER,desired)
         if await value()!=desired:
             raise RuntimeError('Entladeleistung nicht bestätigt; Wiederherstellung bleibt vorgemerkt')
-    write_json(folder/'discharge-status.json',{'locked':active,'source':'manual' if manual else 'smart' if active else None,'until':request.get('until') if manual else None,'time':now.isoformat(),'power_w':desired})
+    write_json(folder/'discharge-status.json',{'locked':active,'source':'manual' if manual else 'smart' if active else None,'until':order.get('end') if order else request.get('until') if manual else None,'time':now.isoformat(),'power_w':desired})
     if not active:journal.unlink()

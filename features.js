@@ -2,7 +2,7 @@
 const phaseColor=action=>({charge:'#2f8d62',pv_charge:'#b18a24',discharge:'#ce732a',hold:'#8c9da2'}[action]||'#91af83');
 const phaseLabel=action=>({charge:'↗ Netzladung',pv_charge:'☀ PV-Ladung',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
 function chartPhases(d){
- if(d.mode!=='smart')return [];
+ if(d.mode!=='smart'&&!d.manual_orders?.length)return [];
  const rows=(d.dispatch_preview?.windows||[]).map(w=>({...w}));
  // Display-only PV charging from positive stored-energy change without a grid purchase.
  for(const t of d.smart_preview?.joint?.trace||[]){
@@ -290,7 +290,7 @@ function batterySeries(d,now=Date.now()){
  measured.sort((a,b)=>a.time-b.time);
  const forecast=[],c=d.settings,capacity=c.battery_capacity_kwh;
  if(!fresh||!(capacity>0))return {measured,forecast};
- const trace=d.mode==='smart'?d.smart_preview?.joint?.trace:null;
+ const trace=(d.mode==='smart'||d.manual_orders?.length)?d.smart_preview?.joint?.trace:null;
  if(trace?.length){
   const floor=c.battery_floor_soc||0;
   for(const row of trace){

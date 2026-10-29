@@ -31,7 +31,7 @@ class DashboardTests(unittest.TestCase):
     def tearDown(self):self.tmp.cleanup()
     def test_missing_credentials_are_specific(self):
         with self.assertRaisesRegex(ValueError,'Seriennummer.*Installateurpasswort'):
-            self.app.action('mode',{'mode':'on'})
+            self.app.action('mode',{'mode':'smart'})
         self.assertEqual(self.app.mode,'off')
     def test_no_secret_returned_and_blank_retains(self):
         self.app.save_settings({'password':'secret-password','tibber_token':'secret-token'})
@@ -70,13 +70,11 @@ class DashboardTests(unittest.TestCase):
     def test_on_requires_test(self):
         self.app.save_settings({'expected_serial':'serial','password':'secret'})
         with self.assertRaisesRegex(ValueError,'Ladetest'):
-            self.app.action('mode',{'mode':'on'})
-    def test_manual_mode_is_bounded_and_resets_after_restart(self):
-        self.app.save_settings({'expected_serial':'serial','password':'secret'})
-        luna.write_json(self.folder/'commissioned.json',{'serial':'serial'})
-        self.app.action('mode',{'mode':'on','minutes':10})
-        self.assertEqual(self.app.mode,'on')
-        self.assertIsNotNone(self.app.until)
+            self.app.action('mode',{'mode':'smart'})
+    def test_obsolete_modes_rejected(self):
+        for mode in ('on','planned','schedule'):
+            with self.assertRaisesRegex(ValueError,'Unbekannter Modus'):
+                self.app.action('mode',{'mode':mode})
         self.assertEqual(web.Dashboard(self.folder,start_worker=False).mode,'off')
     def test_deadline_switches_off_without_browser(self):
         for mode in ('on','planned'):
@@ -110,7 +108,7 @@ class DashboardTests(unittest.TestCase):
             self.assertTrue(self.app.update_preparing)
             self.assertEqual(self.app.update_status()['state'],'preparing')
             thread.return_value.start.assert_called_once()
-            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'on'})
+            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'smart'})
 
     def test_update_prepares_stop_and_release_before_start(self):
         self.app.save_settings({'expected_serial':'test','password':'test'})
@@ -162,7 +160,7 @@ class DashboardTests(unittest.TestCase):
     def test_update_blocks_controls_and_measurements(self):
         self.app.save_settings({})
         with patch('web.updater.busy',return_value=True),patch.object(self.app,'launch') as launch:
-            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'on'})
+            with self.assertRaisesRegex(ValueError,'Update'):self.app.action('mode',{'mode':'smart'})
             self.app.request_sample(fast=True)
             launch.assert_not_called()
 

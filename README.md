@@ -109,28 +109,38 @@ Einrichtung vollständig für Batterie/Tibber im Browser:
 2. Übersicht: Gerät auslesen. Danach Seriennummer übernehmen. Die Seriennummer
    wird nur nach einem erfolgreichen Probe-Vorgang übernehmbar.
 3. Beaufsichtigten 2-Minuten-Ladetest starten und Netzbezug/Ladeleistung prüfen.
-4. Danach Smart, An oder Zeitpläne aktivieren.
+4. Danach Smart aktivieren oder unter Manuell einen Eingriff anlegen.
 
 Die bisherige Meldung „expected_serial und password lokal setzen“ wird durch konkrete
 fehlende Felder ersetzt. Ohne passende Seriennummer/Passwort sind Schreibbefehle gesperrt.
 Ein Wechsel der Seriennummer verwirft die bisherige Ladetest-Freigabe.
 
 Modi:
-- **Aus**: beendet den eigenen Ladeprozess und sendet bei vorhandenen Zugangsdaten
-  zusätzlich Stopp. Normale Enpal-/Huawei-Ladung/Entladung wird nicht deaktiviert.
-- **Smart**: bestehender Preisfilter mit Kaufgrenze, Gesamtwirkungsgrad,
-  Verschleißreserve, Mindestvorteil und konfiguriertem Verbrauchsfenster.
-- **An**: sofortiges preisunabhängiges Laden mit manuell gewählter Dauer;
-  SOC-Limit, AC-Freigabe, Gerätestatus, Leistungsgrenzen und Testfreigabe gelten weiter.
-- **Zeitpläne**: Wochenfenster für Aus/Smart/An, auch über Mitternacht. Erster
-  passender Eintrag gewinnt; sonst Aus. Zeitzone aus Einstellungen. Bei der
-  Zeitumstellung werden lokale Fenster berücksichtigt; es gibt keinen separaten
-  zweiten Start derselben Fensterinstanz in der wiederholten Stunde.
+- **Aus**: Smart ist deaktiviert. Gespeicherte manuelle Eingriffe werden trotzdem ausgeführt.
+- **Smart**: optimiert die verbleibenden Lade-/Entladezeiten unter Berücksichtigung manueller Eingriffe.
+- **Manuell** (eigene Seite): zeitlich sortierte Liste mit Hinzufügen, Bearbeiten und Entfernen.
+  Entladesperren gelten von einem Startzeitpunkt bis Datum/Uhrzeit oder bis auf Widerruf.
+  Ladeaufträge gelten bis Datum/Uhrzeit oder Ziel-SOC. Ein leeres Startfeld bedeutet sofort.
+  Die konfigurierte maximale Sitzungsdauer und Geräte-/SOC-Grenzen gelten weiterhin.
+  SOC-Aufträge haben deshalb zusätzlich eine sichtbare späteste Endzeit.
+  Zeitaufträge enden spätestens auch am beim Anlegen gespeicherten Ziel-SOC.
+  Manuelle Ladeaufträge ignorieren Kaufpreis und Mindestvorteil.
+  Zwei Ladeaufträge oder zwei Entladesperren dürfen sich nicht überschneiden.
+  Entladesperre plus Laden gleichzeitig ist erlaubt. Intervalle sind [Start, Ende).
+  Mehrdeutige/fehlende lokale Uhrzeiten bei Zeitumstellung werden abgewiesen.
 
-Nach Webserver-Neustart immer **Aus**. Zeitpläne bleiben gespeichert, müssen aber
-wieder aktiviert werden. Fehler führen zu Aus, ohne automatische Wiederholung des
-Ladeprozesses. Die maximale zusammenhängende Sitzung gilt auch bei Zeitplänen.
-Prozessausgaben werden nur als begrenzte Ereignisliste im Speicher gehalten.
+Erledigte Einträge verschwinden aus der aktiven Liste und bleiben im Protokoll.
+Aufträge werden an die Wechselrichter-Seriennummer gebunden gespeichert. Nach einem
+Neustart bleibt Smart aus, gültige manuelle Eingriffe werden fortgesetzt. Ein bereits
+erreichter Ziel-SOC wird dauerhaft als abgeschlossen markiert; späterer Verbrauch
+startet diesen Auftrag nicht erneut. Gerätefehler unterbrechen die Steuerung ohne
+endlose automatische Neustarts. Bestehende manuelle Entladesperren werden übernommen.
+Beim Softwareupdate werden Eingriffe vorübergehend ausgesetzt und Gerätefreigaben
+bestätigt; nach dem Neustart gelten noch offene Eingriffe wieder.
+
+Die Smart-Vorschau simuliert die Energie der manuellen Ladefenster und die gesperrte
+Entladung zeitlich. Das erwartete SOC-Ende wird aus dem prognostizierten Start-SOC
+und der Ladeleistung berechnet; die Ausführung entscheidet anhand realer Messwerte.
 
 Im Modus Aus wird die Gerätetelemetrie per „Gerät / Status auslesen“ aktualisiert;
 bei laufendem Laden/Smart automatisch. Die Oberfläche zeigt das Alter der letzten
