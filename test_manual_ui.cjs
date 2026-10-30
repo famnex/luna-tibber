@@ -3,7 +3,7 @@ class El{constructor(){this.children=[];this.dataset={};this.value='';this.hidde
 const nodes={},$=id=>nodes[id]??=new El();
 $('orderendkind').options=['time','soc','forever'].map(value=>({value}));
 const calls=[],d={mode:'off',settings:{timezone:'Europe/Berlin',target_soc:80,charge_power_w:5000,max_session_minutes:120},server_time:'2026-10-29T12:00:00Z',manual_orders:[{id:'1',kind:'hold',start:'2026-10-29T11:00:00Z',end:null,end_kind:'forever'}]};
-const ctx={$,lastStatus:d,Intl,Date,Number,console,document:{createElement:()=>new El()},confirm:()=>true,perform:async(...v)=>{calls.push(v);return true;}};
+const ctx={setTimeout:()=>1,clearTimeout:()=>{},$,lastStatus:d,Intl,Date,Number,console,document:{createElement:()=>new El()},confirm:()=>true,perform:async(...v)=>{calls.push(v);return true;}};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('manual-ui.js','utf8'),ctx);
 ctx.renderManualOrders(d);assert.equal($('orderlist').children.length,1);assert.match($('orderlist').children[0].children[0].textContent,/aktiv/);
 ctx.editOrder(d.manual_orders[0]);assert.equal($('orderdialog').open,true);assert.equal($('orderendwrap').hidden,true);

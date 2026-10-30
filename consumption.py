@@ -96,3 +96,41 @@ def migrate(folder,c,now=None):
     config=folder/'config.json'
     if config.exists() and c.get('extra_load_kwh',0):
         saved=json.loads(config.read_text());saved['extra_load_kwh']=0.0;write_json(config,saved)
+
+
+def price_tip(data,c,prices,now=None,rules=()):
+    """Read-only tariff comparison, same duration/energy and local calendar day."""
+    now=now or datetime.now(timezone.utc)
+    rule=validate({**data,'kind':'consumption','repeat':'once'},c,now)
+    a,b=stamp(rule['start']),stamp(rule['end']);duration=b-a
+    if a<now:return {'state':'past','message':'Für bereits gestartete Verbräuche kein Verschiebevorschlag.'}
+    zone=ZoneInfo(c['timezone']);day=a.astimezone(zone).replace(hour=0,minute=0,second=0,microsecond=0)
+    left=max(now,day.astimezone(timezone.utc));right=(day+timedelta(days=1)).astimezone(timezone.utc)
+    holidays=[(stamp(r['start']),stamp(r['end'])) for r in rules if r['kind']=='holiday']
+    def excluded(x,y):return any(h<y and j>x for h,j in holidays)
+    if excluded(a,b):return {'state':'holiday','message':'Dieser Verbrauch liegt ganz oder teilweise im Urlaub und wird dort nicht eingeplant.'}
+    sorted_prices=sorted(prices,key=lambda p:p['start'])
+    def cost(x):
+        y=x+duration;cursor=x;weighted=0
+        for p in sorted_prices:
+            l,r=max(x,p['start']),min(y,p['end'])
+            if r<=l:continue
+            if l!=cursor:return None
+            weighted+=p['ct']*(r-l).total_seconds();cursor=r
+        return weighted/duration.total_seconds()*rule['kwh']/100 if cursor==y else None
+    current=cost(a)
+    if current is None:return {'state':'missing','message':'Für dein Zeitfenster fehlen vollständige Tibber-Preise.'}
+    # Sliding window minima occur at a tariff boundary or when its end meets one.
+    candidates={a,left}
+    for p in sorted_prices:
+        for edge in (p['start'],p['end']):
+            candidates.add(edge);candidates.add(edge-duration)
+    options=[]
+    for x in sorted(candidates):
+        if x<left or x+duration>right or excluded(x,x+duration):continue
+        value=cost(x)
+        if value is not None:options.append((value,abs((x-a).total_seconds()),x))
+    best=min(options,default=(current,0,a));saving=current-best[0]
+    return {'state':'better' if saving>=0.01 else 'good','start':best[2].isoformat(),'end':(best[2]+duration).isoformat(),
+            'current_eur':round(current,4),'alternative_eur':round(best[0],4),'saving_eur':round(max(0,saving),4),
+            'message':'Vergleich am selben Tag · gleiche Dauer und kWh · nur bekannte Tibber-Preise. PV und Akku nicht berücksichtigt.'}

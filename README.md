@@ -954,3 +954,12 @@ bleibt die Energie pro Termin gleich; nicht existierende Uhrzeiten werden
 ausgelassen, doppelte Uhrzeiten verwenden das erste Vorkommen.
 Verbrauchsempfehlungen für das alte feste Abendfenster entfallen; die
 Grundlastauswertung schließt geplante Zusatzverbrauchsfenster aus.
+
+Bei einmaligem Zusatzverbrauch erscheint im Dialog automatisch ein Preisvergleich
+für gleich lange Zeitfenster am selben lokalen Kalendertag. Er verwendet die
+bereits geladenen Tibber-Preise, keine zusätzlichen Geräteabfragen. Urlaub und
+vergangene Startzeiten werden ausgeschlossen; fehlende Preisintervalle werden
+nicht geschätzt. Ein Vorschlag ab einem Cent Unterschied lässt sich ausdrücklich
+in den Entwurf übernehmen und anschließend speichern. Die Eurobeträge gelten
+bei vollständigem Netzbezug; PV und Akku sind in diesem Hinweis nicht enthalten.
+Zusatzverbräuche können im Feld „Name / Bezeichnung“ frei benannt werden.

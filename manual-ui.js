@@ -16,6 +16,7 @@ function orderFields(){
  $('orderendwrap').hidden=kind.value!=='time';$('orderend').required=kind.value==='time';
  $('ordersocwrap').hidden=kind.value!=='soc';$('ordersoc').required=kind.value==='soc';
  $('orderhelp').textContent=type==='holiday'?'☷ In diesem Zeitraum nur Grundlast einplanen. Zusatzverbräuche werden ausgesetzt, auch einmalige. Explizite Ladeaufträge und Sperren bleiben gültig.':type==='consumption'?'⌂ Zusätzlich zur Grundlast · kWh werden gleichmäßig auf das Zeitfenster verteilt. Überschneidende Verbräuche addieren sich. Wiederholungen gelten ab dem Startdatum.':hold?'🔒 Entladung gesperrt · Laden weiterhin möglich':`↗ Netzladen ohne Preisprüfung · mindestens 3 Minuten · bis ${lastStatus?.settings.charge_power_w||'—'} W · höchstens ${lastStatus?.settings.max_session_minutes||'—'} Minuten · SOC-Grenze ${kind.value==='soc'?$('ordersoc').value:lastStatus?.settings.target_soc||80} %`;
+ scheduleConsumptionTip();
 }
 function editOrder(order=null){
  editingOrder=order?.id||null;$('ordernotice').textContent='';
@@ -26,7 +27,7 @@ function editOrder(order=null){
  $('ordersoc').value=order?.target_soc||lastStatus?.settings.target_soc||80;
  $('ordertitle').textContent=order?'Eingriff bearbeiten':'Eingriff hinzufügen';orderFields();$('orderdialog').showModal();
 }
-$('orderadd').onclick=()=>editOrder();$('ordercancel').onclick=()=>$('orderdialog').close();
+$('orderadd').onclick=()=>editOrder();$('ordercancel').onclick=()=>{clearTimeout(tipTimer);tipRevision++;$('orderdialog').close();};
 $('orderkind').onchange=()=>{if(['consumption','holiday'].includes($('orderkind').value)&&!$('orderstart').value)$('orderstart').value=orderLocal(Date.now());orderFields();};$('orderendkind').onchange=orderFields;$('orderrepeat').onchange=orderFields;
 $('orderform').onsubmit=async e=>{
  e.preventDefault();
@@ -54,3 +55,40 @@ function renderManualOrders(d){
   card.append(actions);root.append(card);
  }
 }
+
+// Suggestions only edit the draft. Saving remains an explicit action.
+let tipTimer=null,tipRevision=0,tipChoice=null;
+function scheduleConsumptionTip(){
+ clearTimeout(tipTimer);const revision=++tipRevision;tipChoice=null;
+ $('ordertipapply').hidden=true;
+ const visible=$('orderkind').value==='consumption'&&$('orderrepeat').value==='once';
+ $('ordertip').hidden=!visible;
+ if(!visible)return;
+ const data={start:$('orderstart').value,end:$('orderend').value,kwh:Number($('orderkwh').value)};
+ if(!data.start||!data.end||!(data.kwh>0)){
+  $('ordertiptitle').textContent='◷ Günstigeren Zeitpunkt finden';
+  $('ordertiptext').textContent='Beginn, Ende und kWh eintragen.';return;
+ }
+ $('ordertiptitle').textContent='◷ Preisvergleich …';$('ordertiptext').textContent='';
+ tipTimer=setTimeout(()=>loadConsumptionTip(data,revision),400);
+}
+async function loadConsumptionTip(data,revision){
+ const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),10000);
+ try{
+  const response=await fetch('/api/consumption-tip',{method:'POST',headers:{'Content-Type':'application/json','X-Luna':'1'},body:JSON.stringify(data),signal:abort.signal});
+  const tip=await response.json();if(revision!==tipRevision)return;
+  if(!response.ok)throw new Error(tip.error||'Preisvergleich nicht verfügbar');
+  const money=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
+  const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
+  $('ordertiptitle').textContent=tip.state==='better'?'💡 '+fmt(tip.start)+'–'+fmt(tip.end)+' · ca. '+money(tip.saving_eur)+' günstiger':tip.state==='good'?'✓ Kein günstigeres Zeitfenster gefunden':'ⓘ Zeitvergleich';
+  $('ordertiptext').textContent=(['better','good'].includes(tip.state)?'Netzstrom: '+money(tip.current_eur)+(tip.state==='better'?' → '+money(tip.alternative_eur):'')+'. ':'')+tip.message;
+  if(tip.state==='better'){tipChoice=tip;$('ordertipapply').hidden=false;}
+ }catch(e){if(revision===tipRevision){$('ordertiptitle').textContent='ⓘ Kein Preisvorschlag';$('ordertiptext').textContent=e.name==='AbortError'?'Zeitlimit erreicht. Eingabe ändern, um erneut zu prüfen.':e.message;}}
+ finally{clearTimeout(timeout);}
+}
+$('ordertipapply').onclick=()=>{
+ if(!tipChoice)return;
+ $('orderstart').value=orderLocal(tipChoice.start);$('orderend').value=orderLocal(tipChoice.end);
+ scheduleConsumptionTip();
+};
+for(const id of ['orderstart','orderend','orderkwh'])$(id).oninput=scheduleConsumptionTip;

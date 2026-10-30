@@ -809,6 +809,12 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path == '/api/consumption-tip':
+                from consumption import price_tip
+                app=self.server.app
+                with app.lock:
+                    c=app.config();prices=list(app.price_data)
+                return self.send(200,price_tip(data,c,prices,rules=c.get('_consumption_rules',[])))
             if self.path == '/api/pv-location':
                 from geocoding import lookup
                 return self.send(200,{'results':lookup(data.get('postcode'))})

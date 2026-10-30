@@ -71,3 +71,27 @@ class ConsumptionTests(unittest.TestCase):
    with self.assertRaises(ValueError):self.rule(**patch)
 
 if __name__=='__main__':unittest.main()
+
+class PriceTipTests(unittest.TestCase):
+ def setUp(self):
+  self.now=datetime(2026,10,30,10,tzinfo=timezone.utc)
+  self.c={**luna.DEFAULT,'timezone':'Europe/Berlin'}
+  self.data={'start':'2026-10-30T15:00','end':'2026-10-30T16:00','kwh':1.5}
+  self.prices=[{'start':self.now+timedelta(hours=i),'end':self.now+timedelta(hours=i+1),'ct':20 if i==6 else 40} for i in range(13)]
+ def test_cheaper_same_day_and_energy(self):
+  tip=consumption.price_tip(self.data,self.c,self.prices,self.now)
+  self.assertEqual(tip['state'],'better')
+  self.assertEqual(tip['start'],'2026-10-30T16:00:00+00:00')
+  self.assertAlmostEqual(tip['saving_eur'],.3)
+ def test_gaps_negative_prices_and_no_future_invention(self):
+  self.assertEqual(consumption.price_tip(self.data,self.c,[],self.now)['state'],'missing')
+  prices=[{**p,'ct':-10 if i==6 else 40} for i,p in enumerate(self.prices)]
+  self.assertAlmostEqual(consumption.price_tip(self.data,self.c,prices,self.now)['saving_eur'],.75)
+  self.assertEqual(consumption.price_tip(self.data,self.c,[self.prices[4]],self.now)['state'],'good')
+ def test_holiday_candidate_excluded(self):
+  holiday=consumption.validate({'kind':'holiday','start':'2026-10-30T17:00','end':'2026-10-30T18:00'},self.c,self.now)
+  self.assertEqual(consumption.price_tip(self.data,self.c,self.prices,self.now,[holiday])['state'],'good')
+ def test_partial_tariff_weighting(self):
+  data={**self.data,'start':'2026-10-30T16:30','end':'2026-10-30T17:30'}
+  tip=consumption.price_tip(data,self.c,self.prices,self.now)
+  self.assertAlmostEqual(tip['current_eur'],.45)
