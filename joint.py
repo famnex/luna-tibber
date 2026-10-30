@@ -12,7 +12,7 @@ from price_cache import planning_end
 
 
 def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
-    if not c.get('smart_discharge_enabled') and not c.get('_orders') and not c.get('_orders_projected'):
+    if not c.get('smart_discharge_enabled') and not c.get('_orders') and not c.get('_orders_projected') and not c.get('_comparison'):
         return None
     if type(soc) not in (int,float) or not math.isfinite(soc) or not 0<=soc<=100:
         return None
@@ -123,6 +123,9 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         if r['start']<=night_b:at_morning=energy
         _,after,charge,used=_choose(energy,spec,values[i+1],ceiling,limit,eta,wear,margin)
         trace.append({'start':r['start'].isoformat(),'end':r['end'].isoformat(),'start_kwh':energy,'end_kwh':after,'grid_charge_kwh':charge,'discharge_kwh':used,'idle_kwh':c.get('battery_idle_w',0)/1000*(r['end']-r['start']).total_seconds()/3600})
+        if c.get('_comparison'):
+            trace[-1].update(grid_house_kwh=spec[0]-used,grid_charge_input_kwh=charge/eta,
+                             cost_eur=((spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear)/100)
         actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
         a,b=r['start'],r['end']
         if charge>1e-7:
@@ -140,7 +143,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         energy=after
     total=sum(w['battery_kwh'] for w in charges)
     economics=None
-    if total>0 and not any(o['kind']=='charge' for o in orders):
+    if total>0 and not c.get('_comparison') and not any(o['kind']=='charge' for o in orders):
         baseline=tuple((*s[:3],0,*s[4:]) for s in specs)
         base_values=_values(baseline,ceiling,limit,eta,wear,margin)
         base_cost=0;available=initial
@@ -178,7 +181,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
                 old=phases[-1];old['end']=item['end'];old['kwh']+=item['kwh'];old['low_ct']=min(old['low_ct'],item['low_ct']);old['high_ct']=max(old['high_ct'],item['high_ct'])
             else:phases.append(item)
     solar_summary=dict(generation_kwh=sum(r['pv_kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows),direct_kwh=sum(min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600 for r in rows))
-    return dict(rolling=True,plan_start=now.isoformat(),idle_w=c.get('battery_idle_w',0),idle_kwh=c.get('battery_idle_w',0)/1000*(end-now).total_seconds()/3600,night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
+    return dict(total_cost_eur=actual_cost/100,rolling=True,plan_start=now.isoformat(),idle_w=c.get('battery_idle_w',0),idle_kwh=c.get('battery_idle_w',0)/1000*(end-now).total_seconds()/3600,night_complete=night_complete,plan_end=end.isoformat(),pv_available=solar_available,guard=guard,solar=solar_summary,phases=phases,bridge=bridge,economics=economics,charges=charges,windows=windows,trace=trace,planned_kwh=total,
                 planning_soc=floor+at_night/capacity*100,morning_soc=(floor+at_morning/capacity*100) if night_complete else None,
                 power_w=power*1000,night_start=max(now,night_a).isoformat(),night_end=night_b.isoformat(),
                 reason='Fortlaufender Energieplan · alle bekannten Preisstunden, Verbrauch und PV')

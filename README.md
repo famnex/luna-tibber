@@ -1006,3 +1006,33 @@ Erreichen unverändert. Beim Bearbeiten des Datumsfelds wird die Eingabe nicht
 überschrieben; beim Verlassen oder Speichern wird sie abgeglichen. Gespeicherte
 Aufträge werden nicht verschoben. Die Vorschläge werden im sichtbaren Dialog
 höchstens beim Minutenwechsel oder bei Eingaben neu berechnet, ohne Geräteabfragen.
+
+
+### Verbrauchsberatung mit PV und Akku
+
+Die Zeitvorschläge vergleichen jetzt denselben Planungshorizont ohne den
+ausgewählten Zusatzverbrauch und mit dessen möglichen Startzeiten.
+Die Differenz sind geschätzte zusätzliche Gesamtkosten; enthalten sind
+Hausverbrauch, vorhandene Verbrauchsroutinen/Urlaub, gespeicherter SOC,
+PV-Prognose samt eingestellten Abschlägen, Lade-/Entladeverluste, Akku-Eigenbedarf,
+Verschleiß, manuelle Ladeaufträge/Sperren und späterer Netzbezug.
+Beim Bearbeiten wird der vorhandene Eintrag im Vergleich ersetzt, nicht verdoppelt.
+
+Dafür wird derselbe gemeinsame Planer wie für Smart verwendet. In Smart werden
+Entladepausen mitgerechnet, sofern die Entladeoptimierung aktiviert ist. In Aus
+wird normale Eigenverbrauchsentladung mit den expliziten manuellen Eingriffen
+simuliert; automatische Netzladungen und neue Smart-Sperren werden nicht
+unterstellt. Die Vorschläge selbst lösen keinerlei Gerätebefehle aus. Nach
+Speichern berücksichtigt die laufende Smartsteuerung den Zusatzbedarf erneut.
+
+SOC darf höchstens 90 Sekunden alt sein. Es werden keine zusätzlichen
+Geräteabfragen ausgelöst. Fehlende PV wird ausdrücklich als Rechnung ohne PV
+markiert; fehlende zusammenhängende Preise oder Messwerte verhindern den
+Vergleich. Zukunft jenseits der bekannten Preise und Einspeisevergütung sind nicht
+bewertet; der verbleibende SOC am Horizontende wird deshalb ebenfalls angezeigt.
+
+Um den Pi 3 zu schonen, werden die bisherigen Preiskandidaten, Dreistundenanker
+und das stärkste prognostizierte PV-Überschussfenster verglichen. Die Auswahl heißt
+deshalb „günstigster geprüfter Start“, nicht garantiertes Optimum aller Minuten.
+Berechnungen werden kurz nach Eingabe gestartet, pro Prozess serialisiert und
+nach Minute, Konfiguration, Modus, Preisen und SOC kurz zwischengespeichert.

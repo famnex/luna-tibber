@@ -101,18 +101,18 @@ $('templatedelete').onclick=e=>changeTemplate('template-delete',true,e.currentTa
 let tipTimer=null,tipRevision=0;
 function scheduleConsumptionTip(){
  clearTimeout(tipTimer);const revision=++tipRevision;
- $('ordertipchoices').replaceChildren();
+ $('ordertipchoices').replaceChildren();$('ordertipassumptions').hidden=true;
  const visible=$('orderkind').value==='consumption'&&$('orderrepeat').value==='once';
  $('ordertip').hidden=!visible;if(!visible)return;
- const data={start:$('orderstart').value,duration_minutes:orderDuration(),kwh:Number($('orderkwh').value)};
+ const data={id:editingOrder,start:$('orderstart').value,duration_minutes:orderDuration(),kwh:Number($('orderkwh').value)};
  if(!data.start||!(data.duration_minutes>0)||!(data.kwh>0)){
   $('ordertiptitle').textContent='◷ Zeitfenster vergleichen';$('ordertiptext').textContent='Beginn, Dauer und kWh eintragen.';return;
  }
  $('ordertiptitle').textContent='◷ Preisvergleich …';$('ordertiptext').textContent='';
- tipTimer=setTimeout(()=>loadConsumptionTip(data,revision),400);
+ tipTimer=setTimeout(()=>loadConsumptionTip(data,revision),700);
 }
 async function loadConsumptionTip(data,revision){
- const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),10000);
+ const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),45000);
  try{
   const response=await fetch('/api/consumption-tip',{method:'POST',headers:{'Content-Type':'application/json','X-Luna':'1'},body:JSON.stringify(data),signal:abort.signal});
   const tip=await response.json();if(revision!==tipRevision)return;
@@ -120,13 +120,23 @@ async function loadConsumptionTip(data,revision){
   const money=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
   const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
   $('ordertiptitle').textContent=tip.suggestions?.length?'💡 Zeitfenster zur Auswahl':'ⓘ Zeitvergleich';
-  $('ordertiptext').textContent=(tip.current_eur!==undefined?'Deine Eingabe: '+money(tip.current_eur)+'. ':'')+tip.message;
+  const economic=tip.basis==='dispatch'&&tip.suggestions?.length;
+  $('ordertipassumptions').hidden=!economic;$('ordertipbasis').textContent=tip.message||'';
+  $('ordertiptext').textContent=economic?'Dein Termin: ≈ '+money(tip.current_eur)+' Mehrkosten · Vergleich bis '+new Date(tip.horizon_end).toLocaleString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):(tip.message||'');
   for(const option of tip.suggestions||[]){
    const row=document.createElement('div');row.className='tip-choice';
    const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');
-   heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?' ★ Günstigstes':'');
+   heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?(economic?' ★ Günstigster geprüft':' ★ Günstigstes'):'');
    detail.className='muted';detail.textContent=(option.saving_eur>=0?'− '+money(option.saving_eur):'+ '+money(-option.saving_eur))+' gegenüber deiner Eingabe'+(!option.cheapest?' · + '+money(option.extra_eur)+' zum günstigsten Termin':'');
-   info.append(heading,detail);const button=document.createElement('button');button.type='button';button.textContent='Übernehmen';
+   info.append(heading,detail);
+   if(economic){
+    const facts=document.createElement('p');facts.className='muted';
+    const number=n=>Number(n).toLocaleString('de-DE',{maximumFractionDigits:1});
+    facts.textContent='🔋 Danach '+number(option.end_soc)+' % · ☀ '+number(option.pv_direct_kwh)+' kWh zusätzlich direkt'+(option.hold_minutes?' · 🔒 '+option.hold_minutes+' Min. '+(option.automatic_hold?'Smart-Pause':'Sperre'):'');
+    const later=document.createElement('small');later.textContent='Spätere Mehrkosten: '+money(option.later_extra_eur)+' · Akku am Horizontende: '+number(option.horizon_soc)+' %';
+    info.append(facts,later);
+   }
+   const button=document.createElement('button');button.type='button';button.textContent='Übernehmen';
    button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(option.start);setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
    row.append(info,button);$('ordertipchoices').append(row);
   }

@@ -136,6 +136,8 @@ class Dashboard:
         self.folder = folder
         self.config_path = folder/'config.json'
         self.lock = threading.RLock()
+        from consumption_advice import AdviceCache
+        self.consumption_advice=AdviceCache()
         self.proc = None
         self.job = None
         self.update_preparing = False
@@ -839,11 +841,18 @@ class Handler(BaseHTTPRequestHandler):
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
             if self.path == '/api/consumption-tip':
-                from consumption import price_tip
-                app=self.server.app
+                from pv import attach
+                from manual import load
+                app=self.server.app;now=datetime.now(timezone.utc)
                 with app.lock:
-                    c=app.config();prices=list(app.price_data)
-                return self.send(200,price_tip(data,c,prices,rules=c.get('_consumption_rules',[])))
+                    c=attach(app.config(),app.folder,now);prices=list(app.price_data)
+                    telemetry=dict(app.telemetry);mode=app.mode
+                    c['_orders']=[r for r in load(app.folder,c['expected_serial'],now) if r['kind'] in ('hold','charge')]
+                    prior=read(app.folder/'discharge-status.json',{})
+                    c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
+                    until=read(app.folder/'discharge-request.json',{}).get('until')
+                    hold_until=datetime.fromisoformat(until) if until else None
+                return self.send(200,app.consumption_advice.get(data,c,prices,telemetry,mode,now,hold_until))
             if self.path == '/api/pv-location':
                 from geocoding import lookup
                 return self.send(200,{'results':lookup(data.get('postcode'))})
