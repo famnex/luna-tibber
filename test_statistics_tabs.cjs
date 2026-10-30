@@ -1,0 +1,17 @@
+const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
+const nodes=Object.fromEntries(['statistics','journal','diagnosispanel','statshub'].map(k=>[k,{hidden:true}]));
+const buttons=['statistics','journal','diagnosispanel'].map(k=>({dataset:{statView:k},classList:{toggle(){}},setAttribute(){}}));
+const calls=[];
+const ctx={$:id=>nodes[id],document:{querySelectorAll:()=>buttons},loadHistory:()=>calls.push('savings'),loadJournal:()=>calls.push('journal'),loadDiagnosis:()=>calls.push('diagnosis')};
+const source=fs.readFileSync('app.js','utf8');
+vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf("let statisticsPage="),source.indexOf("let refreshTimer=")),ctx);
+assert.equal(calls.length,0);nodes.statshub.hidden=false;
+buttons[1].onclick();assert.equal(nodes.journal.hidden,false);assert.equal(nodes.statistics.hidden,true);
+buttons[2].onclick();assert.equal(nodes.journal.hidden,true);assert.equal(nodes.diagnosispanel.hidden,false);
+buttons[0].onclick();assert.equal(nodes.statistics.hidden,false);assert.equal(nodes.diagnosispanel.hidden,true);
+assert.deepEqual(calls,['journal','diagnosis','savings']);
+const html=fs.readFileSync('web.html','utf8');
+assert.equal((html.match(/data-tab="statshub"/g)||[]).length,1);
+assert.equal((html.match(/data-tab="journal"/g)||[]).length,0);
+assert.match(html,/id="diagnosishours"/);
+console.log('Statistics tabs: one menu entry, three independent pages and on-demand loading');

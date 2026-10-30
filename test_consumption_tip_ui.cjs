@@ -1,24 +1,26 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
-const nodes={};const $=id=>nodes[id]??={value:'',hidden:false,options:[]};
+class El{constructor(){this.value='';this.hidden=false;this.options=[];this.children=[];this.dataset={};}replaceChildren(){this.children=[];}append(...x){this.children.push(...x);}}
+const nodes={};const $=id=>nodes[id]??=new El();
 let resolveRequest;
-const ctx={$,Intl,Date,Number,AbortController,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
+const ctx={document:{createElement:()=>new El()},$,Intl,Date,Number,AbortController,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
 fetch:()=>new Promise(resolve=>{resolveRequest=resolve;})};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('manual-ui.js','utf8'),ctx);
 $('orderkind').value='consumption';$('orderrepeat').value='once';
-$('orderstart').value='2026-10-30T15:00';$('orderend').value='2026-10-30T16:00';$('orderkwh').value='1.5';
+$('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderdurationunit').value='1';$('orderkwh').value='1.5';
 (async()=>{
  ctx.scheduleConsumptionTip();
  const pending=ctx.loadConsumptionTip({},1);
- resolveRequest({ok:true,json:async()=>({state:'better',start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,current_eur:.6,alternative_eur:.3,message:'Nur Tibber'})});
+ resolveRequest({ok:true,json:async()=>({state:'better',suggestions:[{start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,cost_eur:.3,extra_eur:0,cheapest:true},{start:'2026-10-30T18:00:00Z',end:'2026-10-30T19:00:00Z',saving_eur:.25,cost_eur:.35,extra_eur:.05,cheapest:false}],current_eur:.6,message:'Nur Tibber'})});
  await pending;
- assert.match($('ordertiptitle').textContent,/17:00–18:00/);
- assert.match($('ordertiptitle').textContent,/0,30/);
+ assert.match($('ordertipchoices').children[0].children[0].children[0].textContent,/17:00–18:00/);
+ assert.match($('ordertipchoices').children[0].children[0].children[0].textContent,/0,30/);
  assert.equal($('orderstart').value,'2026-10-30T15:00');
- assert.equal($('ordertipapply').hidden,false);
- $('ordertipapply').onclick();assert.equal($('orderstart').value,'2026-10-30T17:00');
+ assert.equal($('ordertipchoices').children.length,2);
+ assert.match($('ordertipchoices').children[1].children[0].children[1].textContent,/0,05/);
+ $('ordertipchoices').children[0].children[1].onclick();assert.equal($('orderstart').value,'2026-10-30T17:00');
  const stale=ctx.loadConsumptionTip({},2);
  $('orderrepeat').value='daily';ctx.scheduleConsumptionTip();
- resolveRequest({ok:true,json:async()=>({state:'better',start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,current_eur:.6,alternative_eur:.3,message:'Old'})});
- await stale;assert.equal($('ordertip').hidden,true);assert.equal($('ordertipapply').hidden,true);
+ resolveRequest({ok:true,json:async()=>({state:'better',suggestions:[{start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,cost_eur:.3,extra_eur:0,cheapest:true},{start:'2026-10-30T18:00:00Z',end:'2026-10-30T19:00:00Z',saving_eur:.25,cost_eur:.35,extra_eur:.05,cheapest:false}],current_eur:.6,message:'Old'})});
+ await stale;assert.equal($('ordertip').hidden,true);assert.equal($('ordertipchoices').children.length,0);
  console.log('Price tips: local time, euros, explicit adoption and stale response suppression passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});

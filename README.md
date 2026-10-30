@@ -959,8 +959,9 @@ Bei einmaligem Zusatzverbrauch erscheint im Dialog automatisch ein Preisvergleic
 für gleich lange Zeitfenster am selben lokalen Kalendertag. Er verwendet die
 bereits geladenen Tibber-Preise, keine zusätzlichen Geräteabfragen. Urlaub und
 vergangene Startzeiten werden ausgeschlossen; fehlende Preisintervalle werden
-nicht geschätzt. Ein Vorschlag ab einem Cent Unterschied lässt sich ausdrücklich
-in den Entwurf übernehmen und anschließend speichern. Die Eurobeträge gelten
+nicht geschätzt. Mehrere Vorschläge aus verschiedenen Tagesabschnitten lassen sich ausdrücklich
+in den Entwurf übernehmen und anschließend speichern. Der günstigste bekannte
+Termin ist immer enthalten, Alternativen nennen auch die Mehrkosten dazu. Die Eurobeträge gelten
 bei vollständigem Netzbezug; PV und Akku sind in diesem Hinweis nicht enthalten.
 Zusatzverbräuche können im Feld „Name / Bezeichnung“ frei benannt werden.
 
@@ -969,3 +970,23 @@ wird Smart einmalig wieder aktiviert, wenn es vorher aktiv war. Die Wiederaufnah
 ist an genau diesen Update-Lauf und die Gerätezuordnung gebunden; die üblichen
 Zugangs-/Inbetriebnahmeprüfungen bleiben bestehen. Bei Fehler, Rollback oder einem
 gewöhnlichen Neustart erfolgt keine automatische Smart-Aktivierung.
+
+
+### Statistik und Eingriff-Dialog
+
+Statistik bündelt die Unterseiten Ersparnis, Verlauf und Diagnose. Verlauf und
+Diagnose besitzen unabhängige Zeitraumwahlen; die vorhandenen Messungen und
+Berechnungen bleiben unverändert.
+
+Zeitgebundene Eingriffe verwenden Beginn und Dauer (Minuten, Stunden oder Tage).
+Die Beschriftungen passen sich der Aktion an. Ziel-SOC und unbefristete
+Entladesperren bleiben alternative Begrenzungen. Der Server berechnet die Endzeit
+in der eingestellten Zeitzone; bei einer bis zu zwei Minuten alten Jetzt-Eingabe
+beginnt ein einmaliger Eingriff jetzt mit der vollständigen Dauer.
+
+Verbrauchsvorlagen speichern Name, Dauer und kWh in consumption-templates.json.
+Im Eingriff-Dialog: Vorlage auswählen oder Werte eingeben, dann neu speichern,
+ausgewählte Vorlage ändern oder löschen. Bereits angelegte Eingriffe sind Kopien
+und bleiben bei Vorlagenänderungen unverändert. Die Preisvorschläge zeigen
+günstige Optionen aus bis zu vier Tagesabschnitten samt Gesamtkosten, Differenz
+zur Eingabe und Mehrkosten gegenüber dem günstigsten bekannten Termin.

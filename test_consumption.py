@@ -102,3 +102,36 @@ class PriceTipTests(unittest.TestCase):
   data={**self.data,'start':'2026-10-30T16:30','end':'2026-10-30T17:30'}
   tip=consumption.price_tip(data,self.c,self.prices,self.now)
   self.assertAlmostEqual(tip['current_eur'],.45)
+
+class DurationTemplateTests(unittest.TestCase):
+ def setUp(self):
+  self.now=datetime(2026,10,30,14,0,45,tzinfo=timezone.utc)
+  self.c={**luna.DEFAULT,'timezone':'Europe/Berlin'}
+ def test_now_minute_input_preserves_duration_and_proposal(self):
+  data={'kind':'consumption','start':'2026-10-30T15:00','duration_minutes':60,'kwh':1.5}
+  normalized=consumption.with_duration(data,self.c,self.now)
+  self.assertEqual(consumption.stamp(normalized['start']),self.now)
+  self.assertEqual(consumption.stamp(normalized['end'])-self.now,timedelta(hours=1))
+  prices=[{'start':self.now.replace(minute=0,second=0)+timedelta(hours=i),'end':self.now.replace(minute=0,second=0)+timedelta(hours=i+1),'ct':20+i} for i in range(9)]
+  tip=consumption.price_tip(data,self.c,prices,self.now)
+  self.assertIn(tip['state'],('better','good'));self.assertTrue(tip['suggestions'])
+ def test_suggestions_span_day_and_include_global_best(self):
+  now=self.now.replace(hour=0,minute=0,second=0)
+  prices=[{'start':now+timedelta(hours=i),'end':now+timedelta(hours=i+1),'ct':10 if i==15 else 30+i%6} for i in range(23)]
+  tip=consumption.price_tip({'start':'2026-10-30T09:00','duration_minutes':60,'kwh':1},self.c,prices,now)
+  self.assertEqual(len(tip['suggestions']),4)
+  self.assertTrue(any(o['cheapest'] and o['cost_eur']==.1 for o in tip['suggestions']))
+  self.assertEqual(len(set(consumption.stamp(o['start']).astimezone(consumption.ZoneInfo('Europe/Berlin')).hour//6 for o in tip['suggestions'])),4)
+ def test_template_crud_and_validation(self):
+  data={'name':'Waschen','duration_minutes':90,'kwh':1.5}
+  rows=consumption.template_change([],data);ident=rows[0]['id']
+  rows=consumption.template_change(rows,{**data,'id':ident,'name':'Eco','kwh':.8})
+  self.assertEqual(len(rows),1);self.assertEqual(rows[0]['kwh'],.8)
+  self.assertEqual(consumption.template_change(rows,{'id':ident},delete=True),[])
+  for patch in ({'name':''},{'duration_minutes':0},{'kwh':float('nan')}):
+   with self.assertRaises(ValueError):consumption.template_change([],{**data,**patch})
+ def test_duration_orders_keep_overlap_and_soc_limits(self):
+  data={'kind':'hold','start':'2026-10-30T15:00','duration_minutes':60,'end_kind':'time'}
+  rows=manual.upsert([],data,self.c,self.now)
+  self.assertEqual(consumption.stamp(rows[0]['end'])-consumption.stamp(rows[0]['start']),timedelta(hours=1))
+  with self.assertRaisesRegex(ValueError,'Überschneidung'):manual.upsert(rows,data,self.c,self.now)

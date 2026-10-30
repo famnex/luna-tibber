@@ -127,3 +127,10 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 /* Equal thin timeline bars; keep generous pointer/touch targets. */
 .interactive-strip button,.interactive-strip button:hover,.interactive-strip button:focus-visible{height:22px;min-height:0}
 .history-strip{height:22px}
+
+.stats-tabs{display:flex;gap:8px;overflow-x:auto;margin:12px 0 20px}.stats-tabs button{flex:1;white-space:nowrap}.stats-tabs .selected{background:#185842;color:white}
+.duration-input{display:flex;gap:8px}.duration-input input{min-width:0;flex:1}.duration-input select{width:auto}
+.tip-choice{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;border-top:1px solid var(--line,#dce5dd)}.tip-choice button{flex-shrink:0}.tip-choice p{margin:4px 0!important}
+@media(max-width:480px){.tip-choice{align-items:flex-start;flex-wrap:wrap}.stats-tabs button{padding:10px 8px}}
+
+.bottomnav{grid-template-columns:repeat(5,minmax(0,1fr))}

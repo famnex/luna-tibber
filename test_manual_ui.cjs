@@ -7,8 +7,8 @@ const ctx={setTimeout:()=>1,clearTimeout:()=>{},$,lastStatus:d,Intl,Date,Number,
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('manual-ui.js','utf8'),ctx);
 ctx.renderManualOrders(d);assert.equal($('orderlist').children.length,1);assert.match($('orderlist').children[0].children[0].textContent,/aktiv/);
 ctx.editOrder(d.manual_orders[0]);assert.equal($('orderdialog').open,true);assert.equal($('orderendwrap').hidden,true);
-$('orderkind').value='charge';ctx.orderFields();assert.equal($('orderendkind').value,'time');assert.equal($('orderend').required,true);
-$('orderendkind').value='soc';ctx.orderFields();assert.equal($('ordersocwrap').hidden,false);assert.equal($('orderend').required,false);
+$('orderkind').value='charge';ctx.orderFields();assert.equal($('orderendkind').value,'time');assert.equal($('orderduration').required,true);
+$('orderendkind').value='soc';ctx.orderFields();assert.equal($('ordersocwrap').hidden,false);assert.equal($('orderduration').required,false);
 const html=fs.readFileSync('web.html','utf8');assert.deepEqual([...html.matchAll(/data-mode="([^"]+)"/g)].map(x=>x[1]),['off','smart']);
 (async()=>{await $('orderform').onsubmit({preventDefault(){},submitter:new El()});assert.equal(calls[0][0],'manual-save');assert.equal($('orderdialog').open,false);console.log('Manual UI: persistent list, editor, end conditions, save, two-mode selector passed');})();
 
@@ -25,3 +25,10 @@ assert.match($('orderlist').children[0].children[2].textContent,/weitere Wiederh
 $('orderlist').children[0].children[3].children[0].onclick();
 assert.equal($('orderstart').value,'2026-10-29T18:00');assert.equal($('orderday4').checked,true);
 console.log('Consumption UI: recurrence, holiday semantics, one occurrence and master editing passed');
+
+const template={id:'wash',name:'Waschmaschine',duration_minutes:90,kwh:1.5};
+ctx.lastStatus={...d,consumption_templates:[template]};
+ctx.renderConsumptionTemplates(ctx.lastStatus);$('ordertemplate').value='wash';$('ordertemplate').onchange();
+assert.equal($('ordername').value,'Waschmaschine');assert.equal(ctx.orderDuration(),90);assert.equal($('orderkwh').value,1.5);
+assert.equal($('templateupdate').hidden,false);
+console.log('Templates: saved choice fills independent draft name, duration and energy');

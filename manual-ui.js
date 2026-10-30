@@ -13,16 +13,19 @@ function orderFields(){
  $('orderweekdays').hidden=type!=='consumption'||$('orderrepeat').value!=='weekly';
  [...kind.options].forEach(o=>o.hidden=(o.value==='forever'&&!hold)||(o.value==='soc'&&hold));
  if((hold&&kind.value==='soc')||(!hold&&kind.value==='forever'))kind.value='time';
- $('orderendwrap').hidden=kind.value!=='time';$('orderend').required=kind.value==='time';
+ $('orderendwrap').hidden=kind.value!=='time';$('orderduration').required=kind.value==='time';
+ const labels={hold:['Sperre ab','Sperrdauer'],charge:['Laden ab','Ladedauer'],consumption:['Verbrauch ab','Verbrauchsdauer'],holiday:['Abwesenheit ab','Dauer der Abwesenheit']};
+ const label=labels[type]||labels.hold;$('orderstartlabel').textContent=label[0];$('orderdurationlabel').textContent=label[1];
  $('ordersocwrap').hidden=kind.value!=='soc';$('ordersoc').required=kind.value==='soc';
  $('orderhelp').textContent=type==='holiday'?'☷ In diesem Zeitraum nur Grundlast einplanen. Zusatzverbräuche werden ausgesetzt, auch einmalige. Explizite Ladeaufträge und Sperren bleiben gültig.':type==='consumption'?'⌂ Zusätzlich zur Grundlast · kWh werden gleichmäßig auf das Zeitfenster verteilt. Überschneidende Verbräuche addieren sich. Wiederholungen gelten ab dem Startdatum.':hold?'🔒 Entladung gesperrt · Laden weiterhin möglich':`↗ Netzladen ohne Preisprüfung · mindestens 3 Minuten · bis ${lastStatus?.settings.charge_power_w||'—'} W · höchstens ${lastStatus?.settings.max_session_minutes||'—'} Minuten · SOC-Grenze ${kind.value==='soc'?$('ordersoc').value:lastStatus?.settings.target_soc||80} %`;
  scheduleConsumptionTip();
 }
 function editOrder(order=null){
- editingOrder=order?.id||null;$('ordernotice').textContent='';
+ editingOrder=order?.id||null;$('ordertemplate').value='';$('templatenotice').textContent='';renderConsumptionTemplates(lastStatus);$('ordernotice').textContent='';
  $('ordername').value=order?.name||'';$('orderrepeat').value=order?.repeat||'once';$('orderkwh').value=order?.kwh||1.5;
  for(let i=0;i<7;i++)$('orderday'+i).checked=(order?.weekdays||[]).includes(i);
- $('orderkind').value=order?.kind||'hold';$('orderstart').value=order?orderLocal(order.start):'';
+ $('orderkind').value=order?.kind||'hold';$('orderstart').value=order?orderLocal(order.start):orderLocal(Date.now());
+ setOrderDuration(order?.end?Math.max(1,Math.round((Date.parse(order.end)-Date.parse(order.start))/60000)):60);
  $('orderendkind').value=order?.end_kind||'time';$('orderend').value=order?.end?orderLocal(order.end):orderLocal(Date.now()+3600000);
  $('ordersoc').value=order?.target_soc||lastStatus?.settings.target_soc||80;
  $('ordertitle').textContent=order?'Eingriff bearbeiten':'Eingriff hinzufügen';orderFields();$('orderdialog').showModal();
@@ -31,11 +34,12 @@ $('orderadd').onclick=()=>editOrder();$('ordercancel').onclick=()=>{clearTimeout
 $('orderkind').onchange=()=>{if(['consumption','holiday'].includes($('orderkind').value)&&!$('orderstart').value)$('orderstart').value=orderLocal(Date.now());orderFields();};$('orderendkind').onchange=orderFields;$('orderrepeat').onchange=orderFields;
 $('orderform').onsubmit=async e=>{
  e.preventDefault();
- const data={id:editingOrder,kind:$('orderkind').value,start:$('orderstart').value,end_kind:$('orderendkind').value,end:$('orderend').value,target_soc:Number($('ordersoc').value),name:$('ordername').value,kwh:Number($('orderkwh').value),repeat:$('orderrepeat').value,weekdays:Array.from({length:7},(_,i)=>i).filter(i=>$('orderday'+i).checked)};
+ const data={id:editingOrder,kind:$('orderkind').value,start:$('orderstart').value,end_kind:$('orderendkind').value,end:$('orderend').value,duration_minutes:orderDuration(),target_soc:Number($('ordersoc').value),name:$('ordername').value,kwh:Number($('orderkwh').value),repeat:$('orderrepeat').value,weekdays:Array.from({length:7},(_,i)=>i).filter(i=>$('orderday'+i).checked)};
  if(await perform('manual-save',data,e.submitter))$('orderdialog').close();
  else $('ordernotice').textContent=$('notice').textContent||'Speichern fehlgeschlagen; bitte erneut versuchen.';
 };
 function renderManualOrders(d){
+ renderConsumptionTemplates(d);
  const root=$('orderlist');if(!root)return;
  const now=Date.parse(d.server_time||new Date().toISOString());
  const rows=d.manual_occurrences||d.manual_orders||[];
@@ -56,18 +60,49 @@ function renderManualOrders(d){
  }
 }
 
-// Suggestions only edit the draft. Saving remains an explicit action.
-let tipTimer=null,tipRevision=0,tipChoice=null;
+
+function orderDuration(){return Number($('orderduration').value)*Number($('orderdurationunit').value||1);}
+function setOrderDuration(minutes){
+ const unit=minutes%1440===0?1440:minutes%60===0?60:1;
+ $('orderdurationunit').value=String(unit);$('orderduration').value=String(minutes/unit);
+}
+function renderConsumptionTemplates(d){
+ const select=$('ordertemplate'),rows=d?.consumption_templates||[],key=JSON.stringify(rows);
+ if(select.dataset.key!==key){
+  const selected=select.value;select.replaceChildren();
+  for(const row of [{id:'',name:'Ohne Vorlage'},...rows]){
+   const option=document.createElement('option');option.value=row.id;option.textContent=row.name;select.append(option);
+  }
+  select.value=rows.some(r=>r.id===selected)?selected:'';select.dataset.key=key;
+ }
+ $('templateupdate').hidden=!select.value;$('templatedelete').hidden=!select.value;
+}
+$('ordertemplate').onchange=()=>{
+ const row=(lastStatus?.consumption_templates||[]).find(r=>r.id===$('ordertemplate').value);
+ if(row){$('ordername').value=row.name;$('orderkwh').value=row.kwh;setOrderDuration(row.duration_minutes);}
+ renderConsumptionTemplates(lastStatus);scheduleConsumptionTip();
+};
+async function changeTemplate(action,existing,button){
+ const data={id:existing?$('ordertemplate').value:null,name:$('ordername').value,duration_minutes:orderDuration(),kwh:Number($('orderkwh').value)};
+ if(action==='template-delete'&&!confirm('Diese Vorlage löschen? Bereits angelegte Eingriffe bleiben bestehen.'))return;
+ $('templatenotice').textContent='';
+ if(await perform(action,data,button)){$('templatenotice').textContent=action==='template-delete'?'Vorlage gelöscht.':'Vorlage gespeichert.';renderConsumptionTemplates(lastStatus);}
+ else $('templatenotice').textContent=$('notice').textContent||'Vorlage konnte nicht gespeichert werden.';
+}
+$('templatesave').onclick=e=>changeTemplate('template-save',false,e.currentTarget);
+$('templateupdate').onclick=e=>changeTemplate('template-save',true,e.currentTarget);
+$('templatedelete').onclick=e=>changeTemplate('template-delete',true,e.currentTarget);
+
+// Suggestions edit the draft only. Saving remains explicit.
+let tipTimer=null,tipRevision=0;
 function scheduleConsumptionTip(){
- clearTimeout(tipTimer);const revision=++tipRevision;tipChoice=null;
- $('ordertipapply').hidden=true;
+ clearTimeout(tipTimer);const revision=++tipRevision;
+ $('ordertipchoices').replaceChildren();
  const visible=$('orderkind').value==='consumption'&&$('orderrepeat').value==='once';
- $('ordertip').hidden=!visible;
- if(!visible)return;
- const data={start:$('orderstart').value,end:$('orderend').value,kwh:Number($('orderkwh').value)};
- if(!data.start||!data.end||!(data.kwh>0)){
-  $('ordertiptitle').textContent='◷ Günstigeren Zeitpunkt finden';
-  $('ordertiptext').textContent='Beginn, Ende und kWh eintragen.';return;
+ $('ordertip').hidden=!visible;if(!visible)return;
+ const data={start:$('orderstart').value,duration_minutes:orderDuration(),kwh:Number($('orderkwh').value)};
+ if(!data.start||!(data.duration_minutes>0)||!(data.kwh>0)){
+  $('ordertiptitle').textContent='◷ Zeitfenster vergleichen';$('ordertiptext').textContent='Beginn, Dauer und kWh eintragen.';return;
  }
  $('ordertiptitle').textContent='◷ Preisvergleich …';$('ordertiptext').textContent='';
  tipTimer=setTimeout(()=>loadConsumptionTip(data,revision),400);
@@ -80,15 +115,18 @@ async function loadConsumptionTip(data,revision){
   if(!response.ok)throw new Error(tip.error||'Preisvergleich nicht verfügbar');
   const money=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
   const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
-  $('ordertiptitle').textContent=tip.state==='better'?'💡 '+fmt(tip.start)+'–'+fmt(tip.end)+' · ca. '+money(tip.saving_eur)+' günstiger':tip.state==='good'?'✓ Kein günstigeres Zeitfenster gefunden':'ⓘ Zeitvergleich';
-  $('ordertiptext').textContent=(['better','good'].includes(tip.state)?'Netzstrom: '+money(tip.current_eur)+(tip.state==='better'?' → '+money(tip.alternative_eur):'')+'. ':'')+tip.message;
-  if(tip.state==='better'){tipChoice=tip;$('ordertipapply').hidden=false;}
+  $('ordertiptitle').textContent=tip.suggestions?.length?'💡 Zeitfenster zur Auswahl':'ⓘ Zeitvergleich';
+  $('ordertiptext').textContent=(tip.current_eur!==undefined?'Deine Eingabe: '+money(tip.current_eur)+'. ':'')+tip.message;
+  for(const option of tip.suggestions||[]){
+   const row=document.createElement('div');row.className='tip-choice';
+   const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');
+   heading.textContent=fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?' ★ Günstigstes':'');
+   detail.className='muted';detail.textContent=(option.saving_eur>=0?'− '+money(option.saving_eur):'+ '+money(-option.saving_eur))+' gegenüber deiner Eingabe'+(!option.cheapest?' · + '+money(option.extra_eur)+' zum günstigsten Termin':'');
+   info.append(heading,detail);const button=document.createElement('button');button.type='button';button.textContent='Übernehmen';
+   button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(option.start);setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
+   row.append(info,button);$('ordertipchoices').append(row);
+  }
  }catch(e){if(revision===tipRevision){$('ordertiptitle').textContent='ⓘ Kein Preisvorschlag';$('ordertiptext').textContent=e.name==='AbortError'?'Zeitlimit erreicht. Eingabe ändern, um erneut zu prüfen.':e.message;}}
  finally{clearTimeout(timeout);}
 }
-$('ordertipapply').onclick=()=>{
- if(!tipChoice)return;
- $('orderstart').value=orderLocal(tipChoice.start);$('orderend').value=orderLocal(tipChoice.end);
- scheduleConsumptionTip();
-};
-for(const id of ['orderstart','orderend','orderkwh'])$(id).oninput=scheduleConsumptionTip;
+for(const id of ['orderstart','orderduration','orderdurationunit','orderkwh'])$(id).oninput=scheduleConsumptionTip;

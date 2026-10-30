@@ -29,6 +29,17 @@ class DashboardTests(unittest.TestCase):
         self.folder=Path(self.tmp.name)
         self.app=web.Dashboard(self.folder,start_worker=False)
     def tearDown(self):self.tmp.cleanup()
+    def test_templates_persist_without_device_and_do_not_change_orders(self):
+        self.app.action('template-save',{'name':'Waschen','duration_minutes':90,'kwh':1.5})
+        rows=web.read(self.folder/'consumption-templates.json',[])
+        self.assertEqual(rows[0]['name'],'Waschen')
+        self.assertEqual(self.app.snapshot()['consumption_templates'],rows)
+        self.app.action('template-save',{**rows[0],'name':'Eco','kwh':.8})
+        self.assertEqual(web.read(self.folder/'consumption-templates.json',[])[0]['kwh'],.8)
+        self.assertEqual(web.read(self.folder/'manual-orders.json',{})['rows'],[])
+        self.app.action('template-delete',{'id':rows[0]['id']})
+        self.assertEqual(web.read(self.folder/'consumption-templates.json',[]),[])
+
     def test_missing_credentials_are_specific(self):
         with self.assertRaisesRegex(ValueError,'Seriennummer.*Installateurpasswort'):
             self.app.action('mode',{'mode':'smart'})

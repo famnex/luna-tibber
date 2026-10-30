@@ -59,7 +59,7 @@ function renderPv(d){
 }
 let historyData=null,historyLoading=false,historyAt=0;
 async function loadHistory(force=false){
- if(document.hidden||document.getElementById('statistics').hidden||historyLoading||(!force&&Date.now()-historyAt<60000))return;
+ if(document.hidden||document.getElementById('statistics').hidden||document.getElementById('statshub')?.hidden||historyLoading||(!force&&Date.now()-historyAt<60000))return;
  historyLoading=true;const info=document.getElementById('historyinfo');info.textContent='◌ Statistik wird geladen …';
  try{const r=await fetch('/api/history');if(!r.ok)throw Error('Statistik nicht erreichbar');historyData=await r.json();historyAt=Date.now();if(!document.hidden)renderHistory();}
  catch(e){info.textContent='⚠ '+e.message;}
@@ -109,7 +109,7 @@ async function pushAction(button,callback){
  finally{button.disabled=false;button.classList.remove('button-loading');}
 }
 document.addEventListener('DOMContentLoaded',()=>{
- document.querySelector('[data-tab="statistics"]').addEventListener('click',()=>loadHistory());
+
  document.getElementById('historygroup').onchange=renderHistory;
  document.addEventListener('visibilitychange',()=>{if(!document.hidden)loadHistory();});
  setInterval(()=>loadHistory(),60000);

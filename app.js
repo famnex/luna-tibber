@@ -139,7 +139,7 @@ function fillSettings(s,secrets){
 async function refresh(){if(document.hidden||refreshing)return;refreshing=true;const abort=new AbortController();const timeout=setTimeout(()=>abort.abort(),20000);try{const r=await fetch('/api/status'+(watch?'?fast=1':''),{signal:abort.signal});if(r.status===401){$('connection').textContent='Webinterface erreichbar · bitte anmelden';$('login').hidden=false;$('dashboard').hidden=true;$('logout').hidden=true;window.startupState?.('ready');return;}if(!r.ok)throw new Error('Status nicht erreichbar');const d=await r.json();if(document.hidden)return;trackTransition(d);lastStatus=d;countdownAnchor=performance.now();renderBatteryCard(d);renderControl(d);renderExtras(d);if(typeof renderManualOrders==='function')renderManualOrders(d);renderMeterTest(d);renderOverview(d);$('connection').textContent='● Webdienst erreichbar · '+(d.price_error?'Preisdaten prüfen':d.prices?.length?'Preise bis '+new Date(d.prices[d.prices.length-1].end).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Preise fehlen');$('connection').classList.remove('offline');renderPrices(d);$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;if(!initialized){fillSettings(d.settings,d.secrets_set);initialized=true;}const p=d.planned;$('plannedstatus').textContent=p?`${p.phase==='waiting'?'Wartet':p.phase==='charging'?'Lädt':p.phase==='completed'?'Beendet':'Fehler'} · ${new Date(p.start).toLocaleString('de-DE',{timeZone:d.settings.timezone})} bis spätestens ${new Date(p.end).toLocaleString('de-DE',{timeZone:d.settings.timezone})} · Ziel ${p.target_soc} %`:'Kein einmaliger Auftrag.';const t=d.telemetry;const age=t.time?(Date.now()-Date.parse(t.time))/1000:null;$('soc').textContent=typeof t.soc==='number'?t.soc.toFixed(1)+' %':'—';$('battery').value=t.soc??0;$('power').textContent=typeof t.battery_power_w==='number'?(t.battery_power_w/1000).toFixed(2)+' kW':'—';$('sampletime').textContent=age===null?'Noch keine Messung':`Messung vor ${uiAge(age)}${age>90?' · kein Livewert':''}`;$('price').textContent=ct(d.current_price);$('modebadge').textContent=modes[d.mode];$('activity').classList.toggle('spinning',!!d.job);$('activity').textContent=d.fault?'Steuerung meldet einen Fehler – Details unten.':d.job==='sample'?'Messwerte werden aktualisiert …':d.job==='probe'?'Gerät wird ausgelesen …':d.job==='stop'?'Stopp wird an den Wechselrichter gesendet …':d.job==='charge-test'?'Beaufsichtigter Ladetest läuft …':d.job?(t.eligible?'Ladeauftrag aktiv · '+(t.reason||'Ladung freigegeben'):'Steuerung aktiv · '+(t.reason||'Warte auf Messwerte')):d.mode==='planned'?'Geplant: wartet auf Startzeit.':d.mode==='off'?'Aus · manuelle Eingriffe bleiben gültig.':'Wartet auf das nächste Zeitfenster.';if(!busy){for(const [id,job] of [['probe','probe'],['test','charge-test']])$(id).classList.toggle('button-loading',d.job===job);}$('fault').hidden=!d.fault;$('fault').textContent=d.fault;$('missing').hidden=!d.missing.length;$('missing').textContent='Noch einzurichten: '+d.missing.join(', ');$('device').textContent=d.device.serial?`${d.device.model||'Huawei'} · Seriennummer ${d.device.serial}`:'Gerät noch nicht ausgelesen';$('wifi').textContent=d.wifi.interface?`WLAN-Profil: ${d.wifi.interface} · ${d.wifi.ssid} · ${d.wifi.host} (Systemdienst)`:'WLAN-Connector noch nicht eingerichtet';$('commissioned').hidden=d.job==='charge-test';$('commissioned').textContent=d.commissioned?'Ladetest bestätigt.':'Ladetest noch nicht bestätigt.';$('events').textContent=d.events.map(x=>JSON.stringify(x)).join('\n');window.startupState?.('ready');}catch(e){$('connection').textContent='Verbindung unterbrochen · angezeigte Werte können veraltet sein';$('connection').classList.add('offline');if(!lastStatus)window.startupState?.('error');}finally{clearTimeout(timeout);refreshing=false;scheduleRefresh();}}
 $('loginform').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;showBusy(true,'Anmeldung läuft …',b);notify('Anmeldung läuft …','loading');try{await api('login',{password:$('loginpassword').value});$('loginpassword').value='';initialized=false;notify('');await refresh();}catch(err){notify(err.message,'error');}finally{showBusy(false,'',b);b.disabled=false;}};
 $('logout').onclick=async()=>{if(settingsDirty&&!confirm('Ungespeicherte Einstellungen verwerfen und abmelden?'))return;notify('Abmeldung läuft …','loading');try{await api('logout',{});initialized=false;settingsDirty=false;notify('Abgemeldet.');await refresh();}catch(e){notify(e.message,'error');}};
-document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(s=>s.hidden=s.id!==b.dataset.tab);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));});
+document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(s=>s.hidden=s.id!==b.dataset.tab);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));if(b.dataset.tab==='statshub')selectStatistics(statisticsPage);});
 document.querySelectorAll('[data-mode]').forEach(b=>b.onclick=()=>{chosenMode=b.dataset.mode;modeDirty=true;renderControl(lastStatus);});
 $('confirmmode').onclick=async e=>{
  if(!modeDirty||!lastStatus)return;
@@ -353,6 +353,20 @@ function renderBatteryCard(d){
 }
 setInterval(()=>{if(!document.hidden)drawCountdown();},1000);
 
+
+let statisticsPage='statistics';
+function selectStatistics(page){
+ statisticsPage=page;
+ for(const id of ['statistics','journal','diagnosispanel'])$(id).hidden=id!==page;
+ document.querySelectorAll('[data-stat-view]').forEach(b=>{b.classList.toggle('selected',b.dataset.statView===page);b.setAttribute('aria-pressed',String(b.dataset.statView===page));});
+ if($('statshub').hidden)return;
+ if(page==='statistics')loadHistory();
+ else if(page==='journal')loadJournal();
+ else loadDiagnosis();
+}
+document.querySelectorAll('[data-stat-view]').forEach(b=>b.onclick=()=>selectStatistics(b.dataset.statView));
+selectStatistics(statisticsPage);
+
 let refreshTimer=null,watch=null;
 function watchChange(name,data){
  const kind=name==='discharge'?'discharge':name==='test'||data.mode==='on'?'charge':data.mode==='off'?'stop':'state';
@@ -434,3 +448,4 @@ function renderMeterTest(d){
  for(const row of test.rows){const p=document.createElement('p');p.textContent=row.label+': '+(row.ok?row.value+' '+row.unit:'Nicht lesbar ('+row.error+')');box.append(p);}
  const hint=document.createElement('p');hint.className='muted';hint.textContent='Lesbar bedeutet noch nicht plausibel. Zählerstatus, Leistungsrichtung und Zählerstände gemeinsam prüfen; Nullwerte allein bestätigen keinen verbundenen Zähler.';box.append(hint);
 }
+

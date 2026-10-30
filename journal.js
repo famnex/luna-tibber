@@ -1,6 +1,6 @@
 'use strict';
 let journalBusy=false,journalBefore=null,journalAt=0,journalKey='';
-function journalVisible(){return !document.hidden&&!document.getElementById('dashboard').hidden&&!document.getElementById('journal').hidden;}
+function journalVisible(){return !document.hidden&&!document.getElementById('dashboard').hidden&&!document.getElementById('journal').hidden&&!document.getElementById('statshub')?.hidden;}
 function journalQuery(){return 'hours='+document.getElementById('journalhours').value+'&all='+(document.getElementById('journalall').checked?'1':'0');}
 function journalTime(stamp){
  const zone=typeof lastStatus!=='undefined'?lastStatus?.settings?.timezone||'Europe/Berlin':'Europe/Berlin';
@@ -129,7 +129,7 @@ document.addEventListener('DOMContentLoaded',()=>{
  document.getElementById('journalmore').onclick=()=>loadJournal(true);
  for(const id of ['journalhours','journalall'])document.getElementById(id).onchange=()=>{journalAt=0;loadJournal();};
  for(const kind of ['json','text'])document.getElementById('journal'+kind).onclick=e=>exportJournal(kind==='text'?'txt':'json',e.currentTarget);
- document.querySelector('[data-tab="journal"]').addEventListener('click',()=>setTimeout(()=>loadJournal(),0));
+
  document.addEventListener('visibilitychange',()=>{if(journalVisible())loadJournal();});
 });
 setInterval(()=>{if(journalVisible()&&Date.now()-journalAt>=60000)loadJournal();},1000);
@@ -190,17 +190,17 @@ function renderDiagnosis(box,d){
 }
 async function loadDiagnosis(){
  const button=document.getElementById('diagnosisrefresh'),box=document.getElementById('diagnosisresult');
- if(button.disabled)return;const hours=document.getElementById('journalhours').value;button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
+ if(button.disabled)return;const hours=document.getElementById('diagnosishours').value;button.disabled=true;button.classList.add('button-loading');button.setAttribute('aria-busy','true');
  const controller=new AbortController(),timeout=setTimeout(()=>controller.abort(),30000);
- try{const response=await fetch('/api/journal/diagnosis?hours='+hours,{signal:controller.signal});if(!response.ok)throw Error('Diagnose nicht erreichbar.');const d=await response.json();if(hours===document.getElementById('journalhours').value)renderDiagnosis(box,d);}
+ try{const response=await fetch('/api/journal/diagnosis?hours='+hours,{signal:controller.signal});if(!response.ok)throw Error('Diagnose nicht erreichbar.');const d=await response.json();if(hours===document.getElementById('diagnosishours').value)renderDiagnosis(box,d);}
  catch(e){box.append(diagnosisElement('p',e.name==='AbortError'?'Diagnose dauert zu lange. Erneut versuchen.':e.message,'diag-alert'));}
- finally{clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');if(hours!==document.getElementById('journalhours').value)loadDiagnosis();}
+ finally{clearTimeout(timeout);button.disabled=false;button.classList.remove('button-loading');button.setAttribute('aria-busy','false');if(hours!==document.getElementById('diagnosishours').value)loadDiagnosis();}
 }
 document.addEventListener('DOMContentLoaded',()=>{
  const panel=document.getElementById('diagnosispanel');
- panel.addEventListener('toggle',()=>{if(panel.open)loadDiagnosis();});
+
  document.getElementById('diagnosisrefresh').onclick=loadDiagnosis;
- document.getElementById('journalhours').addEventListener('change',()=>{if(panel.open)loadDiagnosis();});
+ document.getElementById('diagnosishours').addEventListener('change',()=>{if(!panel.hidden)loadDiagnosis();});
 });
 
 // Dashboard history: journal reads only, independent from live control and planning.

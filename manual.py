@@ -46,6 +46,8 @@ def complete(folder, order):
 
 def upsert(rows, data, c, now=None):
     now=now or datetime.now(timezone.utc)
+    from consumption import with_duration
+    data=with_duration(data,c,now)
     kind=data.get('kind');end_kind=data.get('end_kind')
     if kind in ('consumption','holiday'):
         from consumption import validate

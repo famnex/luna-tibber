@@ -101,8 +101,11 @@ def migrate(folder,c,now=None):
 def price_tip(data,c,prices,now=None,rules=()):
     """Read-only tariff comparison, same duration/energy and local calendar day."""
     now=now or datetime.now(timezone.utc)
+    data=with_duration({**data,'repeat':'once'},c,now)
     rule=validate({**data,'kind':'consumption','repeat':'once'},c,now)
     a,b=stamp(rule['start']),stamp(rule['end']);duration=b-a
+    if now-timedelta(minutes=2)<=a<now:
+        b=now+(b-a);a=now
     if a<now:return {'state':'past','message':'Für bereits gestartete Verbräuche kein Verschiebevorschlag.'}
     zone=ZoneInfo(c['timezone']);day=a.astimezone(zone).replace(hour=0,minute=0,second=0,microsecond=0)
     left=max(now,day.astimezone(timezone.utc));right=(day+timedelta(days=1)).astimezone(timezone.utc)
@@ -131,6 +134,46 @@ def price_tip(data,c,prices,now=None,rules=()):
         value=cost(x)
         if value is not None:options.append((value,abs((x-a).total_seconds()),x))
     best=min(options,default=(current,0,a));saving=current-best[0]
+    # One cheapest option per six-hour part of the day, plus global best.
+    buckets={}
+    for option in options:
+        key=option[2].astimezone(zone).hour//6
+        if key not in buckets or option<buckets[key]:buckets[key]=option
+    selected={best[2]:best}
+    selected.update({o[2]:o for o in buckets.values()})
+    suggestions=[{'start':x.isoformat(),'end':(x+duration).isoformat(),'cost_eur':round(value,4),
+                  'saving_eur':round(current-value,4),'extra_eur':round(value-best[0],4),
+                  'cheapest':abs(value-best[0])<0.000001} for value,_,x in sorted(selected.values(),key=lambda o:o[2])]
+
     return {'state':'better' if saving>=0.01 else 'good','start':best[2].isoformat(),'end':(best[2]+duration).isoformat(),
-            'current_eur':round(current,4),'alternative_eur':round(best[0],4),'saving_eur':round(max(0,saving),4),
+            'suggestions':suggestions,'current_eur':round(current,4),'alternative_eur':round(best[0],4),'saving_eur':round(max(0,saving),4),
             'message':'Vergleich am selben Tag · gleiche Dauer und kWh · nur bekannte Tibber-Preise. PV und Akku nicht berücksichtigt.'}
+
+
+def with_duration(data,c,now=None):
+    """Convert UI duration to UTC endpoints; retain legacy start/end clients."""
+    if 'duration_minutes' not in data or data.get('end_kind') in ('soc','forever'):return data
+    now=now or datetime.now(timezone.utc)
+    minutes=data['duration_minutes']
+    if type(minutes) not in (int,float) or not math.isfinite(minutes) or not 1<=minutes<=525600:
+        raise ValueError('Dauer: 1 Minute bis 365 Tage')
+    start=local_time(data['start'],c['timezone']) if data.get('start') else now
+    # A minute-resolution "now" input must not become a past appointment.
+    if data.get('repeat','once')=='once' and now-timedelta(minutes=2)<=start<now:start=now
+    return {**data,'start':start.isoformat(),'end':(start+timedelta(minutes=minutes)).isoformat()}
+
+
+def template_change(rows,data,delete=False):
+    ident=data.get('id')
+    if ident and not any(r['id']==ident for r in rows):raise ValueError('Vorlage nicht mehr vorhanden')
+    if delete:
+        if not ident:raise ValueError('Vorlage auswählen')
+        return [r for r in rows if r['id']!=ident]
+    name=data.get('name','')
+    if not isinstance(name,str) or not name.strip() or len(name.strip())>80:raise ValueError('Vorlagenname: 1 bis 80 Zeichen')
+    minutes=data.get('duration_minutes');kwh=data.get('kwh')
+    if type(minutes) not in (int,float) or not math.isfinite(minutes) or not 1<=minutes<=1440:raise ValueError('Vorlagendauer: 1 bis 1440 Minuten')
+    if type(kwh) not in (int,float) or not math.isfinite(kwh) or not 0<kwh<=200:raise ValueError('Vorlagenenergie: mehr als 0 bis 200 kWh')
+    if not ident and len(rows)>=50:raise ValueError('Maximal 50 Vorlagen')
+    row={'id':ident or uuid.uuid4().hex,'name':name.strip(),'duration_minutes':minutes,'kwh':kwh}
+    return sorted([r for r in rows if r['id']!=ident]+[row],key=lambda r:r['name'].casefold())

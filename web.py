@@ -407,6 +407,11 @@ class Dashboard:
                 self.notifications.unsubscribe(data['endpoint'])
             elif name == 'push-test':
                 self.alert('test','✓ LUNA · Push bereit','Wichtige Meldungen erreichen dieses Gerät.',cooldown=60)
+            elif name in ('template-save','template-delete'):
+                from consumption import template_change
+                path=self.folder/'consumption-templates.json'
+                rows=template_change(read(path,[]),data,delete=name=='template-delete')
+                luna.write_json(path,rows)
             elif name in ('manual-save','manual-delete'):
                 from manual import load, upsert
                 c=self.config()
@@ -664,7 +669,7 @@ class Dashboard:
             dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
+            return {'consumption_templates':read(self.folder/'consumption-templates.json',[]),'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
