@@ -13,7 +13,7 @@ from contextlib import contextmanager
 from datetime import datetime,timezone
 from zoneinfo import ZoneInfo
 
-CONFIG_KEYS=('pv_buffer_pct','morning_buffer_pct','diagnosis_tolerance_pct','battery_idle_w','target_soc','battery_floor_soc','battery_capacity_kwh','charge_power_w',
+CONFIG_KEYS=('_consumption_rules','pv_buffer_pct','morning_buffer_pct','diagnosis_tolerance_pct','battery_idle_w','target_soc','battery_floor_soc','battery_capacity_kwh','charge_power_w',
  'roundtrip_efficiency','wear_ct_kwh','min_saving_ct_kwh','max_buy_ct_kwh',
  'base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour',
  'night_start_hour','night_end_hour','use_start_hour','use_end_hour','max_session_minutes',

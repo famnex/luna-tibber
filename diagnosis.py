@@ -4,7 +4,7 @@ House AC = inverter AC - meter power (Huawei export-positive convention).
 No automatic adjustment: EV/heat-pump loads cannot be separated by one meter.
 """
 import math
-from datetime import datetime,timezone
+from datetime import datetime,timedelta,timezone
 from zoneinfo import ZoneInfo
 
 
@@ -42,6 +42,12 @@ def sample_context(c,pv,stamp):
     evening=a<=local.hour+local.minute/60<b
     base=c.get('base_load_w');extra=c.get('extra_load_kwh') or 0
     load=(base+extra*1000/(b-a) if evening and b>a else base) if finite(base) else None
+    if isinstance(c.get('_consumption_rules'),list):
+        from consumption import intervals
+        start=datetime.fromtimestamp(stamp,timezone.utc)
+        rows=intervals(c['_consumption_rules'],start,start+timedelta(seconds=1))
+        additional=sum(r['kw'] for r in rows)
+        evening=additional>0;extra=additional;load=base+additional*1000 if finite(base) else None
     forecast=None
     for r in pv.get('rows',[]):
         try:
@@ -163,4 +169,4 @@ def recommendations(rows,c):
     else:
         latest=max((d['evening_h'] for d in days.values() if window>0 and d['evening_h']<.9*window),default=0)
         second=record('Abend-Zusatz · Daten sammeln',f"Noch {2-len(full)} ausreichend erfasste Abende nötig. Teilfenster bisher maximal {fmt(latest)} / {fmt(max(0,window*.9))} h.",'extra_load_kwh',False,progress,len(full)/2)
-    return [first,second]
+    return [first] if '_consumption_rules' in c else [first,second]

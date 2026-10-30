@@ -14,15 +14,15 @@ const all=[];function visit(node){all.push(node);for(const child of node.childre
 assert.ok(fields.children.every(n=>n.tag==='details'));assert.ok(fields.children.every(n=>n.children[0].tag==='summary'));
 assert.ok(all.some(n=>n.id==='pv-postcode'));
 assert.equal(all.find(n=>n.id==='pv-postcode').name,undefined);
-const helps=all.filter(n=>n.className==='help-button');assert.equal(helps.length,42);
+const helps=all.filter(n=>n.className==='help-button');assert.equal(helps.length,39);
 for(const help of helps){
  const desc=all.find(n=>n.id===help.attrs['aria-controls']);assert.ok(desc.textContent&&desc.textContent.length>40);
  assert.equal(help.type,'button');assert.equal(desc.hidden,true);help.onclick();assert.equal(desc.hidden,false);assert.equal(help.attrs['aria-expanded'],'true');help.onclick();assert.equal(desc.hidden,true);
 }
 assert.equal(all.some(n=>n.name==='reserve_soc'),false);
-assert.match(all.find(n=>n.id==='help-extra_load_kwh').textContent,/zusätzlich/);
+assert.equal(all.some(n=>n.name==='extra_load_kwh'),false);
 assert.equal(all.find(n=>n.name==='password').type,'password');
-console.log('Settings: help on all 42 fields, touch/keyboard button semantics, no fixed reserve, hidden secrets');
+console.log('Settings: help on all 39 fields, touch/keyboard button semantics, no fixed reserve, hidden secrets');
 // Saving submits only edited fields; unchanged connection data and blank secrets stay out.
 const form={},inputs=[{name:'base_load_w',type:'number',value:'700'},{name:'host',type:'text',value:'192.0.2.1'},{name:'password',type:'password',value:''}];
 ctx.$=id=>id==='settingsform'?form:{querySelectorAll:()=>inputs};

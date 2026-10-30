@@ -56,7 +56,7 @@ class DashboardTests(unittest.TestCase):
 
     def test_active_process_accepts_only_changed_safe_fields(self):
         self.app.save_settings({});self.app.mode='smart';self.app.proc=Mock(poll=Mock(return_value=None));self.app.job='run'
-        patch={k:v for k,v in self.app.config().items() if k!='mode'}
+        patch={k:v for k,v in self.app.config().items() if k!='mode' and not k.startswith('_')}
         patch['target_soc']=70
         self.app.save_settings(patch)
         self.assertEqual(self.app.config()['target_soc'],70)

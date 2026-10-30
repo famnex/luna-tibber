@@ -90,7 +90,11 @@ def refresh(c,folder,now=None,fetcher=None):
 
 
 def attach(c,folder,now=None):
-    return {**c,'_pv':read(c,folder,now)}
+    from manual import load
+    rules=load(folder,c.get('expected_serial'),now)
+    out={**c,'_pv':read(c,folder,now)}
+    if (folder/'manual-orders.json').exists():out['_consumption_rules']=[r for r in rules if r['kind'] in ('consumption','holiday')]
+    return out
 
 
 def rows_for(c,start,end):

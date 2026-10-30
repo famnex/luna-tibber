@@ -2,7 +2,7 @@
 const phaseColor=action=>({charge:'#2f8d62',pv_charge:'#b18a24',discharge:'#ce732a',hold:'#8c9da2'}[action]||'#91af83');
 const phaseLabel=action=>({charge:'↗ Netzladung',pv_charge:'☀ PV-Ladung',discharge:'↘ Entladung frei',hold:'Ⅱ Entladung pausiert'}[action]||'');
 function chartPhases(d){
- if(d.mode!=='smart'&&!d.manual_orders?.length)return [];
+ if(d.mode!=='smart'&&!d.manual_orders?.some(o=>['hold','charge'].includes(o.kind)))return [];
  const rows=(d.dispatch_preview?.windows||[]).map(w=>({...w}));
  // Display-only PV charging from positive stored-energy change without a grid purchase.
  for(const t of d.smart_preview?.joint?.trace||[]){
@@ -292,7 +292,7 @@ function batterySeries(d,now=Date.now()){
  measured.sort((a,b)=>a.time-b.time);
  const forecast=[],c=d.settings,capacity=c.battery_capacity_kwh;
  if(!fresh||!(capacity>0))return {measured,forecast};
- const trace=(d.mode==='smart'||d.manual_orders?.length)?d.smart_preview?.joint?.trace:null;
+ const trace=(d.mode==='smart'||d.manual_orders?.some(o=>['hold','charge'].includes(o.kind)))?d.smart_preview?.joint?.trace:null;
  if(trace?.length){
   const floor=c.battery_floor_soc||0;
   for(const row of trace){
@@ -308,7 +308,7 @@ function batterySeries(d,now=Date.now()){
    if(start>cursor+1000)break;
    for(let a=start;a<end;){
     const b=Math.min(end,a+300000),local=new Intl.DateTimeFormat('en-GB',{timeZone:c.timezone,hour:'2-digit',hourCycle:'h23'}).format(new Date(a));
-    const extra=Number(local)>=c.extra_load_start_hour&&Number(local)<c.extra_load_end_hour?c.extra_load_kwh/(c.extra_load_end_hour-c.extra_load_start_hour):0;
+    const extra=d.consumption_forecast?(d.consumption_forecast||[]).reduce((sum,r)=>sum+r.kw*Math.max(0,Math.min(b,Date.parse(r.end))-Math.max(a,Date.parse(r.start)))/(b-a),0):Number(local)>=c.extra_load_start_hour&&Number(local)<c.extra_load_end_hour?c.extra_load_kwh/(c.extra_load_end_hour-c.extra_load_start_hour):0;
     const net=row.kw-c.base_load_w/1000-extra,held=Date.parse(d.discharge?.request?.until)>a;
     const energy=net>=0?Math.min(net*eta,c.charge_power_w/1000):held?0:net/eta;
     soc=Math.max(floor,Math.min(100,soc+(energy-(c.battery_idle_w||0)/1000)*(b-a)/3600000/capacity*100));forecast.push({time:b,soc});a=b;

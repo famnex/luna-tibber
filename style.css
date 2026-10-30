@@ -121,3 +121,5 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 [data-theme=dark] .interactive-strip .phase-charge{background:#2f8d62}[data-theme=dark] .interactive-strip .phase-pv_charge{background:#b18a24}[data-theme=dark] .interactive-strip .phase-discharge{background:#ce732a}[data-theme=dark] .interactive-strip .phase-hold{background:#8c9da2}
 
 .manual-order{padding:1rem 0;border-bottom:1px solid var(--border,#dce5df)}.manual-order p{margin:.6rem 0}.manual-order .actions{gap:.5rem}#orderdialog{max-width: min(36rem,92vw);max-height:85dvh;overflow:auto}#orderdialog input,#orderdialog select{max-width:100%;box-sizing:border-box}#modecard .modes{grid-template-columns:repeat(2,1fr)}
+
+#orderweekdays{display:flex;flex-wrap:wrap;gap:.7rem}#orderweekdays[hidden]{display:none}#orderweekdays label{display:flex;gap:.3rem;align-items:center}#orderweekdays input{width:auto}

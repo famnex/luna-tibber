@@ -476,12 +476,12 @@ async def operate(args, c, folder):
             prior=read_discharge(folder/'discharge-status.json')
             c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
             from manual import load as load_orders, active as active_order, complete as complete_order
-            c['_orders']=load_orders(folder,c['expected_serial'],now)
+            c['_orders']=[r for r in load_orders(folder,c['expected_serial'],now) if r['kind'] in ('hold','charge')]
             order=active_order(c['_orders'],now,'charge')
             if order and snapshot['soc']>=order['target_soc']:
                 complete_order(folder,order)
                 emit('manual_completed',order_id=order['id'],reason='Ziel-SOC erreicht',soc=snapshot['soc'])
-                c['_orders']=load_orders(folder,c['expected_serial'],now)
+                c['_orders']=[r for r in load_orders(folder,c['expected_serial'],now) if r['kind'] in ('hold','charge')]
             eligible, reason, slot = decide(c, snapshot, prices, now)
             from dispatch import plan as discharge_plan
             dispatch=discharge_plan({**c,'charge_power_w':min(c['charge_power_w'],snapshot.get('max_charge_power_w',c['charge_power_w']))},prices,now,snapshot['soc'],c.get('_hold_until')) if not c.get('_manual') and not c.get('_orders_only') else None

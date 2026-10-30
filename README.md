@@ -930,3 +930,27 @@ Die Historie liest ausschließlich die bestehende Diagnose-Datenbank über `/api
 Der zusätzliche PV-Sicherheitspuffer beträgt standardmäßig 10 % (einstellbar von 0 bis 30 % unter PV-Prognose). Er reduziert die bereits mit dem Prognose-Anteil angepasste Erzeugung für den gesamten Planungshorizont. Bei 0,7 Prognose-Anteil und 10 % Zusatzpuffer werden 63 % angerechnet, nicht zweimal 30 % abgezogen. 0 % stellt das bisherige Verhalten wieder her. Der Prognosecache wird bei Änderungen neu aufgebaut; die Preis- und SOC-Grenzen bleiben bestehen. Dies ist eine konservativere Annahme, keine Garantie gegen Wetterabweichungen.
 
 Der Tagesplan zeigt nur die zeitproportionale Farbleiste und fünf Zeitmarken. Maus, Tastaturfokus oder Antippen öffnen die Zeit-/Aktionsdetails. Diagramme reagieren auf Mausbewegungen und kurze Touch-Taps; Wischgesten scrollen nativ und wählen keinen neuen Wert. Ausgewählte Werte erscheinen in Symbol-Bubbles mit zugänglichen Bezeichnungen.
+
+
+### Zusatzverbrauch und Urlaub unter Manuell
+
+Neben Entladesperren und Ladeaufträgen können zusätzliche Verbräuche als kWh
+über ein Zeitfenster eingetragen werden: einmalig, täglich oder wöchentlich an
+ausgewählten Wochentagen. Die kWh werden gleichmäßig auf das Fenster verteilt;
+überlappende Verbräuche addieren sich. Smart berücksichtigt diese Last zusätzlich
+zur Grundlast in seiner Lade- und Entladeplanung. Ein Verbrauchseintrag steuert
+das Haushaltsgerät selbst nicht.
+
+Urlaub setzt alle Zusatzverbräuche im gewählten Zeitraum aus, auch einmalige.
+Bei teilweiser Überlappung entfällt nur der betroffene Anteil. Grundlast und
+explizite Ladeaufträge/Entladesperren bleiben gültig.
+Die chronologische Liste zeigt pro Routine die nächsten zwei Termine.
+Bearbeiten/Entfernen betrifft jeweils die gesamte Routine.
+
+Der bisherige Abendverbrauch wird beim ersten Start einmalig als tägliche
+Routine übernommen; seine alten Einstellungsfelder entfallen. Wiederholungen
+verwenden die beim Anlegen gespeicherte lokale Zeitzone. Bei Zeitumstellung
+bleibt die Energie pro Termin gleich; nicht existierende Uhrzeiten werden
+ausgelassen, doppelte Uhrzeiten verwenden das erste Vorkommen.
+Verbrauchsempfehlungen für das alte feste Abendfenster entfallen; die
+Grundlastauswertung schließt geplante Zusatzverbrauchsfenster aus.

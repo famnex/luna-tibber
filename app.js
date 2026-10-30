@@ -117,6 +117,7 @@ function fillSettings(s,secrets){
  settingsBaseline={...s};const box=$('fields');box.replaceChildren();const sections={};
  const group=k=>k==='battery_floor_soc'?'Gerätegrenze für die Berechnung':k.startsWith('pv_')?'PV-Prognose':['host','port','unit_id','expected_serial','username','password','wifi_enabled'].includes(k)?'Wechselrichter & Verbindung':k.startsWith('tibber')?'Tibber-Zugang':['target_soc','charge_power_w','max_session_minutes','battery_capacity_kwh'].includes(k)?'Ladegrenzen':['morning_buffer_pct','diagnosis_tolerance_pct','battery_idle_w','smart_discharge_enabled','base_load_w','extra_load_kwh','extra_load_start_hour','extra_load_end_hour'].includes(k)?'Smart-Entladung & Bedarf':['statistics_enabled','push_contact'].includes(k)?'Statistik & Benachrichtigungen':'Preise, Vergleich & Zeitzone';
  for(const [key,label] of Object.entries(labels)){
+  if(key.startsWith('extra_load_'))continue;
   const field=document.createElement('div');field.className='setting-field';
   const heading=document.createElement('div');heading.className='setting-heading';
   const l=document.createElement('label');l.textContent=label;l.htmlFor='setting-'+key;
@@ -273,7 +274,7 @@ function phaseInfo(d,now=Date.now()){
  const charge=manual.find(o=>o.kind==='charge'),hold=manual.find(o=>o.kind==='hold');
  if(charge)return [loading?'↗ Manuell · Lade …':'⌛ Manueller Ladeauftrag · Bestätigung abwarten',charge.end_kind==='soc'?`■ ${charge.target_soc} % · spätestens ${fmt(charge.end)}`:`■ Stopp um ${fmt(charge.end)}`];
  if(hold){const status=d.discharge?.status;const confirmed=status?.locked&&status.source==='manual'&&now-Date.parse(status.time)<90000;return [confirmed?'🔒 Manuelle Entladesperre bestätigt':'⌛ Entladesperre angefordert',hold.end?'Freigabe um '+fmt(hold.end):'Bis auf Widerruf'];}
- if(d.mode==='off'){const next=(d.manual_orders||[]).find(o=>Date.parse(o.start)>now);return ['○ Aus · Smart deaktiviert',next?'◷ Nächster manueller Eingriff '+fmt(next.start):'Kein manueller Eingriff aktiv'];}
+ if(d.mode==='off'){const next=(d.manual_occurrences||d.manual_orders||[]).find(o=>Date.parse(o.start)>now);return ['○ Aus · Smart deaktiviert',next?'◷ Nächster manueller Eingriff '+fmt(next.start):'Kein manueller Eingriff aktiv'];}
  if(d.mode==='planned'&&d.planned){
   const p=d.planned;
   if(now>=Date.parse(p.end))return ['⌛ Auftrag beendet · Stopp wird bestätigt','Automatischer Wechsel zu Aus'];

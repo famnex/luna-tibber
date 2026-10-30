@@ -31,11 +31,11 @@ def load(folder, serial=None, now=None):
         if data.get('rows'):raise ValueError('Manuelle Aufträge gehören zu einer anderen Wechselrichter-Seriennummer')
         return []
     done=folder/'manual-completed'
-    return sorted([r for r in data['rows'] if (not r.get('end') or stamp(r['end'])>now) and not (done/r['token']).exists()],key=lambda r:r['start'])
+    return sorted([r for r in data['rows'] if (r.get('repeat','once')!='once' or not r.get('end') or stamp(r['end'])>now) and not (done/r['token']).exists()],key=lambda r:r['start'])
 
 
 def active(rows, now, kind=None):
-    return next((r for r in rows if (kind is None or r['kind']==kind) and stamp(r['start'])<=now and (not r.get('end') or now<stamp(r['end']))),None)
+    return next((r for r in rows if (r['kind'] in ('hold','charge') if kind is None else r['kind']==kind) and stamp(r['start'])<=now and (not r.get('end') or now<stamp(r['end']))),None)
 
 
 def complete(folder, order):
@@ -47,6 +47,12 @@ def complete(folder, order):
 def upsert(rows, data, c, now=None):
     now=now or datetime.now(timezone.utc)
     kind=data.get('kind');end_kind=data.get('end_kind')
+    if kind in ('consumption','holiday'):
+        from consumption import validate
+        ident=data.get('id')
+        if ident and not any(r['id']==ident for r in rows):raise ValueError('Eintrag nicht mehr vorhanden')
+        if len(rows)>=50 and not ident:raise ValueError('Maximal 50 Einträge')
+        return sorted([r for r in rows if r['id']!=ident]+[validate(data,c,now)],key=lambda r:r['start'])
     if kind not in ('hold','charge'):raise ValueError('Entladesperre oder Ladeauftrag wählen')
     if end_kind not in (('time','forever') if kind=='hold' else ('time','soc')):raise ValueError('Ungültige Endbedingung')
     ident=data.get('id')
@@ -95,6 +101,6 @@ def expire(folder, now=None):
     if not path.exists():return []
     expired=[]
     for order in json.loads(path.read_text())['rows']:
-        if order.get('end') and stamp(order['end'])<=now and not (folder/'manual-completed'/order['token']).exists():
+        if order.get('repeat','once')=='once' and order.get('end') and stamp(order['end'])<=now and not (folder/'manual-completed'/order['token']).exists():
             complete(folder,order);expired.append(order)
     return expired

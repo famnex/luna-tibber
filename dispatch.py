@@ -22,15 +22,18 @@ def demand_rows(c,prices,start,end):
     extra_b=(midnight+timedelta(hours=c.get('extra_load_end_hour',19))).astimezone(timezone.utc)
     hours=(extra_b-extra_a).total_seconds()/3600
     extra_kw=c.get('extra_load_kwh',0)/hours if hours>0 else 0
+    from consumption import intervals
+    extras=intervals(c.get('_consumption_rules',[]),start,end)
+    if '_consumption_rules' in c:extra_kw=0
     from pv import rows_for,power
     solar=rows_for(c,start,end)
     rows=[]
     for p in prices:
         a,b=max(start,p['start']),min(end,p['end'])
         if b<=a:continue
-        edges=sorted({a,b,*[t for t in (extra_a,extra_b,*[r["start"] for r in solar],*[r["end"] for r in solar]) if a<t<b]})
+        edges=sorted({a,b,*[t for t in (extra_a,extra_b,*[t for x in extras for t in (x["start"],x["end"])],*[r["start"] for r in solar],*[r["end"] for r in solar]) if a<t<b]})
         for left,right in zip(edges,edges[1:]):
-            kw=c['base_load_w']/1000+(extra_kw if extra_a<=left<extra_b else 0)
+            kw=c['base_load_w']/1000+(extra_kw if extra_a<=left<extra_b else 0)+sum(x['kw'] for x in extras if x['start']<=left<x['end'])
             pv_kw=power(solar,left,right)
             rows.append({**p,'start':left,'end':right,'gross_load_kw':kw,'pv_kw':pv_kw,'load_kw':max(0,kw-pv_kw)})
     return sorted(rows,key=lambda p:p['start'])

@@ -11,3 +11,17 @@ $('orderkind').value='charge';ctx.orderFields();assert.equal($('orderendkind').v
 $('orderendkind').value='soc';ctx.orderFields();assert.equal($('ordersocwrap').hidden,false);assert.equal($('orderend').required,false);
 const html=fs.readFileSync('web.html','utf8');assert.deepEqual([...html.matchAll(/data-mode="([^"]+)"/g)].map(x=>x[1]),['off','smart']);
 (async()=>{await $('orderform').onsubmit({preventDefault(){},submitter:new El()});assert.equal(calls[0][0],'manual-save');assert.equal($('orderdialog').open,false);console.log('Manual UI: persistent list, editor, end conditions, save, two-mode selector passed');})();
+
+$('orderkind').value='consumption';$('orderrepeat').value='weekly';ctx.orderFields();
+assert.equal($('consumptionfields').hidden,false);assert.equal($('orderweekdays').hidden,false);
+assert.equal($('orderstart').required,true);assert.equal($('orderendkindwrap').hidden,true);
+$('orderkind').value='holiday';ctx.orderFields();assert.equal($('consumptionfields').hidden,true);
+assert.match($('orderhelp').textContent,/Ladeaufträge und Sperren bleiben gültig/);
+const routine={id:'routine',kind:'consumption',name:'Kochen',start:'2026-10-29T17:00:00Z',end:'2026-10-29T19:00:00Z',kwh:2,repeat:'weekly',weekdays:[0,4],end_kind:'time'};
+const occurrences=[0,1].map(i=>({...routine,start:'2026-11-0'+(2+i*4)+'T17:00:00Z',recurring:true}));
+ctx.renderManualOrders({...d,manual_orders:[routine],manual_occurrences:occurrences});
+assert.equal($('orderlist').children.length,2);
+assert.match($('orderlist').children[0].children[2].textContent,/weitere Wiederholungen/);
+$('orderlist').children[1].children[3].children[0].onclick();
+assert.equal($('orderstart').value,'2026-10-29T18:00');assert.equal($('orderday4').checked,true);
+console.log('Consumption UI: recurrence, holiday semantics, next two occurrences and master editing passed');

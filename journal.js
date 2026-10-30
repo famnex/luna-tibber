@@ -170,7 +170,7 @@ function renderDiagnosis(box,d){
  box.replaceChildren();const el=diagnosisElement;
  box.append(el('p',`${d.valid_samples} Messungen · ${d.invalid_samples} ungültig · Toleranz ±${d.tolerance_pct} %`,'diag-quality'));
  const cards=el('div',undefined,'diag-grid');box.append(cards);
- for(const [key,title] of [['house','⌂ Hausverbrauch'],['evening','◷ Abendfenster'],['pv','☀ PV-Erzeugung']]){
+ for(const [key,title] of [['house','⌂ Hausverbrauch'],['evening','◷ Zusatzverbrauchsfenster'],['pv','☀ PV-Erzeugung']]){
   const v=d.totals[key],card=el('article',undefined,'diag-metric');card.append(el('h3',title));cards.append(card);
   if(!v.hours){card.append(el('p','Noch keine Vergleichsdaten','muted'));continue;}
   card.append(el('strong',journalNumber(v.actual_kwh,' kWh'),'diag-value'),el('p','≈ Messung · '+journalNumber(v.planned_kwh,' kWh Prognose')));

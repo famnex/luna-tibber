@@ -173,6 +173,8 @@ class Dashboard:
         (self.folder/'manual-suspended.json').unlink(missing_ok=True)
         from manual import migrate
         migrate(self.folder,self.config()['expected_serial'])
+        from consumption import migrate as migrate_consumption
+        migrate_consumption(self.folder,self.config())
         self.audit_event({'event':'service_started'})
         if start_worker:
             threading.Thread(target=self.worker,daemon=True).start()
@@ -183,7 +185,10 @@ class Dashboard:
 
     def config(self):
         c = {**luna.DEFAULT, **read(self.config_path,{})}
-        return luna.validate(c)
+        c=luna.validate(c)
+        from manual import load as load_orders
+        if (self.folder/'manual-orders.json').exists():c['_consumption_rules']=[r for r in load_orders(self.folder,c['expected_serial']) if r['kind'] in ('consumption','holiday')]
+        return c
     def preflight(self, c, commissioning=True):
         missing = [label for key,label in [('expected_serial','Seriennummer (Gerät auslesen und übernehmen)'),('password','Huawei-Installateurpasswort')] if not c[key]]
         if missing:
@@ -290,6 +295,9 @@ class Dashboard:
     def save_settings(self, patch):
         old_prices=self.config()
         allowed = set(luna.DEFAULT)-{'mode'}
+        if any(k.startswith('extra_load_') for k in patch):
+            # Legacy fields remain readable for old exports, but cannot add hidden demand.
+            patch={k:v for k,v in patch.items() if not k.startswith('extra_load_')}
         if not set(patch) <= allowed:
             raise ValueError('Unbekannte Einstellung')
         c = self.config()
@@ -307,7 +315,7 @@ class Dashboard:
         request=read(self.folder/'discharge-request.json',{})
         hold=request.get('until') and datetime.fromisoformat(request['until'])>datetime.now(timezone.utc)
         from manual import load as load_orders
-        if changed & luna.CONNECTION_KEYS and (load_orders(self.folder,old_serial) or self.proc or self.mode!='off' or hold or
+        if changed & luna.CONNECTION_KEYS and (any(r['kind'] in ('hold','charge') for r in load_orders(self.folder,old_serial)) or self.proc or self.mode!='off' or hold or
                 any((self.folder/n).exists() for n in ('discharge-restore.json','pending-charge.json'))):
             raise ValueError('Nur Geräteverbindung/Zugang benötigen Aus und bestätigte Freigabe; andere Einstellungen sind im Betrieb änderbar')
         with (self.folder/'controller.lock').open('w') as f:
@@ -318,9 +326,12 @@ class Dashboard:
                     fcntl.flock(f,fcntl.LOCK_EX|fcntl.LOCK_NB)
                 except BlockingIOError:
                     raise ValueError('Ein externer CLI-/Ladedienst läuft; zuerst beenden') from None
-            luna.write_json(self.config_path,c)
+            luna.write_json(self.config_path,{k:v for k,v in c.items() if not k.startswith('_')})
             if c['expected_serial'] != old_serial:
                 (self.folder/'commissioned.json').unlink(missing_ok=True)
+                if (self.folder/'manual-orders.json').exists():
+                    saved=read(self.folder/'manual-orders.json',{});saved['serial']=c['expected_serial']
+                    luna.write_json(self.folder/'manual-orders.json',saved)
         if any(c[k]!=old_prices[k] for k in c if k.startswith('pv_')):self.price_at=0
         if any(c[k]!=old_prices[k] for k in ('tibber_token','tibber_home_id')):
             self.price_at = 0
@@ -397,13 +408,14 @@ class Dashboard:
                 self.alert('test','✓ LUNA · Push bereit','Wichtige Meldungen erreichen dieses Gerät.',cooldown=60)
             elif name in ('manual-save','manual-delete'):
                 from manual import load, upsert
-                c=self.config();self.preflight(c)
+                c=self.config()
+                if data.get('kind') not in ('consumption','holiday') and name=='manual-save':self.preflight(c)
                 rows=load(self.folder,c['expected_serial'])
                 if name=='manual-save':rows=upsert(rows,data,c)
                 else:
                     if not any(r['id']==data.get('id') for r in rows):raise ValueError('Auftrag nicht mehr vorhanden')
                     rows=[r for r in rows if r['id']!=data['id']]
-                luna.write_json(self.folder/'manual-orders.json',{'serial':c['expected_serial'],'rows':rows})
+                luna.write_json(self.folder/'manual-orders.json',{**read(self.folder/'manual-orders.json',{}),'serial':c['expected_serial'],'rows':rows})
                 self.fault='';self.discharge_at=-30
                 self.audit_event({'event':'manual_changed','action':name,'orders':rows})
             elif name == 'discharge':
@@ -607,7 +619,7 @@ class Dashboard:
     def snapshot(self):
         with self.lock:
             c = self.config()
-            settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc')}
+            settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')}
             missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
             prices = self.price_data
             now = datetime.now(timezone.utc)
@@ -618,7 +630,8 @@ class Dashboard:
             prior=read(self.folder/'discharge-status.json',{})
             c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
             from manual import load as load_orders
-            c['_orders']=load_orders(self.folder,c['expected_serial'],now)
+            all_orders=load_orders(self.folder,c['expected_serial'],now)
+            c['_orders']=[r for r in all_orders if r['kind'] in ('hold','charge')]
             if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
             preview=smart_preview(c,prices,now,self.telemetry,hold_until)
             from smart import planned_economics
@@ -627,7 +640,7 @@ class Dashboard:
             dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
             current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
             wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'manual_orders':c['_orders'],'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
+            return {'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
