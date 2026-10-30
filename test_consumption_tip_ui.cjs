@@ -2,7 +2,7 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
 class El{constructor(){this.value='';this.hidden=false;this.options=[];this.children=[];this.dataset={};}replaceChildren(){this.children=[];}append(...x){this.children.push(...x);}}
 const nodes={};const $=id=>nodes[id]??=new El();
 let resolveRequest;
-const ctx={document:{createElement:()=>new El()},$,Intl,Date,Number,AbortController,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
+const ctx={document:{createElement:()=>new El()},$,Intl,Date,Number,AbortController,setInterval:()=>1,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
 fetch:()=>new Promise(resolve=>{resolveRequest=resolve;})};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('manual-ui.js','utf8'),ctx);
 $('orderkind').value='consumption';$('orderrepeat').value='once';

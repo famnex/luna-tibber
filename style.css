@@ -134,3 +134,9 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 @media(max-width:480px){.tip-choice{align-items:flex-start;flex-wrap:wrap}.stats-tabs button{padding:10px 8px}}
 
 .bottomnav{grid-template-columns:repeat(5,minmax(0,1fr))}
+
+.template-toolbar{display:flex;gap:8px;align-items:flex-end}.template-toolbar>label{flex:1;min-width:0}.template-icons{display:flex;gap:4px;padding-bottom:12px}.template-icons button{padding:6px;min-width:36px;width:36px;min-height:36px;height:36px;font-size:20px}
+#consumptionfields hr{border:0;border-top:1px solid var(--line,#dce5dd);margin:12px 0 18px}
+#orderdialog[data-kind=consumption] .order-details{grid-template-columns:1fr}
+#orderdialog:not([data-kind=consumption]) #orderendwrap{order:-1}
+#orderweekdays{grid-column:1/-1}

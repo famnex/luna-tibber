@@ -988,5 +988,21 @@ Verbrauchsvorlagen speichern Name, Dauer und kWh in consumption-templates.json.
 Im Eingriff-Dialog: Vorlage auswählen oder Werte eingeben, dann neu speichern,
 ausgewählte Vorlage ändern oder löschen. Bereits angelegte Eingriffe sind Kopien
 und bleiben bei Vorlagenänderungen unverändert. Die Preisvorschläge zeigen
-günstige Optionen aus bis zu vier Tagesabschnitten samt Gesamtkosten, Differenz
+günstige Optionen mit Jetzt-Start, günstigstem Termin und zeitlich getrennten Alternativen samt Gesamtkosten, Differenz
 zur Eingabe und Mehrkosten gegenüber dem günstigsten bekannten Termin.
+
+
+Der Verbrauchsdialog zeigt oben die Vorlage mit kompakten, beschrifteten
+Symbolbuttons (Neu speichern / Ändern / Löschen). Unter einer Trennlinie folgen
+Name, Energie, Verbrauch ab und Wiederholung; darunter Dauer und weitere Optionen.
+Die Vorschläge enthalten den Jetzt-Start (sofern vollständig bepreist), den
+günstigsten Start sowie nach Möglichkeit einen Termin dazwischen und einen danach.
+Ist Jetzt schon am günstigsten, werden stattdessen spätere Alternativen angeboten.
+Kurze Resttage oder Preislücken können die Auswahl verkleinern.
+
+Im geöffneten Verbrauchsentwurf folgt ein vergangener Beginn der aktuellen
+Serverzeit, minutengenau angezeigt. Ein zukünftiger Beginn bleibt bis zum
+Erreichen unverändert. Beim Bearbeiten des Datumsfelds wird die Eingabe nicht
+überschrieben; beim Verlassen oder Speichern wird sie abgeglichen. Gespeicherte
+Aufträge werden nicht verschoben. Die Vorschläge werden im sichtbaren Dialog
+höchstens beim Minutenwechsel oder bei Eingaben neu berechnet, ohne Geräteabfragen.

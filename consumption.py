@@ -134,16 +134,35 @@ def price_tip(data,c,prices,now=None,rules=()):
         value=cost(x)
         if value is not None:options.append((value,abs((x-a).total_seconds()),x))
     best=min(options,default=(current,0,a));saving=current-best[0]
-    # One cheapest option per six-hour part of the day, plus global best.
-    buckets={}
-    for option in options:
-        key=option[2].astimezone(zone).hour//6
-        if key not in buckets or option<buckets[key]:buckets[key]=option
-    selected={best[2]:best}
-    selected.update({o[2]:o for o in buckets.values()})
+    # Always include the earliest available start and global cheapest start.
+    # Pick well-separated alternatives near the middle and after the cheapest.
+    first=next((o for o in options if o[2]==left),None)
+    first=first or min(options,key=lambda o:o[2],default=best)
+    selected={first[2]:(first,'now' if first[2]==now else 'earliest'),best[2]:(best,'best')}
+    if first[2]==best[2]:selected[first[2]]=(first,'now' if first[2]==now else 'earliest')
+    spacing=timedelta(hours=1)
+    def alternative(lo,hi,role):
+        pool=[o for o in options if lo<=o[2]<=hi and all(abs(o[2]-x)>=spacing for x in selected)]
+        if not pool:return
+        middle=lo+(hi-lo)/2
+        option=min(pool,key=lambda o:(abs(o[2]-middle),o[0]))
+        selected[option[2]]=(option,role)
+    if best[2]-first[2]>=2*spacing:
+        alternative(first[2]+spacing,best[2]-spacing,'between')
+    last=max((o[2] for o in options),default=best[2])
+    if best[2]==first[2]:
+        # Cheap now: two useful later alternatives instead of duplicate starts.
+        span=last-first[2]
+        alternative(first[2]+spacing,first[2]+span*0.6,'later')
+        alternative(first[2]+span*0.6,last,'later')
+    else:
+        alternative(best[2]+spacing,last,'later')
+        if len(selected)<4 and best[2]-first[2]<2*spacing:
+            alternative(best[2]+spacing,last,'later')
     suggestions=[{'start':x.isoformat(),'end':(x+duration).isoformat(),'cost_eur':round(value,4),
                   'saving_eur':round(current-value,4),'extra_eur':round(value-best[0],4),
-                  'cheapest':abs(value-best[0])<0.000001} for value,_,x in sorted(selected.values(),key=lambda o:o[2])]
+                  'role':role,'cheapest':abs(value-best[0])<0.000001}
+                 for (value,_,x),role in sorted(selected.values(),key=lambda pair:pair[0][2])]
 
     return {'state':'better' if saving>=0.01 else 'good','start':best[2].isoformat(),'end':(best[2]+duration).isoformat(),
             'suggestions':suggestions,'current_eur':round(current,4),'alternative_eur':round(best[0],4),'saving_eur':round(max(0,saving),4),

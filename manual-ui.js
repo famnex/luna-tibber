@@ -1,11 +1,13 @@
 /* Manual interventions are independent of the automatic mode. */
-let editingOrder=null;
+let editingOrder=null,manualClockOffset=0;
 function orderLocal(iso){
  const parts=new Intl.DateTimeFormat('sv-SE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).format(new Date(iso));
  return parts.replace(' ','T');
 }
 function orderFields(){
  const type=$('orderkind').value,hold=type==='hold',extra=type==='consumption'||type==='holiday',kind=$('orderendkind');
+ $('orderdialog').dataset.kind=type;
+ $('orderenergywrap').hidden=type!=='consumption';$('orderrepeatwrap').hidden=type!=='consumption';
  if(extra)kind.value='time';
  $('ordernamewrap').hidden=!extra;$('consumptionfields').hidden=type!=='consumption';
  $('orderendkindwrap').hidden=extra;$('orderstart').required=extra;
@@ -24,21 +26,23 @@ function editOrder(order=null){
  editingOrder=order?.id||null;$('ordertemplate').value='';$('templatenotice').textContent='';renderConsumptionTemplates(lastStatus);$('ordernotice').textContent='';
  $('ordername').value=order?.name||'';$('orderrepeat').value=order?.repeat||'once';$('orderkwh').value=order?.kwh||1.5;
  for(let i=0;i<7;i++)$('orderday'+i).checked=(order?.weekdays||[]).includes(i);
- $('orderkind').value=order?.kind||'hold';$('orderstart').value=order?orderLocal(order.start):orderLocal(Date.now());
+ $('orderkind').value=order?.kind||'hold';$('orderstart').value=order?orderLocal(order.start):orderLocal(Date.now()+manualClockOffset);
  setOrderDuration(order?.end?Math.max(1,Math.round((Date.parse(order.end)-Date.parse(order.start))/60000)):60);
- $('orderendkind').value=order?.end_kind||'time';$('orderend').value=order?.end?orderLocal(order.end):orderLocal(Date.now()+3600000);
+ $('orderendkind').value=order?.end_kind||'time';$('orderend').value=order?.end?orderLocal(order.end):orderLocal(Date.now()+manualClockOffset+3600000);
  $('ordersoc').value=order?.target_soc||lastStatus?.settings.target_soc||80;
- $('ordertitle').textContent=order?'Eingriff bearbeiten':'Eingriff hinzufügen';orderFields();$('orderdialog').showModal();
+ $('ordertitle').textContent=order?'Eingriff bearbeiten':'Eingriff hinzufügen';orderFields();$('orderdialog').showModal();updateConsumptionClock();
 }
 $('orderadd').onclick=()=>editOrder();$('ordercancel').onclick=()=>{clearTimeout(tipTimer);tipRevision++;$('orderdialog').close();};
-$('orderkind').onchange=()=>{if(['consumption','holiday'].includes($('orderkind').value)&&!$('orderstart').value)$('orderstart').value=orderLocal(Date.now());orderFields();};$('orderendkind').onchange=orderFields;$('orderrepeat').onchange=orderFields;
+$('orderkind').onchange=()=>{if(['consumption','holiday'].includes($('orderkind').value)&&!$('orderstart').value)$('orderstart').value=orderLocal(Date.now()+manualClockOffset);orderFields();};$('orderendkind').onchange=orderFields;$('orderrepeat').onchange=orderFields;
 $('orderform').onsubmit=async e=>{
  e.preventDefault();
+ syncConsumptionStart(true);
  const data={id:editingOrder,kind:$('orderkind').value,start:$('orderstart').value,end_kind:$('orderendkind').value,end:$('orderend').value,duration_minutes:orderDuration(),target_soc:Number($('ordersoc').value),name:$('ordername').value,kwh:Number($('orderkwh').value),repeat:$('orderrepeat').value,weekdays:Array.from({length:7},(_,i)=>i).filter(i=>$('orderday'+i).checked)};
  if(await perform('manual-save',data,e.submitter))$('orderdialog').close();
  else $('ordernotice').textContent=$('notice').textContent||'Speichern fehlgeschlagen; bitte erneut versuchen.';
 };
 function renderManualOrders(d){
+ if(d.server_time)manualClockOffset=Date.parse(d.server_time)-Date.now();
  renderConsumptionTemplates(d);
  const root=$('orderlist');if(!root)return;
  const now=Date.parse(d.server_time||new Date().toISOString());
@@ -120,7 +124,7 @@ async function loadConsumptionTip(data,revision){
   for(const option of tip.suggestions||[]){
    const row=document.createElement('div');row.className='tip-choice';
    const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');
-   heading.textContent=fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?' ★ Günstigstes':'');
+   heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?' ★ Günstigstes':'');
    detail.className='muted';detail.textContent=(option.saving_eur>=0?'− '+money(option.saving_eur):'+ '+money(-option.saving_eur))+' gegenüber deiner Eingabe'+(!option.cheapest?' · + '+money(option.extra_eur)+' zum günstigsten Termin':'');
    info.append(heading,detail);const button=document.createElement('button');button.type='button';button.textContent='Übernehmen';
    button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(option.start);setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
@@ -130,3 +134,26 @@ async function loadConsumptionTip(data,revision){
  finally{clearTimeout(timeout);}
 }
 for(const id of ['orderstart','orderduration','orderdurationunit','orderkwh'])$(id).oninput=scheduleConsumptionTip;
+
+
+// Only the open draft follows the clock; saved orders/routines are never moved.
+function syncConsumptionStart(force=false){
+ if($('orderkind').value!=='consumption'||(!$('orderdialog').open&&!force))return false;
+ const input=$('orderstart'),now=orderLocal(Date.now()+manualClockOffset);
+ if(!force&&document.activeElement===input)return false;
+ if(input.value&&input.value<now){input.value=now;return true;}
+ return false;
+}
+let lastTipMinute='';
+function updateConsumptionClock(){
+ if(document.hidden||!$('orderdialog').open)return;
+ const changed=syncConsumptionStart();
+ const minute=orderLocal(Date.now()+manualClockOffset);
+ if(changed||minute!==lastTipMinute){
+  lastTipMinute=minute;
+  if($('orderkind').value==='consumption'&&$('orderrepeat').value==='once')scheduleConsumptionTip();
+ }
+}
+$('orderstart').onblur=()=>{syncConsumptionStart(true);scheduleConsumptionTip();};
+setInterval(updateConsumptionClock,1000);
+document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)updateConsumptionClock();});

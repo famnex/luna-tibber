@@ -135,3 +135,30 @@ class DurationTemplateTests(unittest.TestCase):
   rows=manual.upsert([],data,self.c,self.now)
   self.assertEqual(consumption.stamp(rows[0]['end'])-consumption.stamp(rows[0]['start']),timedelta(hours=1))
   with self.assertRaisesRegex(ValueError,'Überschneidung'):manual.upsert(rows,data,self.c,self.now)
+
+class DistributedTipTests(unittest.TestCase):
+ def setUp(self):
+  self.now=datetime(2026,10,30,8,7,tzinfo=timezone.utc)
+  self.c={**luna.DEFAULT,'timezone':'Europe/Berlin'}
+  self.data={'start':'2026-10-30T09:07','duration_minutes':60,'kwh':1}
+  self.prices=[{'start':self.now.replace(hour=0,minute=0)+timedelta(hours=i),'end':self.now.replace(hour=0,minute=0)+timedelta(hours=i+1),'ct':10 if i==16 else 30} for i in range(24)]
+ def test_now_best_middle_and_later_separated(self):
+  tip=consumption.price_tip(self.data,self.c,self.prices,self.now)
+  xs=tip['suggestions']
+  self.assertEqual(consumption.stamp(xs[0]['start']),self.now)
+  self.assertEqual(xs[0]['role'],'now')
+  self.assertTrue(any(x['cheapest'] and consumption.stamp(x['start']).hour==16 for x in xs))
+  self.assertEqual({x['role'] for x in xs},{'now','best','between','later'})
+  for a,b in zip(xs,xs[1:]):self.assertGreaterEqual(consumption.stamp(b['start'])-consumption.stamp(a['start']),timedelta(hours=1))
+ def test_cheapest_now_is_not_duplicated(self):
+  tip=consumption.price_tip(self.data,self.c,[{**p,'ct':20} for p in self.prices],self.now)
+  xs=tip['suggestions']
+  self.assertEqual(xs[0]['role'],'now');self.assertTrue(xs[0]['cheapest'])
+  self.assertEqual(len({x['start'] for x in xs}),len(xs))
+  self.assertGreaterEqual(len(xs),2)
+ def test_late_day_does_not_invent_alternatives(self):
+  now=self.now.replace(hour=22,minute=30)
+  data={**self.data,'start':'2026-10-30T23:30','duration_minutes':15}
+  xs=consumption.price_tip(data,self.c,self.prices,now)['suggestions']
+  self.assertEqual(xs[0]['role'],'now')
+  self.assertTrue(all(consumption.stamp(x['end']).astimezone(consumption.ZoneInfo('Europe/Berlin')).date()==now.astimezone(consumption.ZoneInfo('Europe/Berlin')).date() for x in xs))
