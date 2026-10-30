@@ -836,7 +836,7 @@ Entladesperre benutzt werden. Zuerst werden Repository-Voraussetzungen geprüft,
 dann die Steuerung auf Aus gesetzt und eine manuelle Entladesperre aufgehoben.
 Stopp und Wiederherstellung der bisherigen Entladeleistung müssen bestätigt sein,
 bevor der Updater startet. Währenddessen sind weitere Steuerbefehle und Messabfragen
-gesperrt. Bei einem Fehler wird nicht installiert. Nach dem Update bleibt Aus;
+gesperrt. Bei einem Fehler wird nicht installiert. Nach erfolgreichem Update wird zuvor aktives Smart wieder aufgenommen;
 Smart muss bewusst wieder eingeschaltet werden. Die vorherige Sperre wird nicht
 wieder aktiviert. Diese Funktion greift erst, nachdem diese Version installiert ist.
 
@@ -944,7 +944,7 @@ das Haushaltsgerät selbst nicht.
 Urlaub setzt alle Zusatzverbräuche im gewählten Zeitraum aus, auch einmalige.
 Bei teilweiser Überlappung entfällt nur der betroffene Anteil. Grundlast und
 explizite Ladeaufträge/Entladesperren bleiben gültig.
-Die chronologische Liste zeigt pro Routine die nächsten zwei Termine.
+Die chronologische Liste zeigt pro Routine den aktuellen oder nächsten Termin.
 Bearbeiten/Entfernen betrifft jeweils die gesamte Routine.
 
 Der bisherige Abendverbrauch wird beim ersten Start einmalig als tägliche
@@ -963,3 +963,9 @@ nicht geschätzt. Ein Vorschlag ab einem Cent Unterschied lässt sich ausdrückl
 in den Entwurf übernehmen und anschließend speichern. Die Eurobeträge gelten
 bei vollständigem Netzbezug; PV und Akku sind in diesem Hinweis nicht enthalten.
 Zusatzverbräuche können im Feld „Name / Bezeichnung“ frei benannt werden.
+
+Nach einem über die App gestarteten erfolgreichen Update (auch „bereits aktuell“)
+wird Smart einmalig wieder aktiviert, wenn es vorher aktiv war. Die Wiederaufnahme
+ist an genau diesen Update-Lauf und die Gerätezuordnung gebunden; die üblichen
+Zugangs-/Inbetriebnahmeprüfungen bleiben bestehen. Bei Fehler, Rollback oder einem
+gewöhnlichen Neustart erfolgt keine automatische Smart-Aktivierung.

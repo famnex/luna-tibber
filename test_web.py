@@ -118,6 +118,7 @@ class DashboardTests(unittest.TestCase):
             self.app.prepare_update()
             self.assertEqual([c.args[0][-2] for c in run.call_args_list],['stop','discharge-sync'])
             start.assert_called_once()
+            self.assertTrue(start.call_args.kwargs['resume_smart'])
         self.assertEqual(self.app.mode,'off');self.assertFalse(self.app.update_preparing)
         self.assertIsNone(web.read(self.folder/'discharge-request.json',{})['until'])
 
@@ -156,6 +157,37 @@ class DashboardTests(unittest.TestCase):
     def test_update_idle_needs_no_device_io(self):
         with patch('web.subprocess.run') as run,patch('web.updater.start') as start:
             self.app.prepare_update();run.assert_not_called();start.assert_called_once()
+
+    def test_successful_update_resumes_smart_once(self):
+        import time
+        self.app.save_settings({'expected_serial':'test','tibber_token':'token','battery_capacity_kwh':10})
+        luna.write_json(self.folder/'update-resume.json',{'token':'update1','serial':'test','created':time.time()})
+        with patch('web.updater.read_status',return_value={'state':'done','token':'update1'}),patch.object(self.app,'preflight'):
+            self.app.resume_after_update()
+            self.assertEqual(self.app.mode,'smart')
+            self.app.mode='off';self.app.resume_after_update()
+            self.assertEqual(self.app.mode,'off')
+        self.assertFalse((self.folder/'update-resume.json').exists())
+
+    def test_failed_mismatched_and_stale_update_never_resumes(self):
+        import time
+        for state,token,age in [('failed','update1',0),('done','other',0),('done','update1',7200)]:
+            luna.write_json(self.folder/'update-resume.json',{'token':'update1','serial':'test','created':time.time()-age})
+            with patch('web.updater.read_status',return_value={'state':state,'token':token}),patch.object(self.app,'preflight') as check:
+                self.app.resume_after_update()
+                check.assert_not_called();self.assertEqual(self.app.mode,'off')
+
+    def test_resume_waits_for_success_and_checks_device(self):
+        import time
+        path=self.folder/'update-resume.json'
+        luna.write_json(path,{'token':'update1','serial':'test','created':time.time()})
+        with patch('web.updater.read_status',return_value={'state':'restarting','token':'update1'}):
+            self.app.resume_after_update()
+        self.assertTrue(path.exists());self.assertEqual(self.app.mode,'off')
+        with patch('web.updater.read_status',return_value={'state':'current','token':'update1'}):
+            self.app.resume_after_update()
+        self.assertFalse(path.exists());self.assertEqual(self.app.mode,'off')
+        self.assertIn('Gerätezuordnung',self.app.fault)
 
     def test_update_blocks_controls_and_measurements(self):
         self.app.save_settings({})

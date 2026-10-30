@@ -344,6 +344,7 @@ class Dashboard:
         try:
             with self.lock:
                 c=self.config()
+                resume_smart=self.mode=='smart'
                 luna.write_json(self.folder/'manual-suspended.json',{'reason':'update'})
                 need_stop=self.mode!='off' or self.job in ('run','charge','charge-test','stop') or (self.folder/'pending-charge.json').exists()
                 request=read(self.folder/'discharge-request.json',{})
@@ -380,7 +381,7 @@ class Dashboard:
                 if any((self.folder/n).exists() for n in ('pending-charge.json','discharge-restore.json')):
                     raise ValueError('Update abgebrochen: Gerätebestätigung steht aus.')
                 self.update_progress={'state':'preparing','step':3,'message':'Update-Dienst starten …','at':time.time()}
-                updater.start(self.folder,**self.update_settings)
+                updater.start(self.folder,**self.update_settings,resume_smart=resume_smart,resume_serial=c['expected_serial'])
                 self.update_progress=None
         except Exception as exc:
             with self.lock:
@@ -448,6 +449,7 @@ class Dashboard:
                 mode = data['mode']
                 if mode not in MODES:
                     raise ValueError('Unbekannter Modus')
+                (self.folder/'update-resume.json').unlink(missing_ok=True)
                 if mode != 'off':
                     c = self.config()
                     self.preflight(c)
@@ -474,12 +476,34 @@ class Dashboard:
                     self.until = time.monotonic()+minutes*60 if mode == 'on' else None
             else:
                 raise ValueError('Unbekannte Aktion')
+    def resume_after_update(self):
+        path=self.folder/'update-resume.json'
+        if not path.exists():return
+        pending=read(path,{})
+        status=updater.read_status(self.folder)
+        if status.get('state') in updater.ACTIVE:return
+        path.unlink(missing_ok=True)  # Consume once; ordinary restarts never resume.
+        if (status.get('state') not in ('done','current') or not pending.get('token')
+                or status.get('token')!=pending['token'] or time.time()-pending.get('created',0)>3600):
+            return
+        try:
+            c=self.config()
+            if c['expected_serial']!=pending.get('serial'):raise ValueError('Gerätezuordnung hat sich geändert')
+            if self.fault:raise ValueError(self.fault)
+            self.preflight(c)
+            if c['battery_capacity_kwh']<=0 or not c['tibber_token']:raise ValueError('Smart-Einstellungen unvollständig')
+            self.mode='smart'
+            self.audit_event({'event':'smart_resumed','reason':'Nach erfolgreichem Update wieder aktiviert'})
+        except ValueError as exc:
+            self.mode='off';self.fault='Smart nach Update nicht aktiviert: '+str(exc)
+
     def worker(self):
         while not self.closed.wait(1):
             with self.lock:
                 try:
                     if self.update_preparing or updater.busy(self.folder):continue
                     (self.folder/'manual-suspended.json').unlink(missing_ok=True)
+                    self.resume_after_update()
                     if self.fault:continue
                     from manual import load as load_orders, active as active_order, expire
                     for expired in expire(self.folder):self.audit_event({'event':'manual_completed','order_id':expired['id'],'reason':'Zeitfenster abgelaufen'})

@@ -10,10 +10,17 @@ class ConsumptionTests(unittest.TestCase):
  def rule(self,**patch):
   return consumption.validate({'kind':'consumption','start':'2026-10-30T17:00','end':'2026-10-30T19:00','kwh':1.5,'repeat':'daily',**patch},self.c,self.now)
  def energy(self,rows):return sum(r['kw']*(r['end']-r['start']).total_seconds()/3600 for r in rows)
- def test_daily_energy_and_two_occurrences(self):
+ def test_daily_energy_and_one_occurrence(self):
   r=self.rule();xs=consumption.intervals([r],self.now,self.now+timedelta(days=3))
   self.assertAlmostEqual(self.energy(xs),4.5)
-  self.assertEqual(len(consumption.upcoming([r],self.now)),2)
+  self.assertEqual(len(consumption.upcoming([r],self.now)),1)
+ def test_current_occurrence_is_the_only_visible_one(self):
+  r=self.rule()
+  now=datetime(2026,10,30,17,tzinfo=timezone.utc)
+  rows=consumption.upcoming([r],now)
+  self.assertEqual(len(rows),1)
+  self.assertLess(consumption.stamp(rows[0]['start']),now)
+  self.assertGreater(consumption.stamp(rows[0]['end']),now)
  def test_weekdays_and_overnight(self):
   r=self.rule(start='2026-10-30T23:00',end='2026-10-31T01:00',repeat='weekly',weekdays=[0,4],kwh=2)
   xs=consumption.expand(r,self.now,self.now+timedelta(days=8))

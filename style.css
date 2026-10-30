@@ -123,3 +123,7 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 .manual-order{padding:1rem 0;border-bottom:1px solid var(--border,#dce5df)}.manual-order p{margin:.6rem 0}.manual-order .actions{gap:.5rem}#orderdialog{max-width: min(36rem,92vw);max-height:85dvh;overflow:auto}#orderdialog input,#orderdialog select{max-width:100%;box-sizing:border-box}#modecard .modes{grid-template-columns:repeat(2,1fr)}
 
 #orderweekdays{display:flex;flex-wrap:wrap;gap:.7rem}#orderweekdays[hidden]{display:none}#orderweekdays label{display:flex;gap:.3rem;align-items:center}#orderweekdays input{width:auto}
+
+/* Equal thin timeline bars; keep generous pointer/touch targets. */
+.interactive-strip button,.interactive-strip button:hover,.interactive-strip button:focus-visible{height:22px;min-height:0}
+.history-strip{height:22px}

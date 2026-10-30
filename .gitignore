@@ -55,3 +55,5 @@ meter-sample-at.json.tmp
 manual-orders.json*
 manual-completed/
 manual-suspended.json
+
+update-resume.json*

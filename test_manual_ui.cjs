@@ -18,10 +18,10 @@ assert.equal($('orderstart').required,true);assert.equal($('orderendkindwrap').h
 $('orderkind').value='holiday';ctx.orderFields();assert.equal($('consumptionfields').hidden,true);
 assert.match($('orderhelp').textContent,/Ladeaufträge und Sperren bleiben gültig/);
 const routine={id:'routine',kind:'consumption',name:'Kochen',start:'2026-10-29T17:00:00Z',end:'2026-10-29T19:00:00Z',kwh:2,repeat:'weekly',weekdays:[0,4],end_kind:'time'};
-const occurrences=[0,1].map(i=>({...routine,start:'2026-11-0'+(2+i*4)+'T17:00:00Z',recurring:true}));
+const occurrences=[0].map(i=>({...routine,start:'2026-11-0'+(2+i*4)+'T17:00:00Z',recurring:true}));
 ctx.renderManualOrders({...d,manual_orders:[routine],manual_occurrences:occurrences});
-assert.equal($('orderlist').children.length,2);
+assert.equal($('orderlist').children.length,1);
 assert.match($('orderlist').children[0].children[2].textContent,/weitere Wiederholungen/);
-$('orderlist').children[1].children[3].children[0].onclick();
+$('orderlist').children[0].children[3].children[0].onclick();
 assert.equal($('orderstart').value,'2026-10-29T18:00');assert.equal($('orderday4').checked,true);
-console.log('Consumption UI: recurrence, holiday semantics, next two occurrences and master editing passed');
+console.log('Consumption UI: recurrence, holiday semantics, one occurrence and master editing passed');

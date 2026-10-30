@@ -84,7 +84,7 @@ def inspect_repo(folder):
     return git(folder,'rev-parse','HEAD')
 
 
-def start(folder,port=8099,tls=False,old_pid=None):
+def start(folder,port=8099,tls=False,old_pid=None,resume_smart=False,resume_serial=None):
     if busy(folder):raise ValueError('Ein Update läuft bereits')
     if any(c in str(folder) for c in ('$', '%', '\n')):raise ValueError('Installationspfad für Systemdienst ungeeignet')
     try:
@@ -93,12 +93,18 @@ def start(folder,port=8099,tls=False,old_pid=None):
     except UpdateError as exc:raise ValueError(str(exc)) from None
     token=uuid.uuid4().hex;area=folder/'.updates';area.mkdir(mode=0o700,exist_ok=True)
     runner=area/f'runner-{token}.py';shutil.copyfile(Path(__file__),runner);os.chmod(runner,0o600)
+    resume=folder/'update-resume.json'
+    if resume_smart:
+        from luna import write_json
+        write_json(resume,{'token':token,'serial':resume_serial,'created':time.time()})
+    else:resume.unlink(missing_ok=True)
     write_status(folder,'queued','Update wird gestartet',token=token)
     command=['systemd-run','--user',f'--unit=luna-update-{token}','--collect','--property=Type=exec','--property=UMask=0077',
              sys.executable,str(runner),'--apply',str(folder),'--token',token,'--port',str(port),'--old-pid',str(old_pid or os.getpid())]
     if tls:command.append('--tls')
     try:run(command,folder,timeout=15)
     except UpdateError as exc:
+        resume.unlink(missing_ok=True)
         write_status(folder,'failed','Update-Dienst konnte nicht gestartet werden',token=token)
         raise ValueError('Update benötigt einen erreichbaren systemd-Benutzerdienst') from exc
 

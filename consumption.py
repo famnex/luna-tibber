@@ -72,7 +72,7 @@ def upcoming(rows,now):
     out=[]
     for row in rows:
         if row['kind']!='consumption':out.append(row);continue
-        items=expand(row,now,now+timedelta(days=15))[:2] if row.get('repeat','once')!='once' else [row]
+        items=expand(row,now,now+timedelta(days=15))[:1] if row.get('repeat','once')!='once' else [row]
         for item in items:
             a,b=stamp(item['start']),stamp(item['end'])
             excluded=any(h<b and j>a for h,j in holidays)
