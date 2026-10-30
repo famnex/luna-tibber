@@ -9,8 +9,31 @@ from price_cache import planning_end
 def unavailable(message):
     return {'state':'unavailable','basis':'dispatch','message':message,'suggestions':[]}
 
+def hourly_prices(prices, now):
+    """Time-weighted hourly estimates, never bridge missing price intervals."""
+    end=planning_end(prices,now)
+    if end is None:return prices
+    result=[];a=now
+    while a<end:
+        b=min(end,a.replace(minute=0,second=0,microsecond=0)+timedelta(hours=1))
+        cost=seconds=0.
+        for row in prices:
+            overlap=max(0,(min(b,row['end'])-max(a,row['start'])).total_seconds())
+            cost+=overlap*row['ct'];seconds+=overlap
+        if abs(seconds-(b-a).total_seconds())>.01:return prices
+        result.append({'start':a,'end':b,'ct':cost/seconds});a=b
+    return result
+
 def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
     now=now or datetime.now(timezone.utc)
+    hourly=c.get('_comparison_hourly',False)
+    if hourly:
+        prices=hourly_prices(prices,now)
+        from pv import rows_for,power
+        end=planning_end(prices,now)
+        solar=rows_for(c,now,end) if end else []
+        if solar:
+            c={**c,'_pv':{**c.get('_pv',{}),'rows':[{'start':r['start'],'end':r['end'],'kw':power(solar,r['start'],r['end'])} for r in prices]}}
     try:age=(now-datetime.fromisoformat(telemetry['time'])).total_seconds()
     except (KeyError,TypeError,ValueError):age=99999
     soc=telemetry.get('soc')
@@ -35,12 +58,12 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
     right=min(end,(day+timedelta(days=1)).astimezone(timezone.utc))
     holidays=[(consumption.stamp(r['start']),consumption.stamp(r['end'])) for r in rules if r['kind']=='holiday']
     def eligible(x):return x>=left and x+duration<=right and not any(h<x+duration and j>x for h,j in holidays)
-    starts={a}
+    starts={a,*[consumption.stamp(x) for x in c.get('_comparison_starts',[])]}
     fast=c.get('_comparison_fast',False)
     starts.update(consumption.stamp(x['start']) for x in seed.get('suggestions',[]))
     # Bound CPU work on Pi 3: tariff choices plus three-hour anchors and the
     # strongest PV window. Only the evaluated alternatives are ranked.
-    for hour in ([] if fast else range(0,24,3)):
+    for hour in (range(24) if hourly else [] if fast else range(0,24,3)):
         x=(day+timedelta(hours=hour)).astimezone(timezone.utc)
         if eligible(x):starts.add(x)
     if eligible(left):starts.add(left)
@@ -109,14 +132,14 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
         suggestions.append({**row,'role':role,'cheapest':abs(row['cost_eur']-best['cost_eur'])<1e-7,
                             'saving_eur':current['cost_eur']-row['cost_eur'],'extra_eur':row['cost_eur']-best['cost_eur']})
     message=('Mehrkosten gegenüber demselben Plan ohne diesen Verbrauch · '+str(len(evaluated))+' Startzeiten geprüft. '
-             +('Schnellschätzung mit gröberem Akku-Rechenraster. ' if fast else '')
+             +('Stundenschätzung: gemittelte Stundenpreise, stündliche PV und grobes Akku-Rechenraster. ' if hourly else 'Schnellschätzung mit gröberem Akku-Rechenraster. ' if fast else '')
              +'PV, Akku, Verluste, Verschleiß und späterer Netzbezug berücksichtigt. '
              +('Smart plant Entladepausen mit. ' if mode=='smart' and c.get('smart_discharge_enabled') else 'Keine zusätzlichen automatischen Entladesperren. ')
              +('PV-Prognose fehlt: ohne PV gerechnet. ' if c.get('pv_enabled') and not baseline['pv_available'] else '')
              +'Nur bekannte Preisstunden; ohne Einspeisevergütung. Restenergie nach dem Horizont nicht bewertet.')
     return {'state':'better' if current['cost_eur']-best['cost_eur']>=.01 else 'good','basis':'dispatch',
             'current_eur':current['cost_eur'],'suggestions':suggestions,'message':message,'horizon_end':end.isoformat(),
-            'evaluated':len(evaluated),'soc':soc,'pv_available':baseline['pv_available']}
+            'estimate':hourly,'evaluated':len(evaluated),'soc':soc,'pv_available':baseline['pv_available']}
 
 class AdviceCache:
     """One bounded calculation at a time; small minute/config/SOC keyed cache."""
@@ -144,9 +167,13 @@ def _comparison_worker(connection, args):
     try:
         import os
         if hasattr(os, 'nice'): os.nice(10)
-        connection.send(compare(*args))
+        data,c,prices,telemetry,mode,now,hold_until=args
+        estimate=compare(data,{**c,'_comparison_hourly':True},prices,telemetry,mode,now,hold_until)
+        connection.send(('estimate',estimate))
+        refined={**c,'_comparison_starts':[r['start'] for r in estimate.get('suggestions',[])]}
+        connection.send(('final',compare(data,refined,prices,telemetry,mode,now,hold_until)))
     except Exception as exc:
-        connection.send(unavailable('Vergleich fehlgeschlagen: '+str(exc)))
+        connection.send(('final',unavailable('Vergleich fehlgeschlagen: '+str(exc))))
     finally:
         connection.close()
 
@@ -162,8 +189,8 @@ class BackgroundAdvice:
             if not job or token!=job['token']:
                 return unavailable('Vergleich abgelaufen. Bitte erneut berechnen.')
             if job['result'] is not None:return job['result']
-            return {'state':'pending','job':token,'suggestions':[],
-                    'message':'PV, Akku und Folgekosten werden verglichen …',
+            return {**(job.get('estimate') or {}),'state':'pending','job':token,'suggestions':(job.get('estimate') or {}).get('suggestions',[]),
+                    'message':(job.get('estimate') or {}).get('message','PV, Akku und Folgekosten werden verglichen …'),
                     'elapsed_seconds':int(time.monotonic()-job['started'])}
 
     def get(self,data,c,prices,telemetry,mode,now,hold_until=None):
@@ -171,7 +198,12 @@ class BackgroundAdvice:
         with self.lock:
             if self.job and self.job['result'] is None:
                 return {'state':'busy','suggestions':[], 'message':'Vorheriger Vergleich wird abgeschlossen …'}
-            job={'token':uuid.uuid4().hex,'started':time.monotonic(),'result':None}
+            # Immediate, explicitly tariff-only fallback, replaced as soon as the
+            # hourly battery/PV estimate arrives. Never invent a missing price.
+            fallback=consumption.price_tip(data,c,prices,now,[r for r in c.get('_consumption_rules',[]) if r.get('id')!=data.get('id')])
+            if fallback.get('suggestions'):
+                fallback={**fallback,'estimate':True,'basis':'tariff','message':'Vorläufig nur Stromtarif · PV, Akku und Folgekosten noch nicht berücksichtigt.'}
+            job={'token':uuid.uuid4().hex,'started':time.monotonic(),'result':None,'estimate':fallback}
             self.job=job
             context=multiprocessing.get_context('spawn')
             receive,send=context.Pipe(duplex=False)
@@ -182,14 +214,23 @@ class BackgroundAdvice:
                 return unavailable('Vergleich konnte nicht gestartet werden. Bitte erneut versuchen.')
             send.close()
             def finish():
+                result=None;deadline=time.monotonic()+self.timeout
                 try:
-                    result=receive.recv() if receive.poll(self.timeout) else unavailable('Schnellvergleich nach 8 Sekunden abgebrochen: Server momentan zu langsam. Bitte erneut versuchen.')
-                except (EOFError,OSError):
-                    result=unavailable('Vergleich wurde abgebrochen. Bitte erneut versuchen.')
+                    while time.monotonic()<deadline and receive.poll(max(0,deadline-time.monotonic())):
+                        kind,value=receive.recv()
+                        if kind=='estimate':
+                            if value.get('suggestions'):
+                                with self.lock:job['estimate']=value
+                        else:
+                            result=value;break
+                except (EOFError,OSError):pass
                 finally:
-                    with self.lock:job['result']=result
+                    with self.lock:
+                        if result is None or not result.get('suggestions'):
+                            if job['estimate'].get('suggestions'):
+                                result={**job['estimate'],'message':job['estimate']['message']+' Genauere Berechnung nicht verfügbar; Schätzung bleibt nutzbar.'}
+                        job['result']=result or unavailable('Für diesen Zeitraum fehlen vergleichbare Daten.')
                     if process.is_alive():process.terminate()
                     process.join(timeout=2);receive.close()
-                with self.lock:job['result']=result
             threading.Thread(target=finish,daemon=True).start()
         return self.poll(job['token'])

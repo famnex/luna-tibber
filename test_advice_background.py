@@ -25,8 +25,10 @@ class BackgroundTests(unittest.TestCase):
   response=runner.get(f.data,f.c,f.prices,f.telemetry,'smart',f.now)
   time.sleep(.3)
   result=runner.poll(response['job'])
-  self.assertEqual(result['state'],'unavailable')
-  self.assertIn('abgebrochen',result['message'])
+  self.assertIn(result['state'],('good','better'))
+  self.assertTrue(result['suggestions'])
+  self.assertEqual(result['basis'],'tariff')
+  self.assertIn('noch nicht berücksichtigt',result['message'])
   self.assertIsNotNone(runner.job['result'])
 
 if __name__=='__main__':unittest.main()

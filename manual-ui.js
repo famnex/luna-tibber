@@ -98,9 +98,9 @@ $('templateupdate').onclick=e=>changeTemplate('template-save',true,e.currentTarg
 $('templatedelete').onclick=e=>changeTemplate('template-delete',true,e.currentTarget);
 
 // Suggestions edit the draft only. Saving remains explicit.
-let tipTimer=null,tipRevision=0,tipPendingRevision=null;
+let tipTimer=null,tipRevision=0,tipPendingRevision=null,tipRenderedSignature='';
 function scheduleConsumptionTip(){
- clearTimeout(tipTimer);const revision=++tipRevision;
+ clearTimeout(tipTimer);tipRenderedSignature='';const revision=++tipRevision;
  $('ordertipchoices').replaceChildren();$('ordertipassumptions').hidden=true;
  const visible=$('orderkind').value==='consumption'&&$('orderrepeat').value==='once';
  $('ordertip').hidden=!visible;if(!visible)return;
@@ -122,15 +122,18 @@ async function loadConsumptionTip(data,revision){
    $('ordertiptitle').textContent='◷ Vergleich läuft …';
    $('ordertiptext').textContent=(tip.message||'Bitte warten …')+(tip.elapsed_seconds?' · '+tip.elapsed_seconds+' s':'');
    tipTimer=setTimeout(()=>{if(revision===tipRevision)loadConsumptionTip(tip.job?{_advice_job:tip.job}:data,revision);},500);
-   return;
-  }
-  tipPendingRevision=null;
+   if(!tip.suggestions?.length)return;
+  }else tipPendingRevision=null;
+  const signature=JSON.stringify([tip.suggestions,tip.message,tip.basis,tip.current_eur,tip.estimate]);
+  if(signature===tipRenderedSignature)return;tipRenderedSignature=signature;
+  $('ordertipchoices').replaceChildren();
   const money=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
   const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
-  $('ordertiptitle').textContent=tip.suggestions?.length?'💡 Zeitfenster zur Auswahl':'ⓘ Zeitvergleich';
+  $('ordertiptitle').textContent=tip.suggestions?.length?(tip.estimate?'≈ Geschätzte Zeitfenster':'💡 Zeitfenster zur Auswahl'):'ⓘ Zeitvergleich';
   const economic=tip.basis==='dispatch'&&tip.suggestions?.length;
   $('ordertipassumptions').hidden=!economic;$('ordertipbasis').textContent=tip.message||'';
   $('ordertiptext').textContent=economic?'Dein Termin: ≈ '+money(tip.current_eur)+' Mehrkosten · Vergleich bis '+new Date(tip.horizon_end).toLocaleString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):(tip.message||'');
+  if(tip.estimate&&economic)$('ordertiptext').textContent='≈ Stundenschätzung · '+$('ordertiptext').textContent;
   for(const option of tip.suggestions||[]){
    const row=document.createElement('div');row.className='tip-choice';
    const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');

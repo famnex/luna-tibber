@@ -106,7 +106,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)
     if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:6],minimum,*specs[checkpoint][7:])
     wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
-    knots=21 if c.get('_comparison_fast') and c.get('_comparison') else 81
+    knots=(9 if c.get('_comparison_hourly') else 21) if c.get('_comparison_fast') and c.get('_comparison') else 81
     values=_values(tuple(specs),ceiling,limit,eta,wear,margin,knots=knots)
     # Protection uses the continuous value curve. Whole-interval dispatch adds
     # small non-convex steps which must not weaken the independent live guard.

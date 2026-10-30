@@ -44,5 +44,14 @@ $('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderd
  retry();await new Promise(resolve=>setImmediate(resolve));
  assert.equal(payload._advice_job,'job-one');
  assert.equal($('ordertiptext').textContent,'Test abgeschlossen');
+ ctx.scheduleConsumptionTip();
+ const estimate={state:'pending',job:'job-two',estimate:true,basis:'tariff',message:'Nur Tarif',current_eur:.5,suggestions:[{start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',cost_eur:.5,saving_eur:0,extra_eur:0,cheapest:true}]};
+ ctx.fetch=async()=>({ok:true,json:async()=>estimate});
+ await ctx.loadConsumptionTip({},6);
+ assert.equal($('ordertipchoices').children.length,1);
+ assert.match($('ordertiptitle').textContent,/Geschätzte/);
+ const card=$('ordertipchoices').children[0];
+ await ctx.loadConsumptionTip({_advice_job:'job-two'},6);
+ assert.equal($('ordertipchoices').children[0],card,'polling must preserve unchanged cards');
  console.log('Price tips: local time, euros, explicit adoption and stale response suppression passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
