@@ -136,8 +136,8 @@ class Dashboard:
         self.folder = folder
         self.config_path = folder/'config.json'
         self.lock = threading.RLock()
-        from consumption_advice import AdviceCache
-        self.consumption_advice=AdviceCache()
+        from consumption_advice import BackgroundAdvice
+        self.consumption_advice=BackgroundAdvice()
         self.proc = None
         self.job = None
         self.update_preparing = False
@@ -841,6 +841,8 @@ class Handler(BaseHTTPRequestHandler):
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
             if self.path == '/api/consumption-tip':
+                if data.get('_advice_job'):
+                    return self.send(200,self.server.app.consumption_advice.poll(data['_advice_job']))
                 from pv import attach
                 from manual import load
                 app=self.server.app;now=datetime.now(timezone.utc)

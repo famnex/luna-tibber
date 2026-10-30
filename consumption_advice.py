@@ -135,3 +135,58 @@ class AdviceCache:
                 while len(self.rows)>8:self.rows.pop(next(iter(self.rows)))
             return result
         finally:self.lock.release()
+
+
+def _comparison_worker(connection, args):
+    """Separate low-priority CPU process; cannot block the HTTP interpreter."""
+    try:
+        import os
+        if hasattr(os, 'nice'): os.nice(10)
+        connection.send(compare(*args))
+    except Exception as exc:
+        connection.send(unavailable('Vergleich fehlgeschlagen: '+str(exc)))
+    finally:
+        connection.close()
+
+
+class BackgroundAdvice:
+    """One isolated job, explicit polling, hard deadline even after browser closes."""
+    def __init__(self, timeout=120):
+        self.lock=threading.Lock();self.job=None;self.timeout=timeout
+
+    def poll(self, token):
+        with self.lock:
+            job=self.job
+            if not job or token!=job['token']:
+                return unavailable('Vergleich abgelaufen. Bitte erneut berechnen.')
+            if job['result'] is not None:return job['result']
+            return {'state':'pending','job':token,'suggestions':[],
+                    'message':'PV, Akku und Folgekosten werden verglichen …',
+                    'elapsed_seconds':int(time.monotonic()-job['started'])}
+
+    def get(self,data,c,prices,telemetry,mode,now,hold_until=None):
+        import multiprocessing,uuid
+        with self.lock:
+            if self.job and self.job['result'] is None:
+                return {'state':'busy','suggestions':[], 'message':'Vorheriger Vergleich wird abgeschlossen …'}
+            job={'token':uuid.uuid4().hex,'started':time.monotonic(),'result':None}
+            self.job=job
+            context=multiprocessing.get_context('spawn')
+            receive,send=context.Pipe(duplex=False)
+            process=context.Process(target=_comparison_worker,args=(send,(data,c,prices,telemetry,mode,now,hold_until)),daemon=True)
+            try:process.start()
+            except Exception:
+                receive.close();send.close();self.job=None
+                return unavailable('Vergleich konnte nicht gestartet werden. Bitte erneut versuchen.')
+            send.close()
+            def finish():
+                try:
+                    result=receive.recv() if receive.poll(self.timeout) else unavailable('Vergleich hat das Zeitlimit erreicht. Bitte erneut versuchen.')
+                except (EOFError,OSError):
+                    result=unavailable('Vergleich wurde abgebrochen. Bitte erneut versuchen.')
+                finally:
+                    if process.is_alive():process.terminate()
+                    process.join(timeout=2);receive.close()
+                with self.lock:job['result']=result
+            threading.Thread(target=finish,daemon=True).start()
+        return self.poll(job['token'])

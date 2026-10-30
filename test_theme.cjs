@@ -12,5 +12,5 @@ function run(saved,blocked=false){
 }
 run(null);run('dark');run('light');run(null,true);
 const html=fs.readFileSync('web.html','utf8');assert.match(html,/id="login" hidden/);assert(html.indexOf('/theme.js')<html.indexOf('/style.css'));
-const app=fs.readFileSync('app.js','utf8');assert.match(app,/abort\.abort\(\),20000/);assert.match(app,/startupState\?\.\('error'\)/);assert.match(app,/clearTimeout\(timeout\)/);
+const app=fs.readFileSync('app.js','utf8');assert.match(app,/abort\.abort\(\),20000/);assert.match(app,/startupState\?\.\('error',/);assert.match(app,/clearTimeout\(timeout\)/);
 console.log('Appearance: system/manual preference, unavailable storage, startup success/error and hidden initial login passed');

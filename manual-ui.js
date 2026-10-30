@@ -98,7 +98,7 @@ $('templateupdate').onclick=e=>changeTemplate('template-save',true,e.currentTarg
 $('templatedelete').onclick=e=>changeTemplate('template-delete',true,e.currentTarget);
 
 // Suggestions edit the draft only. Saving remains explicit.
-let tipTimer=null,tipRevision=0;
+let tipTimer=null,tipRevision=0,tipPendingRevision=null;
 function scheduleConsumptionTip(){
  clearTimeout(tipTimer);const revision=++tipRevision;
  $('ordertipchoices').replaceChildren();$('ordertipassumptions').hidden=true;
@@ -112,11 +112,19 @@ function scheduleConsumptionTip(){
  tipTimer=setTimeout(()=>loadConsumptionTip(data,revision),700);
 }
 async function loadConsumptionTip(data,revision){
+ tipPendingRevision=revision;
  const abort=new AbortController(),timeout=setTimeout(()=>abort.abort(),45000);
  try{
   const response=await fetch('/api/consumption-tip',{method:'POST',headers:{'Content-Type':'application/json','X-Luna':'1'},body:JSON.stringify(data),signal:abort.signal});
   const tip=await response.json();if(revision!==tipRevision)return;
   if(!response.ok)throw new Error(tip.error||'Preisvergleich nicht verfügbar');
+  if(tip.state==='pending'||tip.state==='busy'){
+   $('ordertiptitle').textContent='◷ Vergleich läuft …';
+   $('ordertiptext').textContent=(tip.message||'Bitte warten …')+(tip.elapsed_seconds?' · '+tip.elapsed_seconds+' s':'');
+   tipTimer=setTimeout(()=>{if(revision===tipRevision)loadConsumptionTip(tip.job?{_advice_job:tip.job}:data,revision);},2000);
+   return;
+  }
+  tipPendingRevision=null;
   const money=n=>n.toLocaleString('de-DE',{style:'currency',currency:'EUR'});
   const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
   $('ordertiptitle').textContent=tip.suggestions?.length?'💡 Zeitfenster zur Auswahl':'ⓘ Zeitvergleich';
@@ -140,7 +148,7 @@ async function loadConsumptionTip(data,revision){
    button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(option.start);setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
    row.append(info,button);$('ordertipchoices').append(row);
   }
- }catch(e){if(revision===tipRevision){$('ordertiptitle').textContent='ⓘ Kein Preisvorschlag';$('ordertiptext').textContent=e.name==='AbortError'?'Zeitlimit erreicht. Eingabe ändern, um erneut zu prüfen.':e.message;}}
+ }catch(e){if(revision===tipRevision)tipPendingRevision=null;if(revision===tipRevision){$('ordertiptitle').textContent='ⓘ Kein Preisvorschlag';$('ordertiptext').textContent=e.name==='AbortError'?'Zeitlimit erreicht. Eingabe ändern, um erneut zu prüfen.':e.message;}}
  finally{clearTimeout(timeout);}
 }
 for(const id of ['orderstart','orderduration','orderdurationunit','orderkwh'])$(id).oninput=scheduleConsumptionTip;
@@ -161,7 +169,7 @@ function updateConsumptionClock(){
  const minute=orderLocal(Date.now()+manualClockOffset);
  if(changed||minute!==lastTipMinute){
   lastTipMinute=minute;
-  if($('orderkind').value==='consumption'&&$('orderrepeat').value==='once')scheduleConsumptionTip();
+  if(tipPendingRevision!==tipRevision&&$('orderkind').value==='consumption'&&$('orderrepeat').value==='once')scheduleConsumptionTip();
  }
 }
 $('orderstart').onblur=()=>{syncConsumptionStart(true);scheduleConsumptionTip();};

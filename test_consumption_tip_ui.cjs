@@ -31,5 +31,18 @@ $('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderd
  assert.match($('ordertipchoices').children[0].children[0].children[0].textContent,/Günstigster geprüft/);
  assert.match($('ordertipchoices').children[0].children[0].children[2].textContent,/Smart-Pause/);
  assert.match($('ordertipchoices').children[0].children[0].children[3].textContent,/Spätere Mehrkosten/);
+ ctx.scheduleConsumptionTip();
+ let retry;
+ ctx.setTimeout=(fn,ms)=>{if(ms===2000)retry=fn;return 1;};
+ const waiting=ctx.loadConsumptionTip({},5);
+ resolveRequest({ok:true,json:async()=>({state:'pending',job:'job-one',message:'Berechne',elapsed_seconds:3})});
+ await waiting;
+ assert.match($('ordertiptitle').textContent,/Vergleich läuft/);
+ assert.equal(typeof retry,'function');
+ let payload;
+ ctx.fetch=async(url,options)=>{payload=JSON.parse(options.body);return {ok:true,json:async()=>({state:'unavailable',message:'Test abgeschlossen'})};};
+ retry();await new Promise(resolve=>setImmediate(resolve));
+ assert.equal(payload._advice_job,'job-one');
+ assert.equal($('ordertiptext').textContent,'Test abgeschlossen');
  console.log('Price tips: local time, euros, explicit adoption and stale response suppression passed');
 })().catch(e=>{console.error(e);process.exitCode=1;});
