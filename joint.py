@@ -106,10 +106,11 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
     checkpoint=next((i for i,r in enumerate(rows) if r['start']==night_b),None)
     if checkpoint is not None:specs[checkpoint]=(*specs[checkpoint][:6],minimum,*specs[checkpoint][7:])
     wear=c['wear_ct_kwh'];margin=c['min_saving_ct_kwh']
-    values=_values(tuple(specs),ceiling,limit,eta,wear,margin)
+    knots=21 if c.get('_comparison_fast') and c.get('_comparison') else 81
+    values=_values(tuple(specs),ceiling,limit,eta,wear,margin,knots=knots)
     # Protection uses the continuous value curve. Whole-interval dispatch adds
     # small non-convex steps which must not weaken the independent live guard.
-    guard_values=_values(tuple(specs),ceiling,limit,eta,wear,margin,True)
+    guard_values=_values(tuple(specs),ceiling,limit,eta,wear,margin,True,knots=knots)
     guard=reserve(guard_values[1],ceiling,specs[0][2],eta,wear,capacity,initial,c.get('_guard_held',False))
     guard['threshold_soc']=floor+guard['trigger_kwh']/capacity*100
     guard['release_soc']=floor+guard['release_kwh']/capacity*100
@@ -238,9 +239,9 @@ def _choose(energy,spec,next_values,ceiling,limit,eta,wear,margin,partial_discha
 
 
 @lru_cache(maxsize=4)
-def _values(specs,ceiling,limit,eta,wear,margin,partial_discharge=False):
+def _values(specs,ceiling,limit,eta,wear,margin,partial_discharge=False,knots=81):
     # About 81*81*200 simple operations, no scipy/numpy on the Raspberry Pi.
-    values=[[0.]*81 for _ in range(len(specs)+1)]
+    values=[[0.]*knots for _ in range(len(specs)+1)]
     for i in range(len(specs)-1,-1,-1):
-        values[i]=[_choose(ceiling*j/80,specs[i],values[i+1],ceiling,limit,eta,wear,margin,partial_discharge)[0] for j in range(81)]
+        values[i]=[_choose(ceiling*j/(knots-1),specs[i],values[i+1],ceiling,limit,eta,wear,margin,partial_discharge)[0] for j in range(knots)]
     return values

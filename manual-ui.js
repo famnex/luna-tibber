@@ -121,7 +121,7 @@ async function loadConsumptionTip(data,revision){
   if(tip.state==='pending'||tip.state==='busy'){
    $('ordertiptitle').textContent='◷ Vergleich läuft …';
    $('ordertiptext').textContent=(tip.message||'Bitte warten …')+(tip.elapsed_seconds?' · '+tip.elapsed_seconds+' s':'');
-   tipTimer=setTimeout(()=>{if(revision===tipRevision)loadConsumptionTip(tip.job?{_advice_job:tip.job}:data,revision);},2000);
+   tipTimer=setTimeout(()=>{if(revision===tipRevision)loadConsumptionTip(tip.job?{_advice_job:tip.job}:data,revision);},500);
    return;
   }
   tipPendingRevision=null;

@@ -26,7 +26,7 @@ class BackgroundTests(unittest.TestCase):
   time.sleep(.3)
   result=runner.poll(response['job'])
   self.assertEqual(result['state'],'unavailable')
-  self.assertIn('Zeitlimit',result['message'])
+  self.assertIn('abgebrochen',result['message'])
   self.assertIsNotNone(runner.job['result'])
 
 if __name__=='__main__':unittest.main()

@@ -36,10 +36,11 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
     holidays=[(consumption.stamp(r['start']),consumption.stamp(r['end'])) for r in rules if r['kind']=='holiday']
     def eligible(x):return x>=left and x+duration<=right and not any(h<x+duration and j>x for h,j in holidays)
     starts={a}
+    fast=c.get('_comparison_fast',False)
     starts.update(consumption.stamp(x['start']) for x in seed.get('suggestions',[]))
     # Bound CPU work on Pi 3: tariff choices plus three-hour anchors and the
     # strongest PV window. Only the evaluated alternatives are ranked.
-    for hour in range(0,24,3):
+    for hour in ([] if fast else range(0,24,3)):
         x=(day+timedelta(hours=hour)).astimezone(timezone.utc)
         if eligible(x):starts.add(x)
     if eligible(left):starts.add(left)
@@ -108,6 +109,7 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
         suggestions.append({**row,'role':role,'cheapest':abs(row['cost_eur']-best['cost_eur'])<1e-7,
                             'saving_eur':current['cost_eur']-row['cost_eur'],'extra_eur':row['cost_eur']-best['cost_eur']})
     message=('Mehrkosten gegenüber demselben Plan ohne diesen Verbrauch · '+str(len(evaluated))+' Startzeiten geprüft. '
+             +('Schnellschätzung mit gröberem Akku-Rechenraster. ' if fast else '')
              +'PV, Akku, Verluste, Verschleiß und späterer Netzbezug berücksichtigt. '
              +('Smart plant Entladepausen mit. ' if mode=='smart' and c.get('smart_discharge_enabled') else 'Keine zusätzlichen automatischen Entladesperren. ')
              +('PV-Prognose fehlt: ohne PV gerechnet. ' if c.get('pv_enabled') and not baseline['pv_available'] else '')
@@ -151,7 +153,7 @@ def _comparison_worker(connection, args):
 
 class BackgroundAdvice:
     """One isolated job, explicit polling, hard deadline even after browser closes."""
-    def __init__(self, timeout=120):
+    def __init__(self, timeout=8):
         self.lock=threading.Lock();self.job=None;self.timeout=timeout
 
     def poll(self, token):
@@ -173,7 +175,7 @@ class BackgroundAdvice:
             self.job=job
             context=multiprocessing.get_context('spawn')
             receive,send=context.Pipe(duplex=False)
-            process=context.Process(target=_comparison_worker,args=(send,(data,c,prices,telemetry,mode,now,hold_until)),daemon=True)
+            process=context.Process(target=_comparison_worker,args=(send,(data,{**c,'_comparison_fast':True},prices,telemetry,mode,now,hold_until)),daemon=True)
             try:process.start()
             except Exception:
                 receive.close();send.close();self.job=None
@@ -181,10 +183,11 @@ class BackgroundAdvice:
             send.close()
             def finish():
                 try:
-                    result=receive.recv() if receive.poll(self.timeout) else unavailable('Vergleich hat das Zeitlimit erreicht. Bitte erneut versuchen.')
+                    result=receive.recv() if receive.poll(self.timeout) else unavailable('Schnellvergleich nach 8 Sekunden abgebrochen: Server momentan zu langsam. Bitte erneut versuchen.')
                 except (EOFError,OSError):
                     result=unavailable('Vergleich wurde abgebrochen. Bitte erneut versuchen.')
                 finally:
+                    with self.lock:job['result']=result
                     if process.is_alive():process.terminate()
                     process.join(timeout=2);receive.close()
                 with self.lock:job['result']=result

@@ -33,7 +33,7 @@ $('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderd
  assert.match($('ordertipchoices').children[0].children[0].children[3].textContent,/Spätere Mehrkosten/);
  ctx.scheduleConsumptionTip();
  let retry;
- ctx.setTimeout=(fn,ms)=>{if(ms===2000)retry=fn;return 1;};
+ ctx.setTimeout=(fn,ms)=>{if(ms===500)retry=fn;return 1;};
  const waiting=ctx.loadConsumptionTip({},5);
  resolveRequest({ok:true,json:async()=>({state:'pending',job:'job-one',message:'Berechne',elapsed_seconds:3})});
  await waiting;
