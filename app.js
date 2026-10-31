@@ -294,10 +294,25 @@ function phaseInfo(d,now=Date.now()){
  }
  return [loading?'ϟ Lade …':'⌛ Warte auf Ladebestätigung',d.remaining_seconds!==null?`■ Geplanter Stopp um ${fmt(now+d.remaining_seconds*1000)}`:'Status wird aktualisiert'];
 }
+function displayPlanPhases(d){
+ // Tariff/reason boundaries are not new control actions. Match the continuous
+ // bands in the day plan and do not advertise an already active pause again.
+ const phases=[...(d.smart_preview?.joint?.phases||[])].sort((a,b)=>Date.parse(a.start)-Date.parse(b.start)),out=[];
+ for(const phase of phases){
+  const last=out[out.length-1];
+  if(last&&last.action===phase.action&&Date.parse(last.end)===Date.parse(phase.start)){
+   last.end=phase.end;
+   if(Number.isFinite(phase.kwh))last.kwh=(last.kwh||0)+phase.kwh;
+   if(Number.isFinite(phase.low_ct))last.low_ct=Number.isFinite(last.low_ct)?Math.min(last.low_ct,phase.low_ct):phase.low_ct;
+   if(Number.isFinite(phase.high_ct))last.high_ct=Number.isFinite(last.high_ct)?Math.max(last.high_ct,phase.high_ct):phase.high_ct;
+  }else out.push({...phase});
+ }
+ return out;
+}
 function compactPlan(d){
  const j=d.smart_preview?.joint;
  if(!j)return d.smart_preview?.windows?.length?'◷ Ladefenster geplant':'◷ Plan abwarten';
- const now=Date.now(),next=j.phases?.find(p=>Date.parse(p.end)>now);
+ const now=Date.parse(d.server_time)||Date.now(),next=displayPlanPhases(d).find(p=>Date.parse(p.start)<=now&&Date.parse(p.end)>now);
  if(!next)return '✓ Planende';
  const time=new Date(next.end).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'});
  return `${next.action==='charge'?'↗ Laden':next.action==='discharge'?'↘ Frei':next.reason==='reserve'?'🔒 Schutz':'Ⅱ Pause'} bis ${time}`;
@@ -407,18 +422,20 @@ document.addEventListener('visibilitychange',()=>{clearTimeout(refreshTimer);if(
 refresh();
 
 // Compact overview uses the same server plan; it never requests extra telemetry.
-function overviewNext(d, now=Date.now()){
+function overviewNext(d, now=Date.parse(d.server_time)||Date.now()){
  const manual=d.discharge?.request?.until;
  if(d.fault)return {label:'Steuerung prüfen',reason:d.fault};
  if(manual&&Date.parse(manual)>now&&d.mode!=='smart'&&d.mode!=='planned')return {time:manual,label:'Manuelle Entladesperre endet',reason:'Freigabe durch den Server erforderlich; danach gilt der aktive Modus.'};
  if(d.mode==='off')return {label:'Kein Ladeauftrag',reason:'Die normale Entladung wird separat geregelt.'};
  if(d.mode==='planned'&&d.planned){const p=d.planned;if(Date.parse(p.end)<=now)return {label:'Stoppbestätigung abwarten',reason:'Geplantes Ende erreicht.'};return Date.parse(p.start)>now?{time:p.start,label:'Geplantes Laden starten',reason:`Ziel ${p.target_soc} % · Ende spätestens zur eingestellten Uhrzeit.`}:{time:p.end,label:'Geplantes Laden beenden',reason:`Bei ${p.target_soc} % endet der Auftrag früher.`};}
  if(d.mode==='on')return {label:'Manuelle Ladung',reason:'Restzeit in der Speicherkarte · Ziel-SOC kann früher stoppen.'};
- const phases=d.smart_preview?.joint?.phases||[];
+ const phases=displayPlanPhases(d);
  const phase=phases.find(p=>Date.parse(p.start)>now);
  if(manual&&Date.parse(manual)>now&&(!phase||Date.parse(manual)<Date.parse(phase.start)))return {time:manual,label:'Manuelle Entladesperre endet',reason:'Danach gilt die Smart-Regelung.'};
  if(phase){const label=phase.action==='charge'?'Netzladen starten':phase.action==='discharge'?'Entladung freigeben':'Entladung pausieren';const price=Number.isFinite(phase.low_ct)?ct(phase.low_ct)+(phase.high_ct!==phase.low_ct?' bis '+ct(phase.high_ct):''):'';return {time:phase.start,label,reason:[Number.isFinite(phase.kwh)&&phase.kwh>0?phase.kwh.toLocaleString('de-DE',{maximumFractionDigits:2})+' kWh geplant':'',price,phase.reason==='reserve'?'Energie für späteren Bedarf schützen':''].filter(Boolean).join(' · ')};}
- const slot=d.smart_preview?.windows?.find(p=>Date.parse(p.start)>now);
+ const active=phases.find(p=>Date.parse(p.start)<=now&&Date.parse(p.end)>now);
+ if(active?.action==='hold')return {label:'Freigabe noch nicht geplant',reason:'Entladung bleibt im bekannten Plan pausiert. Neue Planung abwarten.'};
+ const slot=!phases.length&&d.smart_preview?.windows?.find(p=>Date.parse(p.start)>now);
  if(slot)return {time:slot.start,label:'Netzladen starten',reason:ct(slot.ct)};
  return {label:'Weitere Planung abwarten',reason:d.smart_preview?.reason||'Noch keine nächste Aktion bestätigt.'};
 }
