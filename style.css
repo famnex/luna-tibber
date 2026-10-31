@@ -140,3 +140,7 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 #orderdialog[data-kind=consumption] .order-details{grid-template-columns:1fr}
 #orderdialog:not([data-kind=consumption]) #orderendwrap{order:-1}
 #orderweekdays{grid-column:1/-1}
+
+.tip-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.tip-toolbar button{min-width:44px;padding:8px}.tip-choice>div{width:100%;min-width:0}.tip-costs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}.tip-cost{display:flex;flex-direction:column;gap:4px;padding:10px 8px;border:1px solid var(--line,#dce5dd);border-radius:12px}.tip-cost span{font-size:.8rem}.tip-cost strong{font-size:1.15rem;white-space:nowrap}.tip-cost.total{border:2px solid #43866a}.tip-sources{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tip-sources span{font-size:.85rem;border:1px solid var(--line,#dce5dd);border-radius:20px;padding:6px 9px}.tip-protection{font-size:.9rem}.tip-choice details{font-size:.85rem;margin-top:8px}@media(max-width:380px){.tip-costs{grid-template-columns:repeat(2,minmax(0,1fr))}}
+
+#orderdialog{background:var(--surface,#fff);color:inherit;border:1px solid var(--line,#dce5dd);border-radius:20px;padding:20px;box-sizing:border-box}#orderdialog::backdrop{background:#0b201b88}

@@ -125,7 +125,7 @@ def plan(c, prices, now, soc, max_power_w=None, hold_until=None):
         _,after,charge,used=_choose(energy,spec,values[i+1],ceiling,limit,eta,wear,margin)
         trace.append({'start':r['start'].isoformat(),'end':r['end'].isoformat(),'start_kwh':energy,'end_kwh':after,'grid_charge_kwh':charge,'discharge_kwh':used,'idle_kwh':c.get('battery_idle_w',0)/1000*(r['end']-r['start']).total_seconds()/3600})
         if c.get('_comparison'):
-            trace[-1].update(grid_house_kwh=spec[0]-used,grid_charge_input_kwh=charge/eta,
+            trace[-1].update(gross_load_kwh=r['gross_load_kw']*(r['end']-r['start']).total_seconds()/3600,pv_house_kwh=min(r['pv_kw'],r['gross_load_kw'])*(r['end']-r['start']).total_seconds()/3600,price_ct=spec[2],grid_house_kwh=spec[0]-used,grid_charge_input_kwh=charge/eta,
                              cost_eur=((spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear)/100)
         actual_cost+=(spec[0]-used)*spec[2]+charge/eta*spec[2]+used*wear
         a,b=r['start'],r['end']

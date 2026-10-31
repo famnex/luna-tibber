@@ -119,10 +119,8 @@ async function loadConsumptionTip(data,revision){
   const tip=await response.json();if(revision!==tipRevision)return;
   if(!response.ok)throw new Error(tip.error||'Preisvergleich nicht verfügbar');
   if(tip.state==='pending'||tip.state==='busy'){
-   $('ordertiptitle').textContent='◷ Vergleich läuft …';
-   $('ordertiptext').textContent=(tip.message||'Bitte warten …')+(tip.elapsed_seconds?' · '+tip.elapsed_seconds+' s':'');
    tipTimer=setTimeout(()=>{if(revision===tipRevision)loadConsumptionTip(tip.job?{_advice_job:tip.job}:data,revision);},500);
-   if(!tip.suggestions?.length)return;
+   if(!tip.suggestions?.length){$('ordertiptitle').textContent='◷ Vergleich läuft …';$('ordertiptext').textContent=(tip.message||'Bitte warten …')+(tip.elapsed_seconds?' · '+tip.elapsed_seconds+' s':'');return;}
   }else tipPendingRevision=null;
   const signature=JSON.stringify([tip.suggestions,tip.message,tip.basis,tip.current_eur,tip.estimate]);
   if(signature===tipRenderedSignature)return;tipRenderedSignature=signature;
@@ -134,21 +132,37 @@ async function loadConsumptionTip(data,revision){
   $('ordertipassumptions').hidden=!economic;$('ordertipbasis').textContent=tip.message||'';
   $('ordertiptext').textContent=economic?'Dein Termin: ≈ '+money(tip.current_eur)+' Mehrkosten · Vergleich bis '+new Date(tip.horizon_end).toLocaleString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):(tip.message||'');
   if(tip.estimate&&economic)$('ordertiptext').textContent='≈ Stundenschätzung · '+$('ordertiptext').textContent;
+  if(tip.calculated_at)$('ordertiptext').textContent+=' · Stand '+fmt(tip.calculated_at);
   for(const option of tip.suggestions||[]){
    const row=document.createElement('div');row.className='tip-choice';
    const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');
-   heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+' · '+money(option.cost_eur)+(option.cheapest?(economic?' ★ Günstigster geprüft':' ★ Günstigstes'):'');
+   heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+(economic?'':' · '+money(option.cost_eur))+(option.cheapest?(economic?' ★ Günstigster geprüft':' ★ Günstigstes'):'');
    detail.className='muted';detail.textContent=(option.saving_eur>=0?'− '+money(option.saving_eur):'+ '+money(-option.saving_eur))+' gegenüber deiner Eingabe'+(!option.cheapest?' · + '+money(option.extra_eur)+' zum günstigsten Termin':'');
    info.append(heading,detail);
    if(economic){
-    const facts=document.createElement('p');facts.className='muted';
-    const number=n=>Number(n).toLocaleString('de-DE',{maximumFractionDigits:1});
-    facts.textContent='🔋 Danach '+number(option.end_soc)+' % · ☀ '+number(option.pv_direct_kwh)+' kWh zusätzlich direkt'+(option.hold_minutes?' · 🔒 '+option.hold_minutes+' Min. '+(option.automatic_hold?'Smart-Pause':'Sperre'):'');
-    const later=document.createElement('small');later.textContent='Spätere Mehrkosten: '+money(option.later_extra_eur)+' · Akku am Horizontende: '+number(option.horizon_soc)+' %';
-    info.append(facts,later);
+    const costs=document.createElement('div');costs.className='tip-costs';
+    const cell=(label,value,total=false)=>{const box=document.createElement('div');box.className=total?'tip-cost total':'tip-cost';const name=document.createElement('span'),amount=document.createElement('strong');name.textContent=label;amount.textContent=money(value);box.append(name,amount);costs.append(box);};
+    cell('⚡ Nutzung¹',option.usage_cost_eur??option.cost_eur-option.later_extra_eur);
+    cell('◷ Später',option.later_extra_eur);
+    if(Math.abs(option.plan_adjustment_eur||0)>=.005)cell('↔ Plananpassung',option.plan_adjustment_eur);
+    cell('Σ Gesamt',option.cost_eur,true);
+    info.append(costs);
+    const sources=document.createElement('div');sources.className='tip-sources';
+    const number=n=>Number(n).toLocaleString('de-DE',{maximumFractionDigits:2});
+    if(option.sources_kwh){for(const [key,label] of [['pv','☀ PV'],['battery','🔋 Akku'],['grid','⚡ Netz']]){const pill=document.createElement('span');pill.textContent=label+' '+number(option.sources_kwh[key])+' kWh';sources.append(pill);}}
+    info.append(sources);
+    const protection=document.createElement('p');protection.className='tip-protection';
+    protection.textContent=option.hold_minutes?'🔒 Entladung '+(option.hold_minutes>=orderDuration()-.5?'durchgehend':'teilweise')+' gesperrt · '+option.hold_minutes+' Min. geplant':'🔓 Keine Entladesperre geplant';
+    info.append(protection);
+    const extra=document.createElement('details'),summary=document.createElement('summary'),facts=document.createElement('p');
+    summary.textContent='ⓘ Akku & Sperrzeiten';
+    facts.textContent='¹ Nutzung = Netzstrom + Akkuverschleiß. Quellen anteilig geschätzt. Entladesperre betrifft den gesamten Akku; keine Netzladesperre. Vorschau, noch kein Befehl. Akku danach '+number(option.end_soc)+' % · am Vergleichsende '+number(option.horizon_soc)+' %.';
+    extra.append(summary,facts);
+    for(const window of option.hold_windows||[]){const time=document.createElement('div');time.textContent='🔒 '+fmt(window.start)+'–'+fmt(window.end);extra.append(time);}
+    info.append(extra);
    }
    const button=document.createElement('button');button.type='button';button.textContent='Übernehmen';
-   button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(option.start);setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
+   button.onclick=()=>{if(revision!==tipRevision)return;$('orderstart').value=orderLocal(Math.max(Date.parse(option.start),Date.now()+manualClockOffset));setOrderDuration(Math.round((Date.parse(option.end)-Date.parse(option.start))/60000));scheduleConsumptionTip();};
    row.append(info,button);$('ordertipchoices').append(row);
   }
  }catch(e){if(revision===tipRevision)tipPendingRevision=null;if(revision===tipRevision){$('ordertiptitle').textContent='ⓘ Kein Preisvorschlag';$('ordertiptext').textContent=e.name==='AbortError'?'Zeitlimit erreicht. Eingabe ändern, um erneut zu prüfen.':e.message;}}
@@ -165,16 +179,11 @@ function syncConsumptionStart(force=false){
  if(input.value&&input.value<now){input.value=now;return true;}
  return false;
 }
-let lastTipMinute='';
 function updateConsumptionClock(){
  if(document.hidden||!$('orderdialog').open)return;
- const changed=syncConsumptionStart();
- const minute=orderLocal(Date.now()+manualClockOffset);
- if(changed||minute!==lastTipMinute){
-  lastTipMinute=minute;
-  if(tipPendingRevision!==tipRevision&&$('orderkind').value==='consumption'&&$('orderrepeat').value==='once')scheduleConsumptionTip();
- }
+ syncConsumptionStart(); // Clock only: never invalidate visible recommendations.
 }
-$('orderstart').onblur=()=>{syncConsumptionStart(true);scheduleConsumptionTip();};
+$('orderstart').onblur=()=>{syncConsumptionStart(true);};
+$('ordertiprefresh').onclick=()=>{syncConsumptionStart(true);scheduleConsumptionTip();};
 setInterval(updateConsumptionClock,1000);
 document.addEventListener?.('visibilitychange',()=>{if(!document.hidden)updateConsumptionClock();});

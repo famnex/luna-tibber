@@ -2,7 +2,9 @@ const fs=require('fs'),vm=require('vm'),assert=require('assert/strict');
 class El{constructor(){this.value='';this.hidden=false;this.options=[];this.children=[];this.dataset={};}replaceChildren(){this.children=[];}append(...x){this.children.push(...x);}}
 const nodes={};const $=id=>nodes[id]??=new El();
 let resolveRequest;
-const ctx={document:{createElement:()=>new El()},$,Intl,Date,Number,AbortController,setInterval:()=>1,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
+class ClockDate extends Date{static now(){return Date.parse('2026-10-30T14:00:00Z');}}
+function texts(node){return [node.textContent||'',...(node.children||[]).map(texts)].join(' ');}
+const ctx={document:{createElement:()=>new El()},$,Intl,Date:ClockDate,Number,AbortController,setInterval:()=>1,setTimeout:()=>1,clearTimeout:()=>{},lastStatus:{settings:{timezone:'Europe/Berlin'}},
 fetch:()=>new Promise(resolve=>{resolveRequest=resolve;})};
 vm.createContext(ctx);vm.runInContext(fs.readFileSync('manual-ui.js','utf8'),ctx);
 $('orderkind').value='consumption';$('orderrepeat').value='once';
@@ -24,13 +26,14 @@ $('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderd
  await stale;assert.equal($('ordertip').hidden,true);assert.equal($('ordertipchoices').children.length,0);
  $('orderrepeat').value='once';ctx.scheduleConsumptionTip();
  const economic=ctx.loadConsumptionTip({},4);
- resolveRequest({ok:true,json:async()=>({basis:'dispatch',state:'better',horizon_end:'2026-10-31T00:00:00Z',current_eur:.6,message:'PV und Akku; ohne Einspeisevergütung',suggestions:[{start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,cost_eur:.3,extra_eur:0,cheapest:true,end_soc:42,horizon_soc:10,pv_direct_kwh:.8,hold_minutes:30,automatic_hold:true,later_extra_eur:.1}]})});
+ resolveRequest({ok:true,json:async()=>({basis:'dispatch',state:'better',horizon_end:'2026-10-31T00:00:00Z',current_eur:.6,message:'PV und Akku; ohne Einspeisevergütung',suggestions:[{start:'2026-10-30T16:00:00Z',end:'2026-10-30T17:00:00Z',saving_eur:.3,cost_eur:.3,extra_eur:0,cheapest:true,end_soc:42,horizon_soc:10,pv_direct_kwh:.8,hold_minutes:30,automatic_hold:true,later_extra_eur:.1,usage_cost_eur:.18,plan_adjustment_eur:.02,sources_kwh:{pv:.8,battery:.2,grid:.5},hold_windows:[]}]})});
  await economic;
  assert.equal($('ordertipassumptions').hidden,false);
  assert.match($('ordertiptext').textContent,/Mehrkosten/);
  assert.match($('ordertipchoices').children[0].children[0].children[0].textContent,/Günstigster geprüft/);
- assert.match($('ordertipchoices').children[0].children[0].children[2].textContent,/Smart-Pause/);
- assert.match($('ordertipchoices').children[0].children[0].children[3].textContent,/Spätere Mehrkosten/);
+ assert.match(texts($('ordertipchoices')),/Nutzung.*0,18.*Später.*0,10.*Plananpassung.*0,02.*Gesamt.*0,30/);
+ assert.match(texts($('ordertipchoices')),/PV 0,8 kWh.*Akku 0,2 kWh.*Netz 0,5 kWh/);
+ assert.match(texts($('ordertipchoices')),/Entladung teilweise gesperrt/);
  ctx.scheduleConsumptionTip();
  let retry;
  ctx.setTimeout=(fn,ms)=>{if(ms===500)retry=fn;return 1;};

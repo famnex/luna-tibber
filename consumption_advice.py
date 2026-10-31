@@ -98,6 +98,25 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
                 f=(at-l).total_seconds()/(r-l).total_seconds()
                 return floor+100*(row['start_kwh']+(row['end_kwh']-row['start_kwh'])*f)/capacity
         return floor+100*plan['trace'][-1]['end_kwh']/capacity
+    def usage(plan,x,y):
+        # Sources cannot be assigned to an individual appliance physically.
+        # Allocate the household mix proportionally to the extra load in each row.
+        sources={'pv':0.,'battery':0.,'grid':0.};direct=0.
+        extra_kw=rule['kwh']/((y-x).total_seconds()/3600)
+        for row in plan['trace']:
+            l,r=consumption.stamp(row['start']),consumption.stamp(row['end'])
+            seconds=max(0,(min(y,r)-max(x,l)).total_seconds())
+            if not seconds:continue
+            fraction=seconds/(r-l).total_seconds()
+            extra=extra_kw*seconds/3600
+            gross=row['gross_load_kwh']*fraction
+            share=min(1,extra/gross) if gross>0 else 0
+            pv=row['pv_house_kwh']*fraction*share
+            battery=row['discharge_kwh']*fraction*share
+            grid=max(0,extra-pv-battery)
+            sources['pv']+=pv;sources['battery']+=battery;sources['grid']+=grid
+            direct+=(grid*row['price_ct']+battery*c['wear_ct_kwh'])/100
+        return sources,direct
     evaluated=[]
     for x in sorted(starts):
         y=x+duration;extra={**rule,'start':x.isoformat(),'end':y.isoformat()}
@@ -105,8 +124,16 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
         if plan is None:return unavailable('Vergleichsplanung konnte nicht vollständig berechnet werden.')
         delta=plan['total_cost_eur']-baseline['total_cost_eur']
         held=sum(max(0,(min(y,consumption.stamp(w['end']))-max(x,consumption.stamp(w['start']))).total_seconds()) for w in plan['windows'] if w['action']=='hold')/60
-        evaluated.append({'start':x.isoformat(),'end':y.isoformat(),'cost_eur':delta,
-                          'later_extra_eur':cost_after(plan,y)-cost_after(baseline,y),
+        sources,direct=usage(plan,x,y)
+        later=cost_after(plan,y)-cost_after(baseline,y)
+        holds=[{'start':max(x,consumption.stamp(w['start'])).isoformat(),'end':min(y,consumption.stamp(w['end'])).isoformat()} for w in plan['windows'] if w['action']=='hold' and consumption.stamp(w['start'])<y and consumption.stamp(w['end'])>x]
+        merged=[]
+        for window in holds:
+            if merged and merged[-1]['end']==window['start']:merged[-1]['end']=window['end']
+            else:merged.append(dict(window))
+        holds=merged
+        evaluated.append({'usage_cost_eur':direct,'plan_adjustment_eur':delta-direct-later,'sources_kwh':sources,'hold_windows':holds,'start':x.isoformat(),'end':y.isoformat(),'cost_eur':delta,
+                          'later_extra_eur':later,
                           'end_soc':soc_at(plan,y),'horizon_soc':soc_at(plan,end),
                           'pv_direct_kwh':max(0,plan['solar']['direct_kwh']-baseline['solar']['direct_kwh']),
                           'hold_minutes':round(held),'automatic_hold':mode=='smart' and c.get('smart_discharge_enabled',False) and held>0})
@@ -136,9 +163,10 @@ def compare(data,c,prices,telemetry,mode,now=None,hold_until=None):
              +'PV, Akku, Verluste, Verschleiß und späterer Netzbezug berücksichtigt. '
              +('Smart plant Entladepausen mit. ' if mode=='smart' and c.get('smart_discharge_enabled') else 'Keine zusätzlichen automatischen Entladesperren. ')
              +('PV-Prognose fehlt: ohne PV gerechnet. ' if c.get('pv_enabled') and not baseline['pv_available'] else '')
+             +'Quellen anteilig aus dem Hausverbrauch geschätzt. Nutzung: Netzstrom plus Akkuverschleiß; frühere Anschaffungskosten der Akkuladung nicht enthalten. Plananpassung: übrige Kostenänderungen vor und während der Nutzung. Sperren sind Planvorschauen, keine neuen manuellen Befehle. '
              +'Nur bekannte Preisstunden; ohne Einspeisevergütung. Restenergie nach dem Horizont nicht bewertet.')
     return {'state':'better' if current['cost_eur']-best['cost_eur']>=.01 else 'good','basis':'dispatch',
-            'current_eur':current['cost_eur'],'suggestions':suggestions,'message':message,'horizon_end':end.isoformat(),
+            'calculated_at':now.isoformat(),'current_eur':current['cost_eur'],'suggestions':suggestions,'message':message,'horizon_end':end.isoformat(),
             'estimate':hourly,'evaluated':len(evaluated),'soc':soc,'pv_available':baseline['pv_available']}
 
 class AdviceCache:
@@ -202,7 +230,7 @@ class BackgroundAdvice:
             # hourly battery/PV estimate arrives. Never invent a missing price.
             fallback=consumption.price_tip(data,c,prices,now,[r for r in c.get('_consumption_rules',[]) if r.get('id')!=data.get('id')])
             if fallback.get('suggestions'):
-                fallback={**fallback,'estimate':True,'basis':'tariff','message':'Vorläufig nur Stromtarif · PV, Akku und Folgekosten noch nicht berücksichtigt.'}
+                fallback={**fallback,'calculated_at':now.isoformat(),'estimate':True,'basis':'tariff','message':'Vorläufig nur Stromtarif · PV, Akku und Folgekosten noch nicht berücksichtigt.'}
             job={'token':uuid.uuid4().hex,'started':time.monotonic(),'result':None,'estimate':fallback}
             self.job=job
             context=multiprocessing.get_context('spawn')
