@@ -2,7 +2,7 @@ const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/st
 const source=fs.readFileSync(__dirname+'/app.js','utf8');
 const els={};const element=()=>({textContent:'',attrs:{},classList:{toggle(){}},setAttribute(k,v){this.attrs[k]=v;}});
 const ctx={Date,Number,Math,$:id=>els[id]??=(element()),renderDischarge(){},phaseInfo:()=>['Smart','long generic reason'],drawCountdown(){}};
-vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function displayPlanPhases'),source.indexOf('setInterval(()=>{if(!document.hidden)drawCountdown()')),ctx);
+vm.createContext(ctx);vm.runInContext(source.slice(source.indexOf('function displayPlanPhases'),source.indexOf('setInterval(',source.indexOf('function renderBatteryCard'))),ctx);
 const start=new Date(Date.now()-1000).toISOString(),end=new Date(Date.now()+3600000).toISOString();
 const joint={phases:[{start,end,action:'hold',reason:'reserve',kwh:0,low_ct:12,high_ct:13}]};
 const d={mode:'smart',settings:{target_soc:80,timezone:'Europe/Berlin'},telemetry:{time:new Date().toISOString(),soc:60,battery_power_w:0},smart_preview:{effective_target_soc:18.831684638633398,joint}};
@@ -20,3 +20,8 @@ const pause={settings:{timezone:'Europe/Berlin'},server_time:'2026-10-31T10:59:0
  {start:'2026-10-31T10:58:00Z',end:'2026-10-31T11:00:00Z',action:'hold',reason:'reserve'},
  {start:'2026-10-31T11:00:00Z',end:'2026-10-31T14:45:00Z',action:'hold',reason:'price'}]}}};
 assert.match(ctx.compactPlan(pause),/15:45/);
+const stale={...d,telemetry:{},display_telemetry:{time:'2026-10-01T10:00:00Z',soc:48,battery_power_w:-350}};
+ctx.renderBatteryCard(stale);
+assert.equal(els.socfill.attrs.width,480);
+assert.equal(els.flowstate.textContent,'Entlädt');
+assert.match(els.cardstatus.textContent,/Zuletzt: Entladung/);

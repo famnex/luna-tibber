@@ -136,7 +136,7 @@ function fillSettings(s,secrets){
   sections[g].append(field);
  }
 }
-async function refresh(){if(document.hidden||refreshing)return;refreshing=true;let statusReceived=false;const abort=new AbortController();const timeout=setTimeout(()=>abort.abort(),20000);try{const r=await fetch('/api/status'+(watch?'?fast=1':''),{signal:abort.signal});if(r.status===401){$('connection').textContent='Webinterface erreichbar · bitte anmelden';$('login').hidden=false;$('dashboard').hidden=true;$('logout').hidden=true;window.startupState?.('ready');return;}if(!r.ok)throw new Error('Status nicht erreichbar');const d=await r.json();statusReceived=true;if(document.hidden)return;trackTransition(d);lastStatus=d;countdownAnchor=performance.now();renderBatteryCard(d);renderControl(d);renderExtras(d);if(typeof renderManualOrders==='function')renderManualOrders(d);renderMeterTest(d);renderOverview(d);$('connection').textContent='● Webdienst erreichbar · '+(d.price_error?'Preisdaten prüfen':d.prices?.length?'Preise bis '+new Date(d.prices[d.prices.length-1].end).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Preise fehlen');$('connection').classList.remove('offline');renderPrices(d);$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;if(!initialized){fillSettings(d.settings,d.secrets_set);initialized=true;}const p=d.planned;$('plannedstatus').textContent=p?`${p.phase==='waiting'?'Wartet':p.phase==='charging'?'Lädt':p.phase==='completed'?'Beendet':'Fehler'} · ${new Date(p.start).toLocaleString('de-DE',{timeZone:d.settings.timezone})} bis spätestens ${new Date(p.end).toLocaleString('de-DE',{timeZone:d.settings.timezone})} · Ziel ${p.target_soc} %`:'Kein einmaliger Auftrag.';const t=d.telemetry;const age=t.time?(Date.now()-Date.parse(t.time))/1000:null;$('soc').textContent=typeof t.soc==='number'?t.soc.toFixed(1)+' %':'—';$('battery').value=t.soc??0;$('power').textContent=typeof t.battery_power_w==='number'?(t.battery_power_w/1000).toFixed(2)+' kW':'—';$('sampletime').textContent=age===null?'Noch keine Messung':`Messung vor ${uiAge(age)}${age>90?' · kein Livewert':''}`;$('price').textContent=ct(d.current_price);$('modebadge').textContent=modes[d.mode];$('activity').classList.toggle('spinning',!!d.job);$('activity').textContent=d.fault?'Steuerung meldet einen Fehler – Details unten.':d.job==='sample'?'Messwerte werden aktualisiert …':d.job==='probe'?'Gerät wird ausgelesen …':d.job==='stop'?'Stopp wird an den Wechselrichter gesendet …':d.job==='charge-test'?'Beaufsichtigter Ladetest läuft …':d.job?(t.eligible?'Ladeauftrag aktiv · '+(t.reason||'Ladung freigegeben'):'Steuerung aktiv · '+(t.reason||'Warte auf Messwerte')):d.mode==='planned'?'Geplant: wartet auf Startzeit.':d.mode==='off'?'Aus · manuelle Eingriffe bleiben gültig.':'Wartet auf das nächste Zeitfenster.';if(!busy){for(const [id,job] of [['probe','probe'],['test','charge-test']])$(id).classList.toggle('button-loading',d.job===job);}$('fault').hidden=!d.fault;$('fault').textContent=d.fault;$('missing').hidden=!d.missing.length;$('missing').textContent='Noch einzurichten: '+d.missing.join(', ');$('device').textContent=d.device.serial?`${d.device.model||'Huawei'} · Seriennummer ${d.device.serial}`:'Gerät noch nicht ausgelesen';$('wifi').textContent=d.wifi.interface?`WLAN-Profil: ${d.wifi.interface} · ${d.wifi.ssid} · ${d.wifi.host} (Systemdienst)`:'WLAN-Connector noch nicht eingerichtet';$('commissioned').hidden=d.job==='charge-test';$('commissioned').textContent=d.commissioned?'Ladetest bestätigt.':'Ladetest noch nicht bestätigt.';$('events').textContent=d.events.map(x=>JSON.stringify(x)).join('\n');window.startupState?.('ready');}catch(e){$('connection').textContent=statusReceived?'Server erreichbar · Anzeige konnte nicht geladen werden: '+e.message:'Verbindung unterbrochen · angezeigte Werte können veraltet sein';$('connection').classList.add('offline');if(!lastStatus||$('dashboard').hidden)window.startupState?.('error',statusReceived?'Server erreichbar, aber die Anzeige meldet: '+e.message:'Keine Statusantwort vom Server. Bitte Verbindung und Webdienst prüfen.');}finally{clearTimeout(timeout);refreshing=false;scheduleRefresh();}}
+async function refresh(){if(document.hidden||refreshing)return;refreshing=true;let statusReceived=false;const abort=new AbortController();const timeout=setTimeout(()=>abort.abort(),20000);try{const r=await fetch('/api/status'+(watch?'?fast=1':''),{signal:abort.signal});if(r.status===401){$('connection').textContent='Webinterface erreichbar · bitte anmelden';$('login').hidden=false;$('dashboard').hidden=true;$('logout').hidden=true;window.startupState?.('ready');return;}if(!r.ok)throw new Error('Status nicht erreichbar');const d=await r.json();statusReceived=true;if(document.hidden)return;trackTransition(d);lastStatus=d;countdownAnchor=performance.now();renderBatteryCard(d);renderControl(d);renderExtras(d);if(typeof renderManualOrders==='function')renderManualOrders(d);renderMeterTest(d);renderOverview(d);$('connection').textContent='● Webdienst erreichbar · '+(d.price_error?'Preisdaten prüfen':d.prices?.length?'Preise bis '+new Date(d.prices[d.prices.length-1].end).toLocaleString('de-DE',{timeZone:d.settings.timezone,day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):'Preise fehlen');$('connection').classList.remove('offline');renderPrices(d);$('login').hidden=true;$('dashboard').hidden=false;$('logout').hidden=false;if(!initialized){fillSettings(d.settings,d.secrets_set);initialized=true;}const p=d.planned;$('plannedstatus').textContent=p?`${p.phase==='waiting'?'Wartet':p.phase==='charging'?'Lädt':p.phase==='completed'?'Beendet':'Fehler'} · ${new Date(p.start).toLocaleString('de-DE',{timeZone:d.settings.timezone})} bis spätestens ${new Date(p.end).toLocaleString('de-DE',{timeZone:d.settings.timezone})} · Ziel ${p.target_soc} %`:'Kein einmaliger Auftrag.';const t=knownMeasurement(d);$('soc').textContent=typeof t.soc==='number'?t.soc.toFixed(1)+' %':'—';$('battery').value=t.soc??0;$('power').textContent=typeof t.battery_power_w==='number'?(t.battery_power_w/1000).toFixed(2)+' kW':'—';renderMeasurementAge(d);$('price').textContent=ct(d.current_price);$('modebadge').textContent=modes[d.mode];$('activity').classList.toggle('spinning',!!d.job);$('activity').textContent=d.fault?'Steuerung meldet einen Fehler – Details unten.':d.job==='sample'?'Messwerte werden aktualisiert …':d.job==='probe'?'Gerät wird ausgelesen …':d.job==='stop'?'Stopp wird an den Wechselrichter gesendet …':d.job==='charge-test'?'Beaufsichtigter Ladetest läuft …':d.job?(t.eligible?'Ladeauftrag aktiv · '+(t.reason||'Ladung freigegeben'):'Steuerung aktiv · '+(t.reason||'Warte auf Messwerte')):d.mode==='planned'?'Geplant: wartet auf Startzeit.':d.mode==='off'?'Aus · manuelle Eingriffe bleiben gültig.':'Wartet auf das nächste Zeitfenster.';if(!busy){for(const [id,job] of [['probe','probe'],['test','charge-test']])$(id).classList.toggle('button-loading',d.job===job);}$('fault').hidden=!d.fault;$('fault').textContent=d.fault;$('missing').hidden=!d.missing.length;$('missing').textContent='Noch einzurichten: '+d.missing.join(', ');$('device').textContent=d.device.serial?`${d.device.model||'Huawei'} · Seriennummer ${d.device.serial}`:'Gerät noch nicht ausgelesen';$('wifi').textContent=d.wifi.interface?`WLAN-Profil: ${d.wifi.interface} · ${d.wifi.ssid} · ${d.wifi.host} (Systemdienst)`:'WLAN-Connector noch nicht eingerichtet';$('commissioned').hidden=d.job==='charge-test';$('commissioned').textContent=d.commissioned?'Ladetest bestätigt.':'Ladetest noch nicht bestätigt.';$('events').textContent=d.events.map(x=>JSON.stringify(x)).join('\n');window.startupState?.('ready');}catch(e){$('connection').textContent=statusReceived?'Server erreichbar · Anzeige konnte nicht geladen werden: '+e.message:'Verbindung unterbrochen · angezeigte Werte können veraltet sein';$('connection').classList.add('offline');if(!lastStatus||$('dashboard').hidden)window.startupState?.('error',statusReceived?'Server erreichbar, aber die Anzeige meldet: '+e.message:'Keine Statusantwort vom Server. Bitte Verbindung und Webdienst prüfen.');}finally{clearTimeout(timeout);refreshing=false;scheduleRefresh();}}
 $('loginform').onsubmit=async e=>{e.preventDefault();const b=e.submitter;b.disabled=true;showBusy(true,'Anmeldung läuft …',b);notify('Anmeldung läuft …','loading');try{await api('login',{password:$('loginpassword').value});$('loginpassword').value='';initialized=false;notify('');await refresh();}catch(err){notify(err.message,'error');}finally{showBusy(false,'',b);b.disabled=false;}};
 $('logout').onclick=async()=>{if(settingsDirty&&!confirm('Ungespeicherte Einstellungen verwerfen und abmelden?'))return;notify('Abmeldung läuft …','loading');try{await api('logout',{});initialized=false;settingsDirty=false;notify('Abgemeldet.');await refresh();}catch(e){notify(e.message,'error');}};
 document.querySelectorAll('[data-tab]').forEach(b=>b.onclick=()=>{document.querySelectorAll('.tab').forEach(s=>s.hidden=s.id!==b.dataset.tab);document.querySelectorAll('[data-tab]').forEach(x=>x.classList.toggle('selected',x===b));if(b.dataset.tab==='statshub')selectStatistics(statisticsPage);});
@@ -334,6 +334,19 @@ function uiAge(seconds){
  const m=Math.floor(s/60);if(m<60)return m+' Min.';
  return Math.floor(m/60)+' Std.'+(m%60?' '+m%60+' Min.':'');
 }
+function knownMeasurement(d){
+ const live=d.telemetry||{},cached=d.display_telemetry||{};
+ const valid=t=>Number.isFinite(t.soc)&&Number.isFinite(t.battery_power_w)&&Number.isFinite(Date.parse(t.time));
+ return valid(live)&&(!valid(cached)||Date.parse(live.time)>=Date.parse(cached.time))?live:valid(cached)?cached:{};
+}
+function renderMeasurementAge(d){
+ const t=knownMeasurement(d),stamp=Date.parse(t.time);
+ const now=Date.parse(d.server_time)+(performance.now()-countdownAnchor);
+ const age=Math.max(0,((Number.isFinite(now)?now:Date.now())-stamp)/1000);
+ $('sampletime').textContent=!Number.isFinite(stamp)?'Noch keine Messung':age<60?'Gemessen: gerade eben':`Gemessen: vor ${uiAge(age)}`;
+ $('sampletime').title=Number.isFinite(stamp)?new Date(stamp).toLocaleString('de-DE',{timeZone:d.settings.timezone}):'';
+}
+
 function deviceEvidence(d,now=Date.now()){
  const t=d.telemetry||{},status=d.discharge?.status;
  if(d.fault)return '⚠ Steuerung prüfen';
@@ -345,17 +358,19 @@ function deviceEvidence(d,now=Date.now()){
   if(t.battery_power_w < -100)return '↘ Entladung gemessen';
   return '• Kein wesentlicher Batteriefluss gemessen';
  }
- return '○ Gerätestatus derzeit nicht frisch bestätigt';
+ const known=knownMeasurement(d);
+ if(Number.isFinite(known.battery_power_w))return known.battery_power_w>100?'↗ Zuletzt: Ladung gemessen':known.battery_power_w < -100?'↘ Zuletzt: Entladung gemessen':'• Zuletzt: kein wesentlicher Batteriefluss';
+ return '○ Noch keine Messung';
 }
 
 function renderBatteryCard(d){
  renderDischarge(d);
- const t=d.telemetry,age=t.time?(Date.now()-Date.parse(t.time))/1000:Infinity;
- const fresh=age>=0&&age<=90;
+ const t=knownMeasurement(d);
+ const fresh=Number.isFinite(t.soc);
  const charging=fresh&&t.battery_power_w>100,discharging=fresh&&t.battery_power_w < -100;
  $('batterystatus').classList.toggle('charging',charging);
  $('batterystatus').classList.toggle('stale',!fresh);
- $('flowstate').textContent=!fresh?'Messwerte fehlen / veraltet':charging?'ϟ Lädt':discharging?'Entlädt':'Bereit';
+ $('flowstate').textContent=!fresh?'Noch keine Messung':charging?'ϟ Lädt':discharging?'Entlädt':'Bereit';
  $('powerdirection').textContent=charging?'Energie fließt in den Akku':discharging?'Akku gibt Energie ab':fresh?'Kein wesentlicher Batteriefluss':'Messung abwarten';
  const target=d.mode==='planned'&&d.planned?d.planned.target_soc:d.settings.target_soc;
  $('cardtarget').textContent=Number.isFinite(target)?target.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'—';
@@ -366,7 +381,7 @@ function renderBatteryCard(d){
  $('timerlabel').textContent=d.mode==='on'?'MANUELL · RESTZEIT':'RESTZEIT';
  drawCountdown();
 }
-setInterval(()=>{if(!document.hidden)drawCountdown();},1000);
+setInterval(()=>{if(!document.hidden){drawCountdown();if(lastStatus)renderMeasurementAge(lastStatus);}},1000);
 
 
 let statisticsPage='statistics';

@@ -11,6 +11,7 @@ from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 import ipaddress
 import json
+import math
 import os
 from pathlib import Path
 import secrets
@@ -152,6 +153,8 @@ class Dashboard:
         self.fault = ''
         self.events = deque(maxlen=80)
         self.telemetry = {}
+        self.display_sample = read(folder/'last-measurement.json', {})
+        self.display_saved_at = -300
         self.device = read(folder/'device.json', {})
         self.last_probe_serial = None
         self.price_data = []
@@ -191,6 +194,24 @@ class Dashboard:
         from manual import load as load_orders
         if (self.folder/'manual-orders.json').exists():c['_consumption_rules']=[r for r in load_orders(self.folder,c['expected_serial']) if r['kind'] in ('consumption','holiday')]
         return c
+    def remember_measurement(self,event):
+        # Presentation cache only: never restores controller telemetry/freshness.
+        try:
+            stamp=datetime.fromisoformat(event['time'])
+            if stamp.tzinfo is None or stamp>datetime.now(timezone.utc):return
+            if not all(type(event.get(k)) in (int,float) and math.isfinite(event[k]) for k in ('soc','battery_power_w')):return
+            if not 0<=event['soc']<=100:return
+            serial=self.config()['expected_serial']
+            if not serial:return
+            self.display_sample={'serial':serial,'measurement':{k:event[k] for k in ('time','soc','battery_power_w')}}
+            if time.monotonic()-self.display_saved_at>=300:
+                luna.write_json(self.folder/'last-measurement.json',self.display_sample)
+                self.display_saved_at=time.monotonic()
+        except (ValueError,TypeError,KeyError,OSError):pass
+    def display_measurement(self,c):
+        cache=self.display_sample
+        return cache.get('measurement',{}) if cache.get('serial')==c['expected_serial'] and c['expected_serial'] else {}
+
     def preflight(self, c, commissioning=True):
         missing = [label for key,label in [('expected_serial','Seriennummer (Gerät auslesen und übernehmen)'),('password','Huawei-Installateurpasswort')] if not c[key]]
         if missing:
@@ -228,6 +249,7 @@ class Dashboard:
                 self.events.append(event)
                 if event.get('event') in ('snapshot','test_sample','decision'):
                     self.telemetry = event
+                    self.remember_measurement(event)
                 if event.get('event')=='charge_command' and job in ('run','charge'):
                     try:self.history.record(self.config(),event,self.price_data)
                     except Exception:self.events.append({'event':'statistics_error','message':'Planstatistik konnte nicht gespeichert werden'})
@@ -675,7 +697,7 @@ class Dashboard:
                     'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                     'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                     'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
-                    'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'device':self.device,'economics':plan,'current_price':current,
+                    'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
                     'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                     'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                     'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,

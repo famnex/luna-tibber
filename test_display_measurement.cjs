@@ -1,0 +1,10 @@
+const fs=require('node:fs'),vm=require('node:vm'),assert=require('node:assert/strict');
+const src=fs.readFileSync('app.js','utf8'),els={};
+const ctx={Date,Number,performance:{now:()=>60000},countdownAnchor:0,uiAge:n=>Math.floor(n/60)+' Min.',$:id=>els[id]??={}};
+vm.createContext(ctx);vm.runInContext(src.slice(src.indexOf('function knownMeasurement'),src.indexOf('function deviceEvidence')),ctx);
+const cached={time:'2026-11-02T10:00:00Z',soc:48,battery_power_w:-350};
+const d={display_telemetry:cached,telemetry:{},server_time:'2026-11-02T10:04:00Z',settings:{timezone:'Europe/Berlin'}};
+assert.equal(ctx.knownMeasurement(d),cached);ctx.renderMeasurementAge(d);assert.equal(els.sampletime.textContent,'Gemessen: vor 5 Min.');
+d.telemetry={time:'2026-11-02T10:05:00Z',soc:null};assert.equal(ctx.knownMeasurement(d),cached);
+d.telemetry={...cached,time:'2026-11-02T10:05:00Z',soc:47};assert.equal(ctx.knownMeasurement(d).soc,47);
+console.log('Known measurements survive stale/partial samples; age uses server clock');
