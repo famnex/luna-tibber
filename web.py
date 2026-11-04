@@ -156,6 +156,8 @@ class Dashboard:
         self.display_sample = read(folder/'last-measurement.json', {})
         self.display_saved_at = -300
         self.device = read(folder/'device.json', {})
+        if not self.display_measurement(self.config()) and self.device.get('serial')==self.config()['expected_serial']:
+            self.remember_measurement(self.device)
         self.last_probe_serial = None
         self.price_data = []
         self.price_at = 0
@@ -211,6 +213,12 @@ class Dashboard:
     def display_measurement(self,c):
         cache=self.display_sample
         return cache.get('measurement',{}) if cache.get('serial')==c['expected_serial'] and c['expected_serial'] else {}
+
+    def startup_snapshot(self):
+        # Independent of the planner lock; the cache is replaced as a whole.
+        c=self.config()
+        return {'measurement':self.display_measurement(c),'timezone':c['timezone'],
+                'server_time':datetime.now(timezone.utc).isoformat()}
 
     def preflight(self, c, commissioning=True):
         missing = [label for key,label in [('expected_serial','Seriennummer (Gerät auslesen und übernehmen)'),('password','Huawei-Installateurpasswort')] if not c[key]]
@@ -785,6 +793,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,{'ok':True,'pid':os.getpid(),'revision':getattr(self.server,'started_revision',None)})
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
+        if self.path=='/api/startup':
+            return self.send(200,self.server.app.startup_snapshot())
         if self.path=='/api/update':
             return self.send(200,self.server.app.update_status())
         if self.path.split('?',1)[0]=='/api/journal/timeline':
