@@ -33,3 +33,29 @@ class GridCostTests(unittest.TestCase):
   p=[self.price(0,2,20),self.price(2,5,50)]
   self.sample(0,0,p);self.sample(5,1,p)
   self.assertAlmostEqual(self.g.summary(self.c,self.start+timedelta(minutes=5))['periods']['today']['ct_kwh'],38)
+ def test_backfill_idempotent_preserves_live_cursor_and_costs(self):
+  import sqlite3,json,zlib
+  source=self.folder/'diagnostics.sqlite3'
+  p=[self.price(0,30,20)]
+  with sqlite3.connect(source) as db:
+   db.executescript('CREATE TABLE events(id INTEGER PRIMARY KEY,time REAL,data TEXT,plan_id INTEGER);CREATE TABLE plans(id INTEGER PRIMARY KEY,data BLOB);')
+   db.execute('INSERT INTO plans VALUES(1,?)',(zlib.compress(json.dumps({'prices':p},default=lambda x:x.isoformat()).encode()),))
+   for n in range(4):
+    stamp=self.start+timedelta(minutes=5*n)
+    event={'meter':{'valid':True,'measured_at':stamp.isoformat(),'import_kwh':100+n}}
+    db.execute('INSERT INTO events(time,data,plan_id) VALUES(?,?,1)',(stamp.timestamp(),json.dumps(event)))
+  self.sample(10,102,p);self.sample(15,103,p)
+  now=self.start+timedelta(minutes=16)
+  self.g.backfill(self.c,now);self.g.backfill(self.c,now)
+  row=self.g.summary(self.c,now)['periods']['today']
+  self.assertAlmostEqual(row['kwh'],3);self.assertAlmostEqual(row['eur'],.6)
+  with self.g.connect() as db:self.assertEqual(db.execute('SELECT kwh FROM samples').fetchone()[0],103)
+ def test_backfill_without_prices_remains_empty(self):
+  import sqlite3,json
+  with sqlite3.connect(self.folder/'diagnostics.sqlite3') as db:
+   db.executescript('CREATE TABLE events(id INTEGER PRIMARY KEY,time REAL,data TEXT,plan_id INTEGER);CREATE TABLE plans(id INTEGER PRIMARY KEY,data BLOB);')
+   for n in range(2):
+    stamp=self.start+timedelta(minutes=n*5)
+    db.execute('INSERT INTO events(time,data) VALUES(?,?)',(stamp.timestamp(),json.dumps({'meter':{'valid':True,'measured_at':stamp.isoformat(),'import_kwh':n}})))
+  self.g.backfill(self.c,self.start+timedelta(minutes=6))
+  self.assertIsNone(self.g.summary(self.c,self.start+timedelta(minutes=6))['periods']['today']['ct_kwh'])

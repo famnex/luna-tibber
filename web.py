@@ -186,8 +186,13 @@ class Dashboard:
         migrate_consumption(self.folder,self.config())
         self.audit_event({'event':'service_started'})
         if start_worker:
+            threading.Thread(target=self.backfill_grid_costs,daemon=True).start()
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
+    def backfill_grid_costs(self):
+        try:self.grid_costs.backfill(self.config())
+        except Exception:self.events.append({'event':'statistics_error','message':'Historische Bezugskosten konnten nicht ergänzt werden; erneuter Versuch beim nächsten Start.'})
+
     def audit_event(self,event,job=None,mode=None):
         try:self.grid_costs.record(self.config(),event,self.price_data)
         except Exception:pass  # Statistical IO must not interrupt the controller.
