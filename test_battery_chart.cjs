@@ -10,3 +10,12 @@ console.log('Battery chart: actual history, floor-aware Smart projection, inacti
 
 assert.ok(path.includes(' C'));
 const hourly=c.socPath([{time:now,soc:40},{time:now+3600000,soc:60}],now,now+3600000,Date.parse,v=>v);assert.equal((hourly.match(/ M/g)||[]).length,1);assert.ok(hourly.includes(' C'));
+// A short stale-data gap must not blink; different inputs and expired cache must clear it.
+d.telemetry.time=new Date(now).toISOString();
+r=c.stableBatterySeries(d,now);assert.ok(r.forecast.length);
+d.smart_preview={};r=c.stableBatterySeries(d,now+180000);assert.ok(r.retained);assert.ok(r.forecast.length);
+assert.equal(c.stableBatterySeries(d,now+660000).forecast.length,0);
+d.smart_preview={joint:{trace:[{start:new Date(now).toISOString(),end:new Date(now+900000).toISOString(),start_kwh:4.5,end_kwh:5}]}};
+c.stableBatterySeries(d,now);d.smart_preview={};d.mode='off';assert.equal(c.stableBatterySeries(d,now+180000).forecast.length,0);
+d.mode='smart';d.smart_preview={joint:{trace:[{start:new Date(now).toISOString(),end:new Date(now+900000).toISOString(),start_kwh:4.5,end_kwh:5}]}};
+c.stableBatterySeries(d,now);d.smart_preview={};d.telemetry.time=new Date(now+100000).toISOString();assert.equal(c.stableBatterySeries(d,now+180000).forecast.length,0);

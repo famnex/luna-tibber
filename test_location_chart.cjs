@@ -40,3 +40,12 @@ data.pv_forecast.series[0].kw=3;ctx.renderPrices(data);assert.notEqual($('pricec
 data.settings.pv_enabled=false;ctx.renderPrices(data);assert.equal($('pvlegend').hidden,true);assert.ok(!$('pricechart').children[0].children.some(x=>x.attrs.class==='pv-line'));
 data.settings.pv_enabled=true;data.pv_forecast.series=[];ctx.renderPrices(data);assert.equal($('pvlegend').hidden,true);
 console.log('Solar overlay: independent kW axis, gaps vs zero, DST epochs, negative prices, tooltips and redraw caching passed');
+// Failed construction retains the old chart and does not poison its redraw signature.
+const prior=$('pricechart').children[0],priorSignature=ctx.chartSignature,bind=ctx.bindPlotInspection;
+data.prices[0].ct=12;ctx.bindPlotInspection=()=>{throw Error('temporary rendering failure');};
+assert.throws(()=>ctx.renderPrices(data),/temporary/);assert.equal(ctx.chartSignature,priorSignature);assert.equal($('pricechart').children[0],prior);
+ctx.bindPlotInspection=bind;ctx.renderPrices(data);assert.notEqual($('pricechart').children[0],prior);
+// A new SOC trace is redrawn on a normal status render without changing range/tab.
+data.mode='smart';data.settings.battery_capacity_kwh=10;data.settings.battery_floor_soc=5;
+data.server_time=at(0);data.telemetry={time:at(0),soc:50};data.smart_preview={joint:{trace:[{start:at(0),end:at(12),start_kwh:4.5,end_kwh:5}]}};
+ctx.renderPrices(data);const before=$('pricechart').children[0];data.smart_preview.joint.trace[0].end_kwh=6;ctx.renderPrices(data);assert.notEqual($('pricechart').children[0],before);

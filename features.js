@@ -286,6 +286,23 @@ function renderTodayPlan(d){
 }
 
 const chartVisibility={pv:true,battery:true};
+// Display-only bridge across brief telemetry/plan gaps. Never feeds the controller.
+let lastBatteryForecast=null;
+function stableBatterySeries(d,now=Date.parse(d.server_time)||Date.now()){
+ const series=batterySeries(d,now);
+ const key=JSON.stringify([d.mode,d.settings,d.manual_orders||[],d.consumption_forecast||[],d.discharge?.request||{},d.prices||[],d.pv_forecast?.series||[]]);
+ if(d.fault){lastBatteryForecast=null;return {...series,forecast:[]};}
+ if(series.forecast.length){
+  lastBatteryForecast={key,at:Date.parse(d.telemetry?.time),points:series.forecast};
+  return series;
+ }
+ const cached=lastBatteryForecast,stamp=Date.parse(d.telemetry?.time);
+ if(cached&&cached.key===key&&now>=cached.at&&now-cached.at<=600000&&
+    !(Number.isFinite(stamp)&&stamp>cached.at)&&cached.points.some(p=>p.time>now)){
+  return {...series,forecast:cached.points,retained:true,forecast_at:cached.at};
+ }
+ lastBatteryForecast=null;return series;
+}
 function batterySeries(d,now=Date.now()){
  const measured=(d.battery_history||[]).map(p=>({time:Date.parse(p.time),soc:p.soc})).filter(p=>Number.isFinite(p.time)&&Number.isFinite(p.soc)&&p.time<=now&&p.soc>=0&&p.soc<=100);
  const t=d.telemetry||{},stamp=Date.parse(t.time),fresh=Number.isFinite(t.soc)&&Number.isFinite(stamp)&&now-stamp<=120000&&now>=stamp;
