@@ -144,3 +144,12 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 .tip-toolbar{display:flex;justify-content:space-between;align-items:center;gap:12px}.tip-toolbar button{min-width:44px;padding:8px}.tip-choice>div{width:100%;min-width:0}.tip-costs{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px;margin:12px 0}.tip-cost{display:flex;flex-direction:column;gap:4px;padding:10px 8px;border:1px solid var(--line,#dce5dd);border-radius:12px}.tip-cost span{font-size:.8rem}.tip-cost strong{font-size:1.15rem;white-space:nowrap}.tip-cost.total{border:2px solid #43866a}.tip-sources{display:flex;flex-wrap:wrap;gap:6px;margin:8px 0}.tip-sources span{font-size:.85rem;border:1px solid var(--line,#dce5dd);border-radius:20px;padding:6px 9px}.tip-protection{font-size:.9rem}.tip-choice details{font-size:.85rem;margin-top:8px}@media(max-width:380px){.tip-costs{grid-template-columns:repeat(2,minmax(0,1fr))}}
 
 #orderdialog{background:var(--surface,#fff);color:inherit;border:1px solid var(--line,#dce5dd);border-radius:20px;padding:20px;box-sizing:border-box}#orderdialog::backdrop{background:#0b201b88}
+
+/* Authenticated startup shell: measured values stay visible; unknown content shimmers. */
+.skeleton{position:relative!important;overflow:hidden!important;border-radius:10px!important;background:rgba(115,142,127,.18)!important;color:transparent!important;min-height:1.15em;box-shadow:none!important;}
+.skeleton>*{visibility:hidden}.skeleton::after{content:"";position:absolute;inset:-100%;background:linear-gradient(115deg,transparent 35%,rgba(255,255,255,.22) 50%,transparent 65%);transform:translateX(-55%);animation:luna-shimmer 1.8s ease-in-out infinite;pointer-events:none}
+@keyframes luna-shimmer{to{transform:translateX(55%)}}
+.dashboard-loading #todayphases{height:20px;margin:18px 0}.dashboard-loading #pricechart{height:240px}.dashboard-loading #modebadge{min-width:65px}.dashboard-loading #flowstate{min-width:100px}.dashboard-loading #nexttime{display:block;width:55%;height:36px}.dashboard-loading #nextreason{display:block;width:80%;height:18px}
+.dashboard-loading #overview details{display:none}.dashboard-loading #statshub>:not(.startup-placeholder),.dashboard-loading #manual>:not(.startup-placeholder),.dashboard-loading #settings>:not(.startup-placeholder){display:none}
+.skeleton-heading{height:30px;width:55%;margin-bottom:24px}.skeleton-line{height:20px;width:80%;margin-bottom:16px}.skeleton-panel{height:160px;width:100%}
+@media(prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
