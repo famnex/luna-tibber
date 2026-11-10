@@ -62,3 +62,5 @@ consumption-templates.json*
 
 last-measurement.json
 last-measurement.json.tmp
+
+grid-costs.sqlite3*

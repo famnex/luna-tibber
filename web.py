@@ -170,6 +170,8 @@ class Dashboard:
         from history import History
         from notifications import Notifications
         self.history=History(folder)
+        from grid_costs import GridCosts
+        self.grid_costs=GridCosts(folder)
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
@@ -187,6 +189,8 @@ class Dashboard:
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
     def audit_event(self,event,job=None,mode=None):
+        try:self.grid_costs.record(self.config(),event,self.price_data)
+        except Exception:pass  # Statistical IO must not interrupt the controller.
         try:self.journal.record(self.config(),event,mode or self.mode,job or self.job,self.revision,self.price_data)
         except Exception:self.journal.error='Diagnoseprotokoll konnte nicht gespeichert werden.'
 
@@ -828,6 +832,8 @@ class Handler(BaseHTTPRequestHandler):
                         return self.send_download(stream,'json.gz' if path.endswith('/export') else 'txt')
                 except Exception:return self.send(503,{'error':'Export derzeit nicht möglich. Kürzeren Zeitraum wählen oder erneut versuchen.'})
             return self.send(200,journal.entries(hours,before,query.get('all',['0'])[0]=='1'))
+        if self.path=='/api/grid-costs':
+            return self.send(200,self.server.app.grid_costs.summary(self.server.app.config()))
         if self.path=='/api/history':
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):

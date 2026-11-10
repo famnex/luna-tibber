@@ -60,6 +60,7 @@ function renderPv(d){
 let historyData=null,historyLoading=false,historyAt=0;
 async function loadHistory(force=false){
  if(document.hidden||document.getElementById('statistics').hidden||document.getElementById('statshub')?.hidden||historyLoading||(!force&&Date.now()-historyAt<60000))return;
+ loadGridCosts();
  historyLoading=true;const info=document.getElementById('historyinfo');info.textContent='◌ Statistik wird geladen …';
  try{const r=await fetch('/api/history');if(!r.ok)throw Error('Statistik nicht erreichbar');historyData=await r.json();historyAt=Date.now();if(!document.hidden)renderHistory();}
  catch(e){info.textContent='⚠ '+e.message;}
@@ -362,3 +363,19 @@ function renderPhaseStrip(root,rows,fmt){
  for(let i=0;i<5;i++){const tick=document.createElement('span');tick.textContent=fmt(a+(b-a)*i/4);axis.append(tick);}
  root.append(bar,axis,detail);
 }
+
+let gridCostData=null;
+async function loadGridCosts(){
+ const box=document.getElementById('gridaverage');if(!box)return;
+ document.getElementById('gridperiod').onchange=renderGridCosts;
+ try{const r=await fetch('/api/grid-costs');if(!r.ok)throw Error();gridCostData=await r.json();renderGridCosts();}
+ catch(_){document.getElementById('gridcoverage').textContent='Bezugspreis derzeit nicht abrufbar.';}
+}
+function renderGridCosts(){
+ if(!gridCostData)return;
+ const p=gridCostData.periods[document.getElementById('gridperiod').value],fmt=n=>n.toLocaleString('de-DE',{maximumFractionDigits:2});
+ document.getElementById('gridaverage').textContent=p.ct_kwh===null?'—':'≈ '+fmt(p.ct_kwh)+' ct/kWh';
+ document.getElementById('gridamount').textContent=p.hours?fmt(p.kwh)+' kWh Netzbezug · '+fmt(p.eur)+' € Arbeitspreiskosten':'';
+ document.getElementById('gridcoverage').textContent=p.hours?fmt(p.coverage_pct)+' % des Zeitraums erfasst · '+fmt(p.hours)+' Std.'+(p.coverage_pct<99.9?' · Teilzeitraum': '')+(p.kwh===0?' · Kein Netzbezug gemessen':''):'Noch keine auswertbaren Messpaare mit Strompreisen.';
+}
+
