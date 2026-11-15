@@ -250,7 +250,7 @@ function formatPriceAge(seconds){
    const line=el('path',{d:socPath(points,first,last,x,sy),fill:'none',stroke:'#6864b4','stroke-width':2.5,'stroke-dasharray':dashed?'6 4':'none','pointer-events':'none'});svg.append(line);
   }
  }
- if($('batterychartnote'))$('batterychartnote').textContent='Akku: durchgezogen = Messverlauf · gestrichelt = '+(d.mode==='smart'?'Smart-Plan':'PV-/Verbrauchsschätzung')+'. '+(battery.retained?'Letzte Prognose · Messung '+new Date(battery.forecast_at).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'})+' · Aktualisierung ausstehend. ':!battery.forecast.length?'Keine belastbare Prognose verfügbar. ':'')+'Datenlücken bleiben offen.';
+ if($('batterychartnote'))$('batterychartnote').textContent='🔋 — Messung · ┄ '+(d.mode==='smart'?'Smart-Prognose':'Schätzung')+' · '+(battery.retained?'Letzte Prognose · Messung '+new Date(battery.forecast_at).toLocaleTimeString('de-DE',{timeZone:d.settings.timezone,hour:'2-digit',minute:'2-digit'})+' · Aktualisierung ausstehend. ':!battery.forecast.length?'Keine belastbare Prognose verfügbar. ':'')+'Datenlücken bleiben offen.';
  const cursor=el('line',{x1:55,x2:55,y1:30,y2:246,stroke:'#173a30','stroke-dasharray':'3 3','pointer-events':'none',visibility:'hidden'});svg.append(cursor);
  bindPlotInspection(svg,event=>{const bounds=svg.getBoundingClientRect(),px=(event.clientX-bounds.left)*chartWidth/bounds.width;if(px<55||px>right)return;const stamp=first+(px-55)/(right-55)*(last-first);const index=rows.findIndex(p=>Date.parse(p.start)<=stamp&&stamp<Date.parse(p.end));if(index<0)return;valueBubbles($('chartdetail'),chartValues[index]);cursor.setAttribute('x1',px);cursor.setAttribute('x2',px);cursor.setAttribute('visibility','visible');});
  chart.replaceChildren();chart.append(svg);chartSignature=signature;
@@ -380,7 +380,7 @@ function renderMeasurementAge(d){
  const t=knownMeasurement(d),stamp=Date.parse(t.time);
  const now=Date.parse(d.server_time)+(performance.now()-countdownAnchor);
  const age=Math.max(0,((Number.isFinite(now)?now:Date.now())-stamp)/1000);
- $('sampletime').textContent=!Number.isFinite(stamp)?'Noch keine Messung':age<60?'Gemessen: gerade eben':`Gemessen: vor ${uiAge(age)}`;
+ $('sampletime').textContent=!Number.isFinite(stamp)?'Noch keine Messung':age<60?'◷ gerade eben':`◷ vor ${uiAge(age)}`;
  $('sampletime').title=Number.isFinite(stamp)?new Date(stamp).toLocaleString('de-DE',{timeZone:d.settings.timezone}):'';
 }
 
@@ -408,13 +408,13 @@ function renderBatteryCard(d){
  $('batterystatus').classList.toggle('charging',charging);
  $('batterystatus').classList.toggle('stale',!fresh);
  $('flowstate').textContent=!fresh?'Noch keine Messung':charging?'ϟ Lädt':discharging?'Entlädt':'Bereit';
- $('powerdirection').textContent=charging?'Energie fließt in den Akku':discharging?'Akku gibt Energie ab':fresh?'Kein wesentlicher Batteriefluss':'Messung abwarten';
+ $('powerdirection').textContent=charging?'↑ Laden':discharging?'↓ Entladen':fresh?'Batterieleistung':'Messung abwarten';
  const target=d.mode==='planned'&&d.planned?d.planned.target_soc:d.settings.target_soc;
  $('cardtarget').textContent=Number.isFinite(target)?target.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'—';
  $('socfill').setAttribute('width',fresh?Math.min(1000,Math.max(0,t.soc*10)):0);
  $('soctarget').setAttribute('x1',target*10);$('soctarget').setAttribute('x2',target*10);
  $('socgraphic').setAttribute('aria-label',fresh?`Akkustand ${t.soc} Prozent, Ziel ${target} Prozent`:'Akkustand veraltet oder unbekannt');
- const phase=phaseInfo(d);$('cardstatus').textContent=deviceEvidence(d);$('cardplan').textContent=d.mode==='smart'?'Plan · '+compactPlan(d):phase[1];
+ const phase=phaseInfo(d);$('cardstatus').textContent=deviceEvidence(d);$('cardstatus').hidden=!d.fault&&!['stop','discharge-sync'].includes(d.job)&&!/[🔒✓]/u.test($('cardstatus').textContent)&&fresh;$('cardplan').textContent=d.mode==='smart'?'Plan · '+compactPlan(d):phase[1];
  $('timerlabel').textContent=d.mode==='on'?'MANUELL · RESTZEIT':'RESTZEIT';
  drawCountdown();
 }

@@ -153,3 +153,17 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 .dashboard-loading #overview details{display:none}.dashboard-loading #statshub>:not(.startup-placeholder),.dashboard-loading #manual>:not(.startup-placeholder),.dashboard-loading #settings>:not(.startup-placeholder){display:none}
 .skeleton-heading{height:30px;width:55%;margin-bottom:24px}.skeleton-line{height:20px;width:80%;margin-bottom:16px}.skeleton-panel{height:160px;width:100%}
 @media(prefers-reduced-motion:reduce){.skeleton::after{animation:none;display:none}}
+
+/* Compact information hierarchy, including small touch screens. */
+.battery-stats{grid-template-columns:repeat(2,minmax(0,1fr))}
+#batterystatus>details{margin:0 24px 20px;font-size:.85rem}
+#batterystatus>details .timer-stat{display:flex;gap:12px;align-items:center;margin-top:12px}
+#sampletime[role=button]{cursor:pointer;width:fit-content;min-height:32px;display:flex;align-items:center}
+.icon-action{min-width:44px;min-height:44px;padding:8px;font-size:1.2rem}
+.chart-help,.export-menu{margin:12px 0;font-size:.85rem}
+.tip-choice{padding:16px 0}.tip-choice p{margin:8px 0}.tip-costs{gap:6px;margin:10px 0}.tip-cost{padding:8px 6px}.tip-sources span{padding:4px 8px}
+#notification-settings>details,#notification-settings>article{margin:16px 0;border:0;box-shadow:none;padding:12px 0}
+.car-day details{font-size:.8rem}.car-day details p{overflow-wrap:anywhere}
+.car-advice h3{margin:10px 0}.car-advice>p{margin:8px 0}
+.diag-advice{margin-bottom:24px}.diag-advice>h3{margin-top:0}
+@media(max-width:480px){.tip-cost strong{font-size:1rem}.tip-cost span{font-size:.75rem}.tip-choice>div>strong{font-size:1rem}.tip-sources{gap:4px}.tip-sources span{font-size:.8rem}}

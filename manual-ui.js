@@ -56,10 +56,10 @@ function renderManualOrders(d){
   const title=document.createElement('strong');title.textContent=(o.kind==='hold'?'🔒 Entladesperre':o.kind==='charge'?'↗ Ladeauftrag':(o.kind==='holiday'?'☷ ':'⌂ ')+(o.name||'Zusatzverbrauch'))+(Date.parse(o.start)<=now?' · aktiv':' · geplant');
   const time=document.createElement('p');time.textContent='◷ '+fmt(o.start)+' → '+(o.end_kind==='forever'?'bis auf Widerruf':o.end_kind==='soc'?o.target_soc+' % · spätestens '+fmt(o.end):fmt(o.end));
   const actions=document.createElement('div');actions.className='actions';
-  const edit=document.createElement('button');edit.textContent=o.recurring?'✎ Routine bearbeiten':'✎ Bearbeiten';edit.onclick=()=>editOrder((d.manual_orders||[]).find(r=>r.id===o.id)||o);
-  const remove=document.createElement('button');remove.textContent=o.recurring?'× Routine entfernen':'× Entfernen';remove.onclick=async()=>{if(confirm(o.recurring?'Die gesamte Routine einschließlich aller Wiederholungen entfernen?':'Diesen Eintrag entfernen? Die Planung wird danach angepasst.'))await perform('manual-delete',{id:o.id},remove);};
+  const edit=document.createElement('button');edit.textContent=o.recurring?'✎ Routine bearbeiten':'✎ Bearbeiten';edit.title=edit.textContent;edit.setAttribute('aria-label',edit.textContent);edit.textContent='✎';edit.className='icon-action';edit.onclick=()=>editOrder((d.manual_orders||[]).find(r=>r.id===o.id)||o);
+  const remove=document.createElement('button');remove.textContent=o.recurring?'× Routine entfernen':'× Entfernen';remove.title=remove.textContent;remove.setAttribute('aria-label',remove.textContent);remove.textContent='×';remove.className='icon-action';remove.onclick=async()=>{if(confirm(o.recurring?'Die gesamte Routine einschließlich aller Wiederholungen entfernen?':'Diesen Eintrag entfernen? Die Planung wird danach angepasst.'))await perform('manual-delete',{id:o.id},remove);};
   actions.append(edit,remove);card.append(title,time);
-  if(o.kind==='consumption'){const info=document.createElement('p');info.className='muted';info.textContent=o.kwh.toLocaleString('de-DE')+' kWh zusätzlich'+(o.holiday_overlap?' · ☷ im Urlaub ganz/teilweise pausiert':'')+(o.recurring?' · ↻ '+(o.repeat==='daily'?'täglich':o.weekdays.map(i=>['Mo','Di','Mi','Do','Fr','Sa','So'][i]).join(', '))+' · weitere Wiederholungen folgen':'');card.append(info);}
+  if(o.kind==='consumption'){const info=document.createElement('p');info.className='muted';info.textContent=o.kwh.toLocaleString('de-DE')+' kWh zusätzlich'+(o.holiday_overlap?' · ☷ im Urlaub ganz/teilweise pausiert':'')+(o.recurring?' · ↻ '+(o.repeat==='daily'?'täglich':o.weekdays.map(i=>['Mo','Di','Mi','Do','Fr','Sa','So'][i]).join(', '))+'':'');card.append(info);}
   card.append(actions);root.append(card);
  }
 }
@@ -129,7 +129,7 @@ async function loadConsumptionTip(data,revision){
   const fmt=x=>new Date(x).toLocaleTimeString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',hour:'2-digit',minute:'2-digit'});
   $('ordertiptitle').textContent=tip.suggestions?.length?(tip.estimate?'≈ Geschätzte Zeitfenster':'💡 Zeitfenster zur Auswahl'):'ⓘ Zeitvergleich';
   const economic=tip.basis==='dispatch'&&tip.suggestions?.length;
-  $('ordertipassumptions').hidden=!economic;$('ordertipbasis').textContent=tip.message||'';
+  $('ordertipassumptions').hidden=!economic;$('ordertipbasis').textContent=(tip.message||'')+' Nutzung = Netzstrom + Akkuverschleiß. Quellen anteilig geschätzt. Entladesperren betreffen den gesamten Akku. Vorschau, noch kein Befehl.';
   $('ordertiptext').textContent=economic?'Dein Termin: ≈ '+money(tip.current_eur)+' Mehrkosten · Vergleich bis '+new Date(tip.horizon_end).toLocaleString('de-DE',{timeZone:lastStatus?.settings.timezone||'Europe/Berlin',day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'}):(tip.message||'');
   if(tip.estimate&&economic)$('ordertiptext').textContent='≈ Stundenschätzung · '+$('ordertiptext').textContent;
   if(tip.calculated_at)$('ordertiptext').textContent+=' · Stand '+fmt(tip.calculated_at);
@@ -137,12 +137,12 @@ async function loadConsumptionTip(data,revision){
    const row=document.createElement('div');row.className='tip-choice';
    const info=document.createElement('div'),heading=document.createElement('strong'),detail=document.createElement('p');
    heading.textContent=({now:'Jetzt · ',earliest:'Frühester Start · ',between:'Dazwischen · ',later:'Später · '}[option.role]||'')+fmt(option.start)+'–'+fmt(option.end)+(economic?'':' · '+money(option.cost_eur))+(option.cheapest?(economic?' ★ Günstigster geprüft':' ★ Günstigstes'):'');
-   detail.className='muted';detail.textContent=(option.saving_eur>=0?'− '+money(option.saving_eur):'+ '+money(-option.saving_eur))+' gegenüber deiner Eingabe'+(!option.cheapest?' · + '+money(option.extra_eur)+' zum günstigsten Termin':'');
+   detail.className='muted';detail.textContent=option.cheapest?(Math.abs(option.saving_eur)<.005?'Günstigster geprüfter Termin':money(Math.abs(option.saving_eur))+(option.saving_eur>=0?' günstiger':' teurer')+' als deine Auswahl'):'+'+money(option.extra_eur)+' zum günstigsten Termin';
    info.append(heading,detail);
    if(economic){
     const costs=document.createElement('div');costs.className='tip-costs';
     const cell=(label,value,total=false)=>{const box=document.createElement('div');box.className=total?'tip-cost total':'tip-cost';const name=document.createElement('span'),amount=document.createElement('strong');name.textContent=label;amount.textContent=money(value);box.append(name,amount);costs.append(box);};
-    cell('⚡ Nutzung¹',option.usage_cost_eur??option.cost_eur-option.later_extra_eur);
+    cell('⚡ Nutzung',option.usage_cost_eur??option.cost_eur-option.later_extra_eur);
     cell('◷ Später',option.later_extra_eur);
     if(Math.abs(option.plan_adjustment_eur||0)>=.005)cell('↔ Plananpassung',option.plan_adjustment_eur);
     cell('Σ Gesamt',option.cost_eur,true);
@@ -152,11 +152,11 @@ async function loadConsumptionTip(data,revision){
     if(option.sources_kwh){for(const [key,label] of [['pv','☀ PV'],['battery','🔋 Akku'],['grid','⚡ Netz']]){const pill=document.createElement('span');pill.textContent=label+' '+number(option.sources_kwh[key])+' kWh';sources.append(pill);}}
     info.append(sources);
     const protection=document.createElement('p');protection.className='tip-protection';
-    protection.textContent=option.hold_minutes?'🔒 Entladung '+(option.hold_minutes>=orderDuration()-.5?'durchgehend':'teilweise')+' gesperrt · '+option.hold_minutes+' Min. geplant':'🔓 Keine Entladesperre geplant';
-    info.append(protection);
+    protection.textContent=option.hold_minutes?'🔒 Entladung pausiert · '+option.hold_minutes+' Min.':'🔓 Keine Entladesperre geplant';
+    protection.hidden=!option.hold_minutes;info.append(protection);
     const extra=document.createElement('details'),summary=document.createElement('summary'),facts=document.createElement('p');
     summary.textContent='ⓘ Akku & Sperrzeiten';
-    facts.textContent='¹ Nutzung = Netzstrom + Akkuverschleiß. Quellen anteilig geschätzt. Entladesperre betrifft den gesamten Akku; keine Netzladesperre. Vorschau, noch kein Befehl. Akku danach '+number(option.end_soc)+' % · am Vergleichsende '+number(option.horizon_soc)+' %.';
+    facts.textContent='Akku danach '+number(option.end_soc)+' % · am Vergleichsende '+number(option.horizon_soc)+' %.';
     extra.append(summary,facts);
     for(const window of option.hold_windows||[]){const time=document.createElement('div');time.textContent='🔒 '+fmt(window.start)+'–'+fmt(window.end);extra.append(time);}
     info.append(extra);

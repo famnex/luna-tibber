@@ -1,5 +1,5 @@
 const fs=require('fs'),vm=require('vm'),assert=require('assert');
-class El{constructor(){this.children=[];this.dataset={};this.value='';this.hidden=false;this.options=[];}append(...v){this.children.push(...v);}replaceChildren(...v){this.children=v;}showModal(){this.open=true;}close(){this.open=false;}}
+class El{constructor(){this.children=[];this.dataset={};this.value='';this.hidden=false;this.options=[];}setAttribute(k,v){this[k]=v;}append(...v){this.children.push(...v);}replaceChildren(...v){this.children=v;}showModal(){this.open=true;}close(){this.open=false;}}
 const nodes={},$=id=>nodes[id]??=new El();
 $('orderendkind').options=['time','soc','forever'].map(value=>({value}));
 const calls=[],d={mode:'off',settings:{timezone:'Europe/Berlin',target_soc:80,charge_power_w:5000,max_session_minutes:120},server_time:'2026-10-29T12:00:00Z',manual_orders:[{id:'1',kind:'hold',start:'2026-10-29T11:00:00Z',end:null,end_kind:'forever'}]};
@@ -21,7 +21,7 @@ const routine={id:'routine',kind:'consumption',name:'Kochen',start:'2026-10-29T1
 const occurrences=[0].map(i=>({...routine,start:'2026-11-0'+(2+i*4)+'T17:00:00Z',recurring:true}));
 ctx.renderManualOrders({...d,manual_orders:[routine],manual_occurrences:occurrences});
 assert.equal($('orderlist').children.length,1);
-assert.match($('orderlist').children[0].children[2].textContent,/weitere Wiederholungen/);
+assert.match($('orderlist').children[0].children[2].textContent,/↻ Mo, Fr/);
 $('orderlist').children[0].children[3].children[0].onclick();
 assert.equal($('orderstart').value,'2026-10-29T18:00');assert.equal($('orderday4').checked,true);
 console.log('Consumption UI: recurrence, holiday semantics, one occurrence and master editing passed');

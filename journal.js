@@ -64,7 +64,7 @@ async function loadJournal(more=false){
    const title=document.createElement('h3');title.textContent=card.title;head.append(icon,title);
    const metrics=document.createElement('div');metrics.className='event-metrics';
    for(const text of card.metrics){const chip=document.createElement('span');chip.textContent=text;metrics.append(chip);}
-   const label=document.createElement('small');label.textContent='Grund / Beobachtung';
+   const label=document.createElement('small');label.hidden=true;label.textContent='Grund / Beobachtung';
    p.textContent=card.reason;li.append(time,head,metrics,label,p);
    const details=document.createElement('details'),summary=document.createElement('summary'),pre=document.createElement('pre');
    summary.textContent='Messwerte & Entscheidungsdaten · Plan #'+(event.plan_id??'—');
@@ -184,7 +184,7 @@ function renderDiagnosis(box,d){
  if(!d.hold_spans.length)details.append(el('p','Keine ausreichend dokumentierte Sperrphase.','muted'));
  for(const s of d.hold_spans){const row=el('div',undefined,'diag-hold');row.append(el('strong',journalNumber(s.start_soc,' %')+' → '+journalNumber(s.end_soc,' %')),el('p',journalTime(s.start)+' – '+journalTime(s.end)),el('small','Abnahme '+journalNumber(s.soc_drop,' Prozentpunkte')+' · max. gemeldete Entladung '+journalNumber(s.max_discharge_w,' W')));details.append(row);}
  for(const s of d.limit_mismatches)details.append(el('p','⚠ '+journalTime(s.time)+': Entladegrenze '+journalNumber(s.limit_w,' W')+' trotz zuvor bestätigter Sperre.','diag-alert'));
- const advice=el('section',undefined,'diag-advice');advice.append(el('h3','↗ Einstellungen prüfen'),el('p','Letzte 7 Tage · nur passende Einstellungen · keine automatische Änderung.','muted'));box.append(advice);
+ const advice=el('section',undefined,'diag-advice');advice.append(el('h3','↗ Einstellungen prüfen'),el('p','Letzte 7 Tage · nur passende Einstellungen · keine automatische Änderung.','muted'));box.prepend(advice);
  for(const r of d.recommendations){const card=el('article',undefined,'diag-recommendation '+r.level);card.append(el('strong',(r.level==='ok'?'✓ ':r.level==='review'?'↗ ':'ⓘ ')+r.title),el('p',r.text));const progress=el('progress');progress.max=100;progress.value=r.progress_pct;progress.setAttribute('aria-label',r.progress);card.append(progress,el('small',r.progress));if(!r.ready){advice.append(card);continue;}const b=el('button','Einstellung öffnen');b.onclick=()=>{document.querySelector('[data-tab="settings"]').click();const input=document.querySelector('input[name="'+r.setting+'"]');if(input){const group=input.closest('details');if(group)group.open=true;input.scrollIntoView({behavior:'smooth',block:'center'});input.focus({preventScroll:true});}};card.append(b);advice.append(card);}
  const notes=el('details');notes.append(el('summary','ⓘ Aussagekraft & Messverfahren'),el('p','Verglichen werden dieselben erfassten Zeiträume mit der jeweiligen Prognose zum Messzeitpunkt. Lücken bleiben offen. Zwischenwerte sind angenähert; kurze Lastspitzen können fehlen. DC-PV und AC-Prognose sind nur orientierend vergleichbar. Hausverbrauch enthält auch Auto und andere Sonderlasten. SOC-Verlust bei 0 W beweist weder Eigenbedarf noch einen Defekt.'));box.append(notes);
 }
@@ -223,7 +223,7 @@ function renderDashboardHistory(d){
   document.getElementById(name+'-plan-view').hidden=state[name];document.getElementById(name+'-history-view').hidden=!state[name];
   const refresh=document.getElementById(name+'-history-refresh');refresh.onclick=()=>loadDashboardHistory(d,true);refresh.disabled=state.pending.has(state.date);refresh.classList.toggle('button-loading',refresh.disabled);
   const cached=state.cache.get(state.date),error=state.errors.get(state.date);
-  document.getElementById(name+'-history-state').textContent=error||(state.pending.has(state.date)?'Protokoll wird geladen …':cached?'Gemessener Verlauf · '+(cached.data.summary||cached.data.phases||[]).filter(p=>p.action!=='unknown').length+' Abschnitte':'Noch nicht geladen.');
+  document.getElementById(name+'-history-state').textContent=error||(state.pending.has(state.date)?'Protokoll wird geladen …':cached?'Gemessener Verlauf':'Noch nicht geladen.');
   const root=document.getElementById(name+'-history-content');
   if(state[name]){
    if(!cached){root.replaceChildren();delete root.dataset.historySignature;}

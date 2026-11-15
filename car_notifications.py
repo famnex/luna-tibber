@@ -37,6 +37,10 @@ def alerts(advice,now=None,zone='Europe/Berlin'):
         if car.get('unreachable') and not rotation:
             body=action+' Eine volle Batterie reicht nicht: zusätzliches Zwischenladen einplanen.'
         else:body=action+f" Mindestens ca. {number(extra)} Prozentpunkte ({number(missing)} kWh) nachladen; Ziel {target} %."
+        if car.get('connector_status')=='connected' or car.get('connected'):
+            body+=' Bereits angeschlossen – kein Umstecken nötig. Ladung in evcc einplanen, falls noch nicht geschehen.'
+        elif car.get('connector_status') not in ('connected','disconnected'):
+            body+=' Anschlussstatus unbekannt; Anschluss und Ladeplanung in evcc prüfen.'
         if first and advice.get('rotation',{}).get('status')=='conflict':body+=' Gemeinsamer Wochenplan hat einen Ladekonflikt; zusätzlichen Ladetermin prüfen.'
         result.append({'key':f"ev:{car['id']}:{when.astimezone(tz).date()}:{stage}",'title':'LUNA · '+car['name'],'body':body})
     return result

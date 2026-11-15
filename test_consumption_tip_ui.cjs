@@ -33,7 +33,7 @@ $('orderstart').value='2026-10-30T15:00';$('orderduration').value='60';$('orderd
  assert.match($('ordertipchoices').children[0].children[0].children[0].textContent,/Günstigster geprüft/);
  assert.match(texts($('ordertipchoices')),/Nutzung.*0,18.*Später.*0,10.*Plananpassung.*0,02.*Gesamt.*0,30/);
  assert.match(texts($('ordertipchoices')),/PV 0,8 kWh.*Akku 0,2 kWh.*Netz 0,5 kWh/);
- assert.match(texts($('ordertipchoices')),/Entladung teilweise gesperrt/);
+ assert.match(texts($('ordertipchoices')),/Entladung pausiert · 30 Min\./);
  ctx.scheduleConsumptionTip();
  let retry;
  ctx.setTimeout=(fn,ms)=>{if(ms===500)retry=fn;return 1;};

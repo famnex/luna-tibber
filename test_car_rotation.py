@@ -44,3 +44,14 @@ class RotationTests(unittest.TestCase):
         d={'priority':'a','priority_kind':'rotation','rotation':{'status':'planned'},'vehicles':[car,{'id':'b','name':'Cupra Born','connected':False,'connector_status':'disconnected'}]}
         r=alerts(d,self.now);self.assertEqual(len(r),1);self.assertIn('Kein Auto ist angesteckt.',r[0]['body']);self.assertIn('diese Nacht',r[0]['body']);self.assertIn('47 Prozentpunkte',r[0]['body']);self.assertLess(len(r[0]['body']),230)
         d['vehicles'][1]['connected']=True;self.assertIn('Cupra Born ist angesteckt, aber ID.3',alerts(d,self.now)[0]['body'])
+
+    def test_connected_car_notification_requires_only_evcc_planning(self):
+        car={'id':'b','name':'Born','soc':34,'capacity':55,'connected':True,'connector_status':'connected','rotation':{'start':'2026-11-15T22:00:00+01:00','target_soc':92,'kwh':31.9,'add_soc':58}}
+        advice={'priority':'b','priority_kind':'rotation','rotation':{'status':'planned'},'vehicles':[car]}
+        body=alerts(advice,self.now)[0]['body']
+        self.assertIn('58 Prozentpunkte (31,9 kWh)',body)
+        self.assertIn('Bereits angeschlossen – kein Umstecken nötig.',body)
+        self.assertIn('in evcc einplanen, falls noch nicht geschehen',body)
+        self.assertNotIn('Bitte umstecken',body)
+        car['connector_status']='unknown';car['connected']=False
+        self.assertIn('Anschlussstatus unbekannt',alerts(advice,self.now)[0]['body'])
