@@ -1068,3 +1068,35 @@ Empfehlung. `car-context.json` speichert Wetter und Preise lokal und kontogebund
 
 Die Fahrzeugbilder stammen aus den vom Nutzer bereitgestellten Bildern; als
 WebP für mobile Geräte komprimiert.
+
+
+### WhatsApp über CallMeBot
+
+Einstellungen → WhatsApp & Auto-Hinweise → Empfänger einrichten.
+Jede Nummer benötigt ihre eigene CallMeBot-Freischaltung und ihren eigenen
+API-Schlüssel (bis zu zehn Empfänger). Der Assistent verlinkt die offizielle
+Anleitung mit der aktuellen Bot-Nummer; die Registrierung kann beim Anbieter
+zeitweise ausgebucht sein. Speichern versendet noch keine Testnachricht; die
+Testschaltfläche sendet ausschließlich an den ausgewählten Empfänger.
+
+Nummern bearbeiten, deaktivieren oder löschen; beim Bearbeiten bleibt ein leerer
+Schlüssel unverändert, solange die Nummer gleich bleibt. Schlüssel werden nicht
+an den Browser zurückgegeben und liegen lokal in `whatsapp-private.json` (0600).
+Telefonnummer, Schlüssel und Nachricht gehen an CallMeBot. Keine Gruppenadresse
+und kein gemeinsamer API-Schlüssel für verschiedene Nummern.
+
+Auto-Hinweise: Prüfung jede Minute, zwei aufeinanderfolgende Prüfungen, aktuelle
+Fahrzeugdaten erforderlich. Bedarf innerhalb 24 Stunden, erneut innerhalb 3 Stunden;
+pro Fahrzeug/Bedarfstag/Stufe zwölf Stunden Ruhezeit, auch nach Neustart. Bei
+laufender Ladung entfällt die frühe Meldung. Das priorisierte, nicht angesteckte
+Auto wird namentlich genannt, einschließlich eines eventuell anderen angesteckten
+Autos. Angegeben werden Termin, Ziel-SOC, letzter SOC und fehlende Energie.
+Die Einschätzung verwendet die Dashboard-Planung; keine garantierte Ladezeit und
+keine automatische Wallbox-Steuerung. Auto-Hinweise erreichen zusätzlich bereits
+aktiviertes Web-Push. Systemfehler per WhatsApp lassen sich separat einschalten.
+
+Versand läuft in einer begrenzten Hintergrundwarteschlange, mit Zeitlimit und
+Abstand zwischen Anfragen. Fehler werden ohne URL/Schlüssel ausgegeben.
+„Von CallMeBot angenommen“ ist keine Empfangsbestätigung des Handys.
+Tests verwenden einen simulierten Sender; ein echter Versand muss mit der
+eingerichteten Telefonnummer über die Testschaltfläche geprüft werden.

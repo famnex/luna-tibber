@@ -181,6 +181,10 @@ class Dashboard:
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
+        from whatsapp import WhatsApp
+        from car_notifications import CarNotifier
+        self.whatsapp=WhatsApp(folder,start_worker=start_worker)
+        self.car_notifier=CarNotifier(self)
         self.sample_failures=0
         self.price_failed_since=None
         self.revision=updater.revision(folder)
@@ -195,6 +199,7 @@ class Dashboard:
             threading.Thread(target=self.vehicle_probe.worker,args=(self.closed,),daemon=True).start()
             threading.Thread(target=self.car_context.worker,args=(self.closed,self.config,lambda:self.price_data),daemon=True).start()
             threading.Thread(target=self.backfill_grid_costs,daemon=True).start()
+            threading.Thread(target=self.car_notifier.worker,daemon=True).start()
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
     def backfill_grid_costs(self):
@@ -321,6 +326,7 @@ class Dashboard:
     def alert(self,key,title,body,cooldown=1800):
         contact=self.config().get('push_contact','')
         self.notifications.emit(key,title,body,'mailto:'+contact if contact else '',cooldown)
+        if key!='test':self.whatsapp.emit(key,title,body,'system',cooldown)
 
     def stop(self):
         # Called with lock held; collector needs lock, so poll process directly.
@@ -734,6 +740,7 @@ class Dashboard:
     def close(self):
         self.closed.set()
         self.notifications.closed.set()
+        self.whatsapp.closed.set()
         with self.lock:
             self.stop()
 
@@ -798,6 +805,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static['/cars-ui.js']=('cars-ui.js','application/javascript')
+        static['/whatsapp-ui.js']=('whatsapp-ui.js','application/javascript')
         static['/cars-ui.css']=('cars-ui.css','text/css')
         static['/car-id3.webp']=('car-id3.webp','image/webp')
         static['/car-born.webp']=('car-born.webp','image/webp')
@@ -818,6 +826,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/vehicles':
             return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
+        if self.path=='/api/whatsapp':
+            return self.send(200,self.server.app.whatsapp.status())
         if self.path=='/api/car-advice':
             from car_planning import advice
             return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone'],context=self.server.app.car_context.snapshot(self.server.app.config())))
@@ -906,6 +916,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path.startswith('/api/whatsapp/'):
+                action=self.path.rsplit('/',1)[-1]
+                service=self.server.app.whatsapp
+                return self.send(200,service.test(data.get('id')) if action=='test' else service.change(action,data))
             if self.path=='/api/car-planning':
                 return self.send(200,self.server.app.car_planning.save(data))
             if self.path.startswith('/api/vehicles/'):

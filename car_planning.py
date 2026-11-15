@@ -74,7 +74,7 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):
         vid=v['device']['id'];p=plan.get('profiles',{}).get(vid,{})
         detail=v.get('details',{});caps={c.get('id'):c for c in detail.get('capabilities',[])}
         name=p.get('name') or detail.get('info',{}).get('name') or v['device'].get('info',{}).get('name') or 'Fahrzeug'
-        row={'id':vid,'name':name,'connected':caps.get('connector.status',{}).get('value')=='connected'}
+        row={'id':vid,'name':name,'connected':caps.get('connector.status',{}).get('value')=='connected','connector_status':caps.get('connector.status',{}).get('value','unknown'),'charging_status':caps.get('charging.status',{}).get('value','unknown')}
         result['vehicles'].append(row)
         if v.get('error'):row['message']='Fahrzeugdaten nicht verfügbar.';continue
         try:soc=float(caps['storage.stateOfCharge']['value'])

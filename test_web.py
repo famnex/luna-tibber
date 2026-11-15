@@ -297,6 +297,24 @@ class HTTPTests(unittest.TestCase):
             self.server.app.action.assert_not_called();self.server.app.request_sample.assert_not_called()
         conn.close()
 
+    def test_whatsapp_requires_auth_and_csrf(self):
+        import http.client
+        conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
+        headers={'Content-Type':'application/json','X-Luna':'1'}
+        conn.request('GET','/api/whatsapp');r=conn.getresponse();self.assertEqual(r.status,401);r.read()
+        conn.request('POST','/api/whatsapp/test',body='{"id":"a"}',headers=headers)
+        r=conn.getresponse();self.assertEqual(r.status,401);r.read();self.server.app.whatsapp.test.assert_not_called()
+        conn.request('POST','/api/login',body='{"password":"test-password"}',headers=headers)
+        r=conn.getresponse();self.assertEqual(r.status,200);cookie=r.getheader('Set-Cookie').split(';')[0];r.read()
+        conn.request('POST','/api/whatsapp/test',body='{"id":"a"}',headers={'Cookie':cookie,'Content-Type':'application/json'})
+        r=conn.getresponse();self.assertEqual(r.status,403);r.read()
+        self.server.app.whatsapp.status.return_value={'recipients':[]}
+        conn.request('GET','/api/whatsapp',headers={'Cookie':cookie});r=conn.getresponse();self.assertEqual(r.status,200);r.read()
+        self.server.app.whatsapp.test.return_value={'recipients':[]}
+        conn.request('POST','/api/whatsapp/test',body='{"id":"a"}',headers={**headers,'Cookie':cookie})
+        r=conn.getresponse();self.assertEqual(r.status,200);r.read();self.server.app.whatsapp.test.assert_called_once_with('a')
+        self.server.app.action.assert_not_called();conn.close()
+
     def test_unknown_host_rejected(self):
         import http.client
         conn=http.client.HTTPConnection('127.0.0.1',self.server.server_port)
