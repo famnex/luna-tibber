@@ -813,6 +813,9 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/vehicles':
             return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
+        if self.path=='/api/car-advice':
+            from car_planning import advice
+            return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone']))
         if self.path=='/api/car-planning':
             return self.send(200,self.server.app.car_planning.read())
         if self.path=='/api/vehicles':

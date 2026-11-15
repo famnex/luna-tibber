@@ -22,3 +22,34 @@ class PlanningTests(unittest.TestCase):
         self.assertEqual(self.p.save(self.data)['trips'][0]['days'],[])
 
 if __name__=='__main__':unittest.main()
+
+class AdviceTests(unittest.TestCase):
+    def setUp(self):
+        from datetime import datetime,timezone
+        self.now=datetime(2026,11,15,12,tzinfo=timezone.utc)
+        self.plan={'profiles':{},'trips':[]};self.snapshot={'fetched_at':self.now.timestamp(),'devices':[]}
+    def add(self,id,soc,km,departure='07:00',capacity=60):
+        self.plan['profiles'][id]={'name':id,'consumption':20,'reserve':20,'capacity':capacity}
+        self.plan['trips'].append({'id':id,'vehicle':id,'name':'Arbeit','kind':'weekly','days':[0],'km':km,'departure':departure,'return':'17:00'})
+        self.snapshot['devices'].append({'device':{'id':id},'details':{'capabilities':[{'id':'storage.stateOfCharge','value':soc},{'id':'connector.status','value':'disconnected'}]}})
+    def run_advice(self):
+        from car_planning import advice
+        return advice(self.plan,self.snapshot,now=self.now)
+    def test_first_uncovered_trip_priority(self):
+        self.add('Born',25,100,'08:00');self.add('GTX',30,100,'07:00')
+        r=self.run_advice();self.assertEqual(r['priority'],'GTX');self.assertEqual(r['vehicles'][1]['missing_kwh'],14);self.assertEqual(r['vehicles'][1]['target_soc'],54)
+        self.assertTrue(any('Beide' in w for w in r['warnings']))
+    def test_sufficient_and_missing_capacity(self):
+        self.add('GTX',90,50);self.assertIsNone(self.run_advice()['priority'])
+        self.plan['profiles']['GTX']['capacity']=None
+        self.assertIn('Batteriekapazität',self.run_advice()['vehicles'][0]['message'])
+    def test_stale_data_never_recommends(self):
+        self.add('GTX',10,100);self.snapshot['fetched_at']-=1900
+        self.assertIsNone(self.run_advice()['priority'])
+    def test_known_old_measurement_never_recommends(self):
+        self.add('GTX',10,100);self.snapshot['devices'][0]['details']['capabilities'][0]['updatedAt']='2026-11-14T12:00:00Z'
+        self.assertIsNone(self.run_advice()['priority'])
+    def test_multiple_trips_add_up(self):
+        self.add('GTX',50,50)
+        t=dict(self.plan['trips'][0],id='second',departure='18:00',km=50);self.plan['trips'].append(t)
+        r=self.run_advice()['vehicles'][0];self.assertEqual(r['missing_kwh'],2);self.assertIn('18:00',r['deadline'])
