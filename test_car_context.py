@@ -57,9 +57,9 @@ class ContextTests(unittest.TestCase):
         plan={'profiles':{'a':self.p,'b':self.p},'trips':[]};snapshot={'fetched_at':self.now.timestamp(),'devices':[]}
         for vid in ('a','b'):
             plan['trips'].append(dict(self.t,id=vid,vehicle=vid,kind='weekly',days=[0,1,2,3,4],departure='07:00',km=70))
-            snapshot['devices'].append({'device':{'id':vid},'details':{'capabilities':[{'id':'storage.stateOfCharge','value':30},{'id':'connector.status','value':'connected' if vid=='a' else 'disconnected'}]}})
+            snapshot['devices'].append({'device':{'id':vid},'details':{'capabilities':[{'id':'storage.stateOfCharge','value':30 if vid=='a' else 80},{'id':'connector.status','value':'connected' if vid=='a' else 'disconnected'}]}})
         c={**self.prices(),**self.weather(20)};r=advice(plan,snapshot,now=self.now,context=c)
-        self.assertEqual(r['priority_kind'],'stock');self.assertEqual(r['priority'],'a')
+        self.assertEqual(r['priority_kind'],'rotation');self.assertEqual(r['priority'],'a')
         self.assertEqual(r['vehicles'][0]['opportunity']['target_soc'],100)
         # A small weekly need must not force a full battery.
         for t in plan['trips']:t['days']=[0];t['km']=20

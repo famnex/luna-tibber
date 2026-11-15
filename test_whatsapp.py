@@ -75,7 +75,7 @@ class CarAlertTests(unittest.TestCase):
         self.advice={'vehicles':[self.car,{'id':'b','name':'ID.3','connected':True}],'priority':'a'}
     def test_wrong_car_and_distances(self):
         a=alerts(self.advice,self.now)[0]
-        self.assertIn('Born anschließen',a['title']);self.assertIn('ID.3 angesteckt',a['body']);self.assertIn('20 kWh',a['body']);self.assertIn('60 %',a['body'])
+        self.assertEqual(a['title'],'LUNA · Born');self.assertIn('ID.3 ist angesteckt',a['body']);self.assertIn('20 kWh',a['body']);self.assertIn('60 %',a['body'])
     def test_no_warning_outside_horizon_or_without_advice(self):
         self.car['deadline']=(self.now+timedelta(hours=25)).isoformat()
         self.assertEqual(alerts(self.advice,self.now),[]);self.assertEqual(alerts({'vehicles':[]},self.now),[])

@@ -1124,3 +1124,26 @@ Schlüssel bleiben serverseitig; lokale Dateien `ntfy-private.json` und
 `ntfy-events.json` haben Modus 0600. Gleiche Warteschlange, Wiederholungsschutz
 und Testfunktion wie WhatsApp, aber unabhängig gespeicherte Versandereignisse.
 „Angenommen“ bestätigt den Server, nicht den tatsächlichen Handy-Empfang.
+
+
+### Gemeinsame Auto-Ladeempfehlung
+
+Bei zwei Autos mit gültigen Ladeständen und Kapazitäten prüft LUNA sieben
+Nächte gemeinsam (22–06 Uhr, höchstens ein Auto je Nacht). Erfasste Abwesenheiten
+werden berücksichtigt; während einer Abwesenheit wird das Auto nicht für das
+ganze Nachtfenster eingeplant. Die Energieprüfung sucht eine Abfolge mit möglichst
+wenigen Ladesitzungen. Ladeziele decken die Fahrten bis zum nächsten eigenen
+Nachttermin inklusive Reserve ab, also auch Tage, an denen das andere Auto lädt.
+Günstige Nachtfenster werden bei ansonsten gleichwertigen Abfolgen bevorzugt;
+ein passendes Vorratsziel kann weiterhin 100 % betragen.
+
+Kann kein gemeinsamer Energieplan erstellt werden, erscheint ein Ladekonflikt
+mit dem Hinweis auf einen zusätzlichen Ladetermin. Fehlende Fahrzeugdaten werden
+nicht als leere oder volle Batterie interpretiert. Die Abfolge steht in den
+Details „Bedarf & Annahmen“. Ladeleistung und tatsächlich erreichbare Ladezeit
+sind weiterhin nicht geprüft; keine automatische Wallbox-Steuerung.
+
+Push-Texte sind kurz: Anlass/benötigtes Auto, gegebenenfalls Umstecken, zusätzliche
+Prozentpunkte und kWh sowie Ziel-SOC. Prozentpunkte bezeichnen die nachzuladende
+Menge, nicht das Ladeziel. Bei gemeinsamer Planung wird nur für das als Nächstes
+eingeplante Auto erinnert.

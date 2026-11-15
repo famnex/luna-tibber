@@ -5,32 +5,40 @@ import time
 
 
 def alerts(advice,now=None,zone='Europe/Berlin'):
-    now=now or datetime.now(timezone.utc);result=[]
+    now=now or datetime.now(timezone.utc);result=[];tz=ZoneInfo(zone)
+    def number(value):return f'{value:.1f}'.rstrip('0').rstrip('.').replace('.',',')
     for car in advice.get('vehicles',[]):
-        deadline=car.get('deadline')
+        rotation=car.get('rotation') if advice.get('priority_kind')=='rotation' and advice.get('priority')==car['id'] else None
+        # A coordinated plan notifies only the car assigned to the next night.
+        if advice.get('rotation',{}).get('status')=='planned' and not rotation:continue
         stock=car.get('opportunity') if advice.get('priority_kind')=='stock' and advice.get('priority')==car['id'] else None
-        if stock:deadline=stock['start']
+        deadline=(rotation or stock or {}).get('start') or car.get('deadline')
         if not deadline:continue
         when=datetime.fromisoformat(deadline);hours=(when-now).total_seconds()/3600
         if not 0<=hours<=24:continue
         urgent=hours<=3;stage='urgent' if urgent else 'ahead'
         if car.get('charging_status')=='charging' and not urgent:continue
-        target=stock['target_soc'] if stock else car['target_soc'];missing=stock['kwh'] if stock else car['missing_kwh']
-        stamp=when.astimezone(ZoneInfo(zone)).strftime('%d.%m. %H:%M')
-        first=car['id']==advice.get('priority')
-        disconnected=car.get('connector_status')=='disconnected'
-        if first and disconnected:
-            title='LUNA · '+car['name']+' anschließen'
-            others=[r['name'] for r in advice['vehicles'] if r['id']!=car['id'] and r.get('connected')]
-            action=('Aktuell ist '+', '.join(others)+' angesteckt. ' if others else '')+'Für die Planung wird '+car['name']+' benötigt.'
-        else:
-            title='LUNA · Ladebedarf '+car['name']
-            action='Angesteckt; Ladefortschritt prüfen.' if car.get('connected') else ('Anschlussstatus unbekannt; bitte prüfen.' if not disconnected else 'Zusätzlichen Ladetermin einplanen.')
-        body=f"{action}\n{'Günstiges Nachtfenster ab' if stock else 'Fahrtbedarf bis'} {stamp}: Ziel ca. {target} %, noch ca. {missing:g} kWh. Aktuell {car['soc']:g} %."
-        if car.get('unreachable'):body+=' Mehr Energie als eine volle Batterie nötig: Zwischenladen erforderlich.'
-        body+=' Schätzung; LUNA steuert die Wallbox noch nicht.'
-        # Day and urgency are stable against revised minute-by-minute targets.
-        result.append({'key':f"ev:{car['id']}:{when.astimezone(ZoneInfo(zone)).date()}:{stage}",'title':title,'body':body})
+        target=(rotation or stock or {}).get('target_soc',car.get('target_soc'))
+        missing=(rotation or stock or {}).get('kwh',car.get('missing_kwh'))
+        extra=rotation.get('add_soc') if rotation else (missing/car['capacity']*100 if car.get('capacity') else max(0,target-car['soc']))
+        first=car['id']==advice.get('priority');disconnected=car.get('connector_status')=='disconnected'
+        day=(when.astimezone(tz).date()-now.astimezone(tz).date()).days
+        night='diese Nacht' if day==0 or (day==1 and when.astimezone(tz).hour<7) else 'morgen Nacht' if day==1 else 'am '+when.astimezone(tz).strftime('%d.%m.')
+        journey='die morgige Fahrt' if day==1 else 'die heutige Fahrt' if day==0 else 'die Fahrt am '+when.astimezone(tz).strftime('%d.%m.')
+        need_time=night if rotation or stock else ('vor der morgigen Fahrt' if day==1 else 'vor der heutigen Fahrt' if day==0 else 'vor der Fahrt am '+when.astimezone(tz).strftime('%d.%m.'))
+        others=[r['name'] for r in advice['vehicles'] if r['id']!=car['id'] and r.get('connected')]
+        if first and disconnected and others:
+            action=f"{', '.join(others)} ist angesteckt, aber {car['name']} muss {need_time} laden. Bitte umstecken."
+        elif first and disconnected and all(r.get('connector_status')=='disconnected' for r in advice['vehicles']):
+            action=f"Kein Auto ist angesteckt. {car['name']} muss {need_time} laden."
+        elif rotation or stock:
+            action=f"{car['name']} {'kann günstig' if stock else 'muss'} {night} laden."
+        else:action=f"Die Ladung von {car['name']} reicht für {journey} nicht aus."
+        if car.get('unreachable') and not rotation:
+            body=action+' Eine volle Batterie reicht nicht: zusätzliches Zwischenladen einplanen.'
+        else:body=action+f" Mindestens ca. {number(extra)} Prozentpunkte ({number(missing)} kWh) nachladen; Ziel {target} %."
+        if first and advice.get('rotation',{}).get('status')=='conflict':body+=' Gemeinsamer Wochenplan hat einen Ladekonflikt; zusätzlichen Ladetermin prüfen.'
+        result.append({'key':f"ev:{car['id']}:{when.astimezone(tz).date()}:{stage}",'title':'LUNA · '+car['name'],'body':body})
     return result
 
 

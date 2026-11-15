@@ -97,7 +97,7 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):
                 if not (t['kind']=='weekly' and day.weekday() in t['days'] or t['kind']=='once' and t['date']==day.isoformat()):continue
                 start=datetime.combine(day,time.fromisoformat(t['departure']),local.tzinfo)
                 if start>=local:trips.append((start,t))
-        trips.sort(key=lambda x:x[0]);row['soc']=soc
+        trips.sort(key=lambda x:x[0]);row['soc']=soc;row['capacity']=capacity
         if not trips:row['message']='Keine kommende Fahrt in den nächsten 7 Tagen.';continue
         energy=0;reserve=p['reserve'];available=max(0,(soc-reserve)*capacity/100)
         row['next_departure']=trips[0][0].isoformat();row['next_km']=trips[0][1]['km']
@@ -137,5 +137,19 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):
             # One connector: choose one car, never schedule a midnight swap.
             opportunities.sort(key=lambda r:(not r['connected'], -r['opportunity']['kwh']))
             result['priority']=opportunities[0]['id'];result['priority_kind']='stock'
+    from car_rotation import coordinate
+    result['rotation']=coordinate(plan,result['vehicles'],zone,now,context)
+    if result['rotation']['status']=='planned':
+        result['warnings']=[w for w in result['warnings'] if not w.startswith('Beide Autos brauchen Ladung.')]
+        sessions=result['rotation']['sessions']
+        result['priority']=sessions[0]['id'] if sessions else None
+        if sessions:
+            result['priority_kind']='rotation'
+            chosen=next(r for r in result['vehicles'] if r['id']==result['priority'])
+            chosen['rotation']=sessions[0]
+        else:result.pop('priority_kind',None)
+    elif result['rotation']['status']=='conflict':
+        result['warnings'].append(result['rotation']['message'])
+        result.pop('priority_kind',None)
     if any(r.get('estimated') for r in result['vehicles']):result['warnings'].append('Vorläufig anhand der zuletzt abgerufenen Ladestände; Tibber liefert nicht für alle Werte eine Messzeit.')
     return result
