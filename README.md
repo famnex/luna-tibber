@@ -1036,3 +1036,35 @@ und das stärkste prognostizierte PV-Überschussfenster verglichen. Die Auswahl 
 deshalb „günstigster geprüfter Start“, nicht garantiertes Optimum aller Minuten.
 Berechnungen werden kurz nach Eingabe gestartet, pro Prozess serialisiert und
 nach Minute, Konfiguration, Modus, Preisen und SOC kurz zwischengespeichert.
+
+
+### Auto-Verbrauch und günstige Nächte
+
+Die Autoplanung ist weiterhin eine **Empfehlung**, keine Wallbox-Steuerung.
+Wärmepumpe pro Fahrzeug einstellen; die Gesamtstrecke einer Hin-/Rückfahrt wird
+auf zwei gleich lange Teilfahrten verteilt. Bestehende Fahrten gelten weiterhin
+als Hin-/Rückfahrt. Der Basisverbrauch gilt bei mildem Wetter.
+
+Temperatur: Open-Meteo `temperature_2m` am vorhandenen PV-Standort, Abruf alle
+drei Stunden; nach sechs Stunden ohne frische Prognose gelten gekennzeichnete
+monatliche Saisonannahmen für Deutschland. Allgemeines Modell: je Grad unter
+20 °C +0,6 % Fahrenergie, dazu Heizenergie (1,2 kW bei 0 °C und 0,35 kWh
+Aufwärmen pro Teilfahrt, proportional zur Temperaturdifferenz). Wärmepumpe
+reduziert den angenommenen Heizanteil auf 65 %. Fahrtdauer grob aus 50 km/h;
+Rückfahrtzeit aus Ankunft zuhause abzüglich dieser Dauer. Keine fahrzeugspezifische
+Messkalibrierung. Wochenansicht und Anschluss-Empfehlung verwenden dieselbe Schätzung.
+
+Für Vorratsladen wird das günstigste zusammenhängende 2-Stunden-Fenster
+zwischen 22 und 06 Uhr mit den günstigsten Fenstern vergangener Nächte verglichen
+(Median, letzte 7 Tage, mindestens 3 Nächte). Voraussetzung: mindestens 5 ct/kWh
+und 20 % günstiger. Ziel: Fahrbedarf bis 7 Tage plus Reserve, maximal 100 %,
+mindestens 10 Prozentpunkte zusätzlich. Dringende Fahrten werden nicht auf die
+Nacht verschoben; nur ein Fahrzeug wird priorisiert, kein nächtlicher Wechsel.
+Preisverlauf wird ab Installation gesammelt.
+
+Das Preisfenster ist keine zugesicherte Ladedauer. Ladeleistung, Ladeverluste,
+PV-Angebot und eine verbindliche Wallbox-Steuerung sind noch nicht Teil dieser
+Empfehlung. `car-context.json` speichert Wetter und Preise lokal und kontogebunden.
+
+Die Fahrzeugbilder stammen aus den vom Nutzer bereitgestellten Bildern; als
+WebP für mobile Geräte komprimiert.

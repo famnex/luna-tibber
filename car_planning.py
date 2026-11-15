@@ -27,7 +27,7 @@ class CarPlanning:
                 if not isinstance(key,str) or not key or len(key)>200 or not isinstance(p,dict):raise ValueError('Ungültiges Fahrzeug')
                 cleaned[key]={'name':str(p.get('name',''))[:60], 'consumption':number(p.get('consumption',18),5,60),
                               'capacity':None if p.get('capacity') in (None,'') else number(p['capacity'],5,200),
-                              'reserve':number(p.get('reserve',20),0,80)}
+                              'reserve':number(p.get('reserve',20),0,80),'heat_pump':p.get('heat_pump') is True}
             rows=[];ids=set()
             for t in trips:
                 if not isinstance(t,dict):raise ValueError('Ungültige Fahrt')
@@ -45,19 +45,28 @@ class CarPlanning:
                     time.fromisoformat(value)
                 rows.append({'id':tid,'vehicle':vid,'name':str(t.get('name','Fahrt'))[:80], 'km':number(t.get('km'),0.1,3000),
                              'kind':kind,'days':sorted(set(days)) if kind=='weekly' else [],'date':day if kind=='once' else '',
-                             'departure':dep,'return':ret})
+                             'departure':dep,'return':ret,'round_trip':t.get('round_trip',True) is True})
             result={'revision':old['revision']+1,'profiles':cleaned,'trips':rows}
             tmp=self.path.with_suffix('.tmp');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:json.dump(result,f)
             os.replace(tmp,self.path);return result
 
 
-def advice(plan, snapshot, zone='Europe/Berlin', now=None):
+def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):
     """Read-only demand priority, not an optimized charging schedule."""
     from datetime import datetime, timedelta, timezone
     from zoneinfo import ZoneInfo
     now=now or datetime.now(timezone.utc)
-    local=now.astimezone(ZoneInfo(zone));result={'vehicles':[], 'priority':None,'warnings':[]}
+    from car_context import estimate_trip, cheap_night
+    local=now.astimezone(ZoneInfo(zone));result={'vehicles':[], 'priority':None,'warnings':[], 'estimates':[], 'night':cheap_night(context,zone,now)}
+    # Same estimates for the week cards and recommendations, including today's past departures.
+    for offset in range(7):
+        day=local.date()+timedelta(days=offset)
+        for t in plan.get('trips',[]):
+            if not (t['kind']=='weekly' and day.weekday() in t['days'] or t['kind']=='once' and t['date']==day.isoformat()):continue
+            p=plan.get('profiles',{}).get(t['vehicle'],{'consumption':18})
+            start=datetime.combine(day,time.fromisoformat(t['departure']),local.tzinfo)
+            result['estimates'].append(dict(id=t['id'],date=day.isoformat(),**estimate_trip(t,p,start,context,now)))
     fetched=(snapshot or {}).get('fetched_at',0)
     if not fetched or now.timestamp()-fetched>1800:
         result['warnings'].append('Fahrzeugdaten fehlen oder sind älter als 30 Minuten. Anschluss-Empfehlung erst nach Aktualisierung.');return result
@@ -93,7 +102,7 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None):
         energy=0;reserve=p['reserve'];available=max(0,(soc-reserve)*capacity/100)
         row['next_departure']=trips[0][0].isoformat();row['next_km']=trips[0][1]['km']
         for start,t in trips:
-            energy+=t['km']*p['consumption']/100
+            energy+=estimate_trip(t,p,start,context,now)['kwh']
             if energy>available+0.001:
                 required=reserve+energy/capacity*100
                 # Target only the day's trips up to and including the first unmet trip;
@@ -102,11 +111,31 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None):
                 row['message']='Ladung vor dieser Fahrt erforderlich.'
                 break
         else:row['message']='Vorhandene Energie reicht rechnerisch für die erfassten Fahrten.'
+        # Seven-day energy stock replaces repeated small daily top-ups only on exceptional nights.
+        night=result['night']
+        if night.get('qualified'):
+            window_end=datetime.fromisoformat(night['end'])
+            # Do not defer a more urgent trip until a cheap window, or propose charging away.
+            if trips[0][0]>=window_end:
+                stock=sum(estimate_trip(t,p,start,context,now)['kwh'] for start,t in trips if start<local+timedelta(days=7))
+                target=min(100,math.ceil(reserve+stock/capacity*100))
+                # Only a meaningful top-up (>=10 percentage points), not a few percent nightly.
+                if target-soc>=10 and target>row.get('target_soc',0):
+                    row['opportunity']={'target_soc':target,'kwh':round((target-soc)*capacity/100,2), 'start':night['start'],'end':night['end']}
+                    row['message']='Günstige Nacht für mehrere Fahrtage nutzen.'
     candidates=[r for r in result['vehicles'] if r.get('deadline')]
     candidates.sort(key=lambda r:(r['deadline'],-r['missing_kwh']))
     if candidates:
         result['priority']=candidates[0]['id']
         if len(candidates)>1:
             result['warnings'].append('Beide Autos brauchen Ladung. Reihenfolge nach erster Unterdeckung; kein nächtlicher Wechsel eingeplant. Ladezeiten und Wechsel vor dem Schlafengehen müssen noch geprüft werden.')
+    opportunities=[r for r in result['vehicles'] if r.get('opportunity')]
+    if opportunities:
+        window_end=datetime.fromisoformat(result['night']['end'])
+        urgent=[r for r in candidates if datetime.fromisoformat(r['deadline'])<=window_end]
+        if not urgent:
+            # One connector: choose one car, never schedule a midnight swap.
+            opportunities.sort(key=lambda r:(not r['connected'], -r['opportunity']['kwh']))
+            result['priority']=opportunities[0]['id'];result['priority_kind']='stock'
     if any(r.get('estimated') for r in result['vehicles']):result['warnings'].append('Vorläufig anhand der zuletzt abgerufenen Ladestände; Tibber liefert nicht für alle Werte eine Messzeit.')
     return result

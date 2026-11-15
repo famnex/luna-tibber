@@ -9,6 +9,7 @@ class PlanningTests(unittest.TestCase):
         self.data={'revision':0,'profiles':{'born':{'name':'Born','consumption':18,'capacity':None,'reserve':20}},'trips':[{'id':'one','vehicle':'born','name':'Arbeit','km':80,'kind':'weekly','days':[0,2,4],'departure':'07:00','return':'17:00'}]}
     def test_roundtrip_and_revision(self):
         result=self.p.save(self.data);self.assertEqual(self.p.read(),result);self.assertEqual(result['revision'],1)
+        self.assertTrue(result['trips'][0]['round_trip']);self.assertFalse(result['profiles']['born']['heat_pump'])
         with self.assertRaises(ValueError):self.p.save(self.data)
         self.assertEqual(self.p.path.stat().st_mode & 0o777,0o600)
     def test_invalid_and_no_partial_save(self):
@@ -17,6 +18,12 @@ class PlanningTests(unittest.TestCase):
             d=copy.deepcopy(self.data);d['trips'][0][key]=value
             with self.assertRaises(ValueError):self.p.save(d)
         self.assertEqual(self.p.read()['revision'],0)
+    def test_heat_pump_and_single_journey_persist(self):
+        self.data['profiles']['born']['heat_pump']=True
+        self.data['trips'][0]['round_trip']=False
+        result=self.p.save(self.data)
+        self.assertTrue(result['profiles']['born']['heat_pump'])
+        self.assertFalse(result['trips'][0]['round_trip'])
     def test_once_overnight(self):
         t=self.data['trips'][0];t.update({'kind':'once','date':'2026-11-20','departure':'22:00','return':'06:00'})
         self.assertEqual(self.p.save(self.data)['trips'][0]['days'],[])
@@ -34,7 +41,9 @@ class AdviceTests(unittest.TestCase):
         self.snapshot['devices'].append({'device':{'id':id},'details':{'capabilities':[{'id':'storage.stateOfCharge','value':soc},{'id':'connector.status','value':'disconnected'}]}})
     def run_advice(self):
         from car_planning import advice
-        return advice(self.plan,self.snapshot,now=self.now)
+        from datetime import timedelta
+        weather=[{'time':(self.now+timedelta(hours=h)).timestamp(),'c':20} for h in range(200)]
+        return advice(self.plan,self.snapshot,now=self.now,context={'weather_at':self.now.timestamp(),'weather':weather})
     def test_first_uncovered_trip_priority(self):
         self.add('Born',25,100,'08:00');self.add('GTX',30,100,'07:00')
         r=self.run_advice();self.assertEqual(r['priority'],'GTX');self.assertEqual(r['vehicles'][1]['missing_kwh'],14);self.assertEqual(r['vehicles'][1]['target_soc'],54)

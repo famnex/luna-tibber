@@ -176,6 +176,8 @@ class Dashboard:
         self.vehicle_probe=VehicleProbe(folder)
         from car_planning import CarPlanning
         self.car_planning=CarPlanning(folder)
+        from car_context import CarContext
+        self.car_context=CarContext(folder)
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
@@ -191,6 +193,7 @@ class Dashboard:
         self.audit_event({'event':'service_started'})
         if start_worker:
             threading.Thread(target=self.vehicle_probe.worker,args=(self.closed,),daemon=True).start()
+            threading.Thread(target=self.car_context.worker,args=(self.closed,self.config,lambda:self.price_data),daemon=True).start()
             threading.Thread(target=self.backfill_grid_costs,daemon=True).start()
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
@@ -796,6 +799,8 @@ class Handler(BaseHTTPRequestHandler):
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static['/cars-ui.js']=('cars-ui.js','application/javascript')
         static['/cars-ui.css']=('cars-ui.css','text/css')
+        static['/car-id3.webp']=('car-id3.webp','image/webp')
+        static['/car-born.webp']=('car-born.webp','image/webp')
         static['/vehicles.js']=('vehicles.js','application/javascript')
         static['/vehicles.css']=('vehicles.css','text/css')
         static.update({
@@ -815,7 +820,7 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
         if self.path=='/api/car-advice':
             from car_planning import advice
-            return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone']))
+            return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone'],context=self.server.app.car_context.snapshot(self.server.app.config())))
         if self.path=='/api/car-planning':
             return self.send(200,self.server.app.car_planning.read())
         if self.path=='/api/vehicles':

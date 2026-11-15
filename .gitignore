@@ -72,3 +72,6 @@ car-planning.json
 car-planning.tmp
 vehicle-cache.json
 vehicle-cache.tmp
+
+car-context.json
+car-context.tmp
