@@ -252,7 +252,7 @@ class HTTPTests(unittest.TestCase):
         for path,kind in [('/manifest.webmanifest','application/manifest+json'),('/sw.js','application/javascript'),('/icon-192.png','image/png')]:
             conn.request('GET',path);r=conn.getresponse()
             self.assertEqual(r.status,200);self.assertIn(kind,r.getheader('Content-Type'));self.assertTrue(r.read())
-        for path in ('/api/history','/api/update','/api/journal','/api/journal/export','/api/journal/text','/api/journal/plan?id=1','/api/journal/timeline?day=2026-10-26'):
+        for path in ('/api/car-planning','/api/vehicles','/vehicles','/api/history','/api/update','/api/journal','/api/journal/export','/api/journal/text','/api/journal/plan?id=1','/api/journal/timeline?day=2026-10-26'):
             conn.request('GET',path);r=conn.getresponse();self.assertEqual(r.status,401);r.read()
         conn.request('GET','/healthz');r=conn.getresponse();self.assertEqual(r.status,200)
         self.assertEqual(set(json.loads(r.read())),{'ok','pid','revision'})

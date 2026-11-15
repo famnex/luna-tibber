@@ -18,7 +18,9 @@ class VehicleProbe:
         self.path = folder / 'vehicle-tibber-private.json'
         self.lock = threading.Lock()
         self.pending = {}
-        self.cache = None
+        try:self.cache = json.loads((folder/'vehicle-cache.json').read_text())
+        except (OSError, ValueError):self.cache = None
+        self.error = ''
         self.last_attempt = 0
         try:
             self.credentials = json.loads(self.path.read_text())
@@ -35,7 +37,7 @@ class VehicleProbe:
 
     def status(self):
         return {'connected': bool(self.credentials.get('refresh_token')), 'redirect_uri': REDIRECT,
-                'scopes': SCOPES, 'result': self.cache}
+                'scopes': SCOPES, 'result': self.cache, 'error': self.error}
 
     def request(self, url, form=None, token=None):
         headers = {'Accept': 'application/json'}
@@ -112,6 +114,7 @@ class VehicleProbe:
                                 expires=time.time()+float(tokens.get('expires_in',3600)))
         self.save()
         self.cache = None
+        (self.path.parent/'vehicle-cache.json').unlink(missing_ok=True)
         self.last_attempt = 0
         return self.status()
 
@@ -168,7 +171,20 @@ class VehicleProbe:
                     devices.append({'home_id':hid,'device':device,'error':str(exc)})
         self.cache = {'fetched_at':time.time(), 'devices':devices, 'warnings':errors,
                       'note':'Abrufzeit ist kein Messzeitpunkt. Angezeigt werden ausschließlich die von Tibber freigegebenen Daten.'}
+        self.error = ''
+        cache_path = self.path.parent/'vehicle-cache.json'
+        tmp = cache_path.with_suffix('.tmp')
+        fd = os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
+        with os.fdopen(fd,'w') as f:json.dump(self.cache,f)
+        os.replace(tmp,cache_path)
         return self.cache
+
+    def worker(self, closed):
+        while not closed.is_set():
+            if self.credentials.get('refresh_token'):
+                try:self.action('read',{},'background')
+                except Exception:self.error = 'Fahrzeugdaten konnten nicht aktualisiert werden. Letzte Werte werden angezeigt.'
+            closed.wait(300)
 
     def action(self, action, data, session):
         if not self.lock.acquire(blocking=False):
@@ -180,6 +196,8 @@ class VehicleProbe:
             if action=='disconnect':
                 self.credentials={};self.pending={};self.cache=None;self.last_attempt=0
                 self.path.unlink(missing_ok=True)
+                (self.path.parent/'vehicle-cache.json').unlink(missing_ok=True)
+                self.error = ''
                 return self.status()
             raise ValueError('Unbekannte Fahrzeugaktion')
         finally:

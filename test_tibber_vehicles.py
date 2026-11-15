@@ -39,6 +39,10 @@ class VehicleTests(unittest.TestCase):
         self.assertEqual(result['devices'][0]['details']['soc'],42)
         self.assertEqual(self.p.action('read',{},'session'),result)
         self.assertEqual(self.p.request.call_count,3)
+        restored=VehicleProbe(Path(self.tmp.name))
+        self.assertEqual(restored.cache,result)
+        self.p.action('disconnect',{},'session')
+        self.assertFalse((Path(self.tmp.name)/'vehicle-cache.json').exists())
         for call in self.p.request.call_args_list:self.assertEqual(len(call.args),1)
     def test_refresh_rotates_and_disconnect(self):
         self.p.credentials={'refresh_token':'old','client_id':'client','client_secret':'secret','expires':0}

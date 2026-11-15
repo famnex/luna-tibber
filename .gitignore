@@ -67,3 +67,8 @@ grid-costs.sqlite3*
 
 vehicle-tibber-private.json
 vehicle-tibber-private.tmp
+
+car-planning.json
+car-planning.tmp
+vehicle-cache.json
+vehicle-cache.tmp

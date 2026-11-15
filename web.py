@@ -174,6 +174,8 @@ class Dashboard:
         self.grid_costs=GridCosts(folder)
         from tibber_vehicles import VehicleProbe
         self.vehicle_probe=VehicleProbe(folder)
+        from car_planning import CarPlanning
+        self.car_planning=CarPlanning(folder)
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
@@ -188,6 +190,7 @@ class Dashboard:
         migrate_consumption(self.folder,self.config())
         self.audit_event({'event':'service_started'})
         if start_worker:
+            threading.Thread(target=self.vehicle_probe.worker,args=(self.closed,),daemon=True).start()
             threading.Thread(target=self.backfill_grid_costs,daemon=True).start()
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
@@ -791,6 +794,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
+        static['/cars-ui.js']=('cars-ui.js','application/javascript')
+        static['/cars-ui.css']=('cars-ui.css','text/css')
         static['/vehicles.js']=('vehicles.js','application/javascript')
         static['/vehicles.css']=('vehicles.css','text/css')
         static.update({
@@ -808,6 +813,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/vehicles':
             return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
+        if self.path=='/api/car-planning':
+            return self.send(200,self.server.app.car_planning.read())
         if self.path=='/api/vehicles':
             return self.send(200,self.server.app.vehicle_probe.status())
         if self.path=='/api/startup':
@@ -891,6 +898,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path=='/api/car-planning':
+                return self.send(200,self.server.app.car_planning.save(data))
             if self.path.startswith('/api/vehicles/'):
                 cookie=SimpleCookie(self.headers.get('Cookie',''))
                 session=session_key(cookie['luna'].value)
