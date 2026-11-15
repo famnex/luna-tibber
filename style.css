@@ -167,3 +167,26 @@ header{padding:16px max(18px,calc((100vw - 1050px)/2));background:#f6f8f5;border
 .car-advice h3{margin:10px 0}.car-advice>p{margin:8px 0}
 .diag-advice{margin-bottom:24px}.diag-advice>h3{margin-top:0}
 @media(max-width:480px){.tip-cost strong{font-size:1rem}.tip-cost span{font-size:.75rem}.tip-choice>div>strong{font-size:1rem}.tip-sources{gap:4px}.tip-sources span{font-size:.8rem}}
+
+/* Mobile refinement: preserve tap targets and keep intrinsic inputs inside grids. */
+.tab,.card,.fields,.fields>*,dialog form,dialog label{min-width:0}
+dialog{max-width:calc(100vw - 24px);box-sizing:border-box}
+dialog input,dialog select,dialog textarea{min-width:0;max-width:100%;width:100%;box-sizing:border-box}
+input[type=datetime-local],input[type=date],input[type=time]{min-width:0;max-width:100%;box-sizing:border-box}
+input[type=datetime-local]::-webkit-date-and-time-value{text-align:left}
+#orderdialog{position:fixed}#ordertitle{padding-right:44px}
+.dialog-close{position:absolute;top:10px;right:10px;width:44px;height:44px;padding:0;font-size:28px;border:0;background:transparent;color:inherit}
+.icon-action svg{width:22px;height:22px;display:block}
+.table-scroll{min-width:0;max-width:100%;overflow-x:auto;overscroll-behavior-x:contain;-webkit-overflow-scrolling:touch}
+.table-scroll table{min-width:520px}.table-scroll th{white-space:normal;min-width:100px}
+.chart-toggles{display:flex;gap:8px;flex-wrap:nowrap;margin:12px 0}.chart-toggles button{flex:1;min-width:0;min-height:44px;padding:8px 12px;border-radius:14px}
+.chart-toggles button[aria-pressed=false]{opacity:.5}.legend .legend-price:before{background:#d7bf8e}
+.chart-ranges,.plan-days{gap:8px}.chart-ranges button,.plan-days button{flex:0 1 auto;padding:7px 14px;min-height:36px;font-size:.85rem}
+.plan-axis{display:block;position:relative;height:20px;margin-top:8px}.plan-axis span{position:absolute;white-space:nowrap}
+#evcclink{border-left:1px solid var(--line,#78948755);border-radius:0}
+.car-shortcut{border:0;border-radius:12px;background:transparent;color:inherit;padding:4px;width:100%;cursor:pointer}
+.car-shortcut:focus-visible{outline:2px solid #83bda1;outline-offset:3px}
+.soc-track-wrap{flex:1;min-width:0;position:relative}.soc-row .soc-track-wrap #socgraphic{width:100%;height:24px}
+.soc-limit{text-align:right;margin-top:4px;font-size:10px!important;color:#f5dfa0!important}
+#perioddetails section{padding:12px 0;border-bottom:1px solid var(--line,#78948755)}#perioddetails p{margin:6px 0}.statcard .big{font-size:clamp(1.4rem,5vw,2rem)}
+.planning-tabs{margin-bottom:16px}.car-choices{padding-top:8px;border-top:1px solid var(--line,#78948755)}

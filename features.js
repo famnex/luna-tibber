@@ -72,8 +72,8 @@ function renderHistory(){
  const valued=v=>v.valued>0,empty=v=>!(v.seconds>0);
  const money=(v,key)=>valued(v)?'≈ '+eur(v[key]):empty(v)?eur(0):'—';
  const partial=v=>valued(v)&&v.discharge-v.valued>0.000001;
- document.getElementById('historyinfo').textContent=(d.started?'≈ Geschätzte Ersparnis aus ausgeführten Ladeaufträgen · seit '+d.started:'Noch keine Ladeaufträge erfasst. Ein zukünftiger Smart-Plan zählt erst, sobald die App lädt.')+(d.enabled?'':' · Erfassung deaktiviert: in den Einstellungen einschalten.');
- const box=document.getElementById('periodstats');box.replaceChildren();
+ document.getElementById('historyinfo').textContent=(d.started?'≈ Geschätzte Ersparnis aus ausgeführten Ladeaufträgen · seit '+(/^\d{4}-\d{2}-\d{2}$/.test(d.started)?d.started.split('-').reverse().join('.'):new Date(d.started).toLocaleDateString('de-DE')):'Noch keine Ladeaufträge erfasst. Ein zukünftiger Smart-Plan zählt erst, sobald die App lädt.')+(d.enabled?'':' · Erfassung deaktiviert: in den Einstellungen einschalten.');
+ const box=document.getElementById('periodstats');box.replaceChildren();const breakdown=document.getElementById('perioddetails');breakdown.replaceChildren();
  for(const [key,title] of [['today','Heute'],['yesterday','Gestern'],['last30','Letzte 30 Tage'],['last365','Letzte 365 Tage']]){
   const v=d.periods[key],card=document.createElement('article');card.className='card statcard';
   const h=document.createElement('p');h.className='eyebrow';h.textContent=title;
@@ -81,7 +81,7 @@ function renderHistory(){
   const label=document.createElement('p');label.textContent=valued(v)&&v.saving<0?'Geschätzte Mehrkosten':'Geschätzte Ersparnis';
   const detail=document.createElement('p');detail.className='muted';
   detail.textContent=empty(v)?'Keine Ladeaufträge in diesem Zeitraum.':!valued(v)?'Ladeaufträge vorhanden, aber Preise fehlen für die Geldberechnung.':`Vermiedene Stromkosten: ${eur(v.avoided)} · Ladekosten: ${eur(v.cost)} · Verschleiß: ${eur(Math.max(0,v.avoided-v.cost-v.saving))}${partial(v)?' · Teilbetrag: Für weitere Ladeaufträge fehlen Preise.':''}`;
-  card.append(h,amount,label,detail);box.append(card);
+  const note=document.createElement('small');note.className='muted';note.textContent=empty(v)?'Keine Ladeaufträge':!valued(v)?'Preise fehlen':partial(v)?'Teilbetrag · Preise fehlen':'';card.append(h,amount,label,note);box.append(card);const section=document.createElement('section'),heading=document.createElement('strong');heading.textContent=title;section.append(heading,detail);breakdown.append(section);
  }
  const tbody=document.getElementById('historyrows');tbody.replaceChildren();
  const group=document.getElementById('historygroup').value;
@@ -377,7 +377,10 @@ function renderPhaseStrip(root,rows,fmt){
  part.onclick=select;part.addEventListener('focus',select);part.addEventListener('pointerenter',e=>{if(e.pointerType==='mouse')select();});bar.append(part);}
  const axis=document.createElement('div');axis.className='plan-axis';
  const a=rows[0].start,b=rows[rows.length-1].end;
- for(let i=0;i<5;i++){const tick=document.createElement('span');tick.textContent=fmt(a+(b-a)*i/4);axis.append(tick);}
+ const hour=3600000,step=Math.max(1,Math.ceil((b-a)/hour/4))*hour;
+ const marks=[];for(let t=Math.ceil(a/step)*step;t<=b;t+=step)marks.push(t);
+ if(marks.length<2){marks.length=0;marks.push(a,b);}
+ for(const t of marks){const tick=document.createElement('span');tick.textContent=fmt(t);const pos=(t-a)/(b-a)*100;tick.style.left=pos+'%';tick.style.transform=pos<8?'none':pos>92?'translateX(-100%)':'translateX(-50%)';axis.append(tick);} 
  root.append(bar,axis,detail);
 }
 

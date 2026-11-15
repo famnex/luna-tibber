@@ -14,7 +14,7 @@ assert.equal(intercepted,false);
 console.log('Chart phase precedence and service-worker control isolation passed');
 // Money statistics: empty periods, missing prices and negative savings stay distinct.
 function element(){return {textContent:'',children:[],append(...items){this.children.push(...items);},replaceChildren(){this.children=[];}};}
-const elements={historyinfo:element(),periodstats:element(),historyrows:element(),historygroup:{value:'months'}};
+const elements={historyinfo:element(),periodstats:element(),historyrows:element(),perioddetails:element(),historygroup:{value:'months'}};
 ctx.document.getElementById=id=>elements[id];ctx.document.createElement=element;
 const blank={valued:0,discharge:0,seconds:0,saving:0,cost:0,avoided:0};
 ctx.ledger={enabled:true,started:null,periods:{today:{...blank},yesterday:{...blank},last30:{...blank},last365:{...blank}},months:[],years:[]};
@@ -30,7 +30,7 @@ vm.runInContext('renderHistory()',ctx);
 const card=elements.periodstats.children[0];
 assert.match(card.children[1].textContent,/-0,12/);
 assert.equal(card.children[2].textContent,'Geschätzte Mehrkosten');
-assert.match(card.children[3].textContent,/Verschleiß: 0,02/);
+assert.match(elements.perioddetails.children[0].children[1].textContent,/Verschleiß: 0,02/);
 assert.match(card.children[3].textContent,/Teilbetrag/);
 assert.equal(elements.historyrows.children[0].children.length,4);
 assert.ok(elements.historyrows.children[0].children.slice(1).every(x=>x.textContent.includes('€')));

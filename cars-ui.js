@@ -10,7 +10,7 @@ $('overview').querySelector(':scope > .heading').hidden=true;
 const account=make('details',undefined,'card');account.append(make('summary','Konto & Verbindung'),$('logout'));$('settings').append(account);
 const cars=make('article',undefined,'card cars-card');cars.id='cars-card';cars.append(make('h2','Deine Autos'));const carGrid=make('div',undefined,'cars-grid');cars.append(carGrid);const carNotice=make('p','Fahrzeugdaten werden geladen …','muted');cars.append(carNotice);$('batterystatus').after(cars);
 const manual=$('manual'),original=make('div');original.id='manual-interventions';while(manual.firstChild)original.append(manual.firstChild);manual.append(make('h1','Planung'));
-const tabs=make('div',undefined,'history-toggle');tabs.setAttribute('role','group');tabs.setAttribute('aria-label','Planungsbereich');const interventions=make('button','Eingriffe'),carTab=make('button','Autoplanung');tabs.append(interventions,carTab);manual.append(tabs,original);original.querySelector('h1').hidden=true;
+const tabs=make('div',undefined,'history-toggle');tabs.setAttribute('role','group');tabs.setAttribute('aria-label','Planungsbereich');tabs.classList.add('planning-tabs');const interventions=make('button','Eingriffe'),carTab=make('button','Autoplanung');tabs.append(interventions,carTab);manual.append(tabs,original);original.querySelector('h1').hidden=true;
 const panel=make('section');panel.hidden=true;panel.id='car-planning';manual.append(panel);
 function tab(car){panel.hidden=!car;original.hidden=car;interventions.setAttribute('aria-pressed',String(!car));carTab.setAttribute('aria-pressed',String(car));if(car)load();}interventions.onclick=()=>tab(false);carTab.onclick=()=>tab(true);tab(false);
 const nav=document.querySelector('[data-tab="manual"]');for(const n of [...nav.childNodes])if(n.nodeType===3)n.textContent='Planung';
@@ -36,8 +36,8 @@ async function request(path,data){const r=await fetch('/api/'+path,data?{method:
 function cap(v,id){return (v.details?.capabilities||[]).find(c=>c.id===id);}
 function name(v){return plan?.profiles[v.device.id]?.name||v.details?.info?.name||v.device.info?.name||v.device.info?.model||v.device.name||'Fahrzeug';}
 function drawCars(data){vehicles=data.result?.devices||[];vehicles.sort((a,b)=>Number(/born/i.test(name(a)))-Number(/born/i.test(name(b))));carGrid.replaceChildren();
- for(const v of vehicles){const c=make('div',undefined,'car-summary'),pic=make('div',undefined,'car-pictogram');pic.innerHTML=carIcon(/born/i.test(name(v)));c.append(pic,make('strong',name(v)));const soc=cap(v,'storage.stateOfCharge'),plug=cap(v,'connector.status'),charge=cap(v,'charging.status');c.append(make('b',soc?.value!=null?soc.value+' %':'—','car-soc'));const socLine=make('div',undefined,'car-soc-line');socLine.append(c.querySelector('.car-soc'),plugIcon(plug?.value));c.append(socLine);if(charge?.value==='charging')c.append(make('small','⚡ Lädt'));
- carGrid.append(c);}
+ for(const v of vehicles){const c=make('button',undefined,'car-summary car-shortcut'),pic=make('div',undefined,'car-pictogram');pic.innerHTML=carIcon(/born/i.test(name(v)));c.append(pic,make('strong',name(v)));const soc=cap(v,'storage.stateOfCharge'),plug=cap(v,'connector.status'),charge=cap(v,'charging.status');c.append(make('b',soc?.value!=null?soc.value+' %':'—','car-soc'));const socLine=make('div',undefined,'car-soc-line');socLine.append(c.querySelector('.car-soc'),plugIcon(plug?.value));c.append(socLine);if(charge?.value==='charging')c.append(make('small','⚡ Lädt'));
+ c.type='button';c.setAttribute('aria-label',name(v)+' · Wochenplanung öffnen');c.onclick=()=>{selected=v.device.id;nav.click();tab(true);renderPlan();manual.scrollIntoView({block:'start'});};carGrid.append(c);}
  if(!vehicles.length){const a=make('a','Fahrzeuge mit Tibber verbinden →');a.href='/vehicles';carGrid.append(a);}
  carNotice.textContent=data.error||(data.result&&Date.now()/1000-data.result.fetched_at>1800?'Fahrzeugdaten veraltet · letzter Abruf '+new Date(data.result.fetched_at*1000).toLocaleString('de-DE'):!data.result?'Noch keine Fahrzeugdaten.':'');carNotice.hidden=!carNotice.textContent;
 }
@@ -68,7 +68,8 @@ setInterval(load,60000);document.addEventListener('visibilitychange',()=>{if(!do
 document.addEventListener('DOMContentLoaded',()=>{
  const $=id=>document.getElementById(id);
  const details=(label,...nodes)=>{const d=document.createElement('details'),s=document.createElement('summary');s.textContent=label;d.append(s,...nodes);return d;};
- const reason=$('nextreason'),why=details('Begründung');reason.before(why);why.append(reason);
+ const toggles=document.createElement('div');toggles.className='chart-toggles';toggles.setAttribute('role','group');toggles.setAttribute('aria-label','Diagrammkurven');$('pricechart').before(toggles);toggles.append($('pvlegend'),$('batterylegend'));
+ const close=document.createElement('button');close.type='button';close.className='dialog-close';close.textContent='×';close.setAttribute('aria-label','Dialog schließen');close.onclick=()=> $('ordercancel').click();$('ordertitle').before(close);
  const target=$('cardtarget').parentElement;
  const batteryDetails=details('Akku-Details',target);$('batterystatus').append(batteryDetails);
  const sample=$('sampletime');sample.tabIndex=0;sample.setAttribute('role','button');sample.setAttribute('aria-label','Genauen Messzeitpunkt anzeigen');
