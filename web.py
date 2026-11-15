@@ -172,6 +172,8 @@ class Dashboard:
         self.history=History(folder)
         from grid_costs import GridCosts
         self.grid_costs=GridCosts(folder)
+        from tibber_vehicles import VehicleProbe
+        self.vehicle_probe=VehicleProbe(folder)
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
@@ -789,6 +791,8 @@ class Handler(BaseHTTPRequestHandler):
         if not self.host_ok():
             return self.send(403,{'error':'Host nicht erlaubt'})
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
+        static['/vehicles.js']=('vehicles.js','application/javascript')
+        static['/vehicles.css']=('vehicles.css','text/css')
         static.update({
             '/manual-ui.js':('manual-ui.js','application/javascript'),'/theme.js':('theme.js','application/javascript'),'/journal.js':('journal.js','application/javascript'),'/features.js':('features.js','application/javascript'),'/sw.js':('sw.js','application/javascript'),
             '/manifest.webmanifest':('manifest.webmanifest','application/manifest+json'),
@@ -802,6 +806,10 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,{'ok':True,'pid':os.getpid(),'revision':getattr(self.server,'started_revision',None)})
         if not self.authenticated():
             return self.send(401,{'error':'Bitte anmelden'})
+        if self.path=='/vehicles':
+            return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
+        if self.path=='/api/vehicles':
+            return self.send(200,self.server.app.vehicle_probe.status())
         if self.path=='/api/startup':
             return self.send(200,self.server.app.startup_snapshot())
         if self.path=='/api/update':
@@ -883,6 +891,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path.startswith('/api/vehicles/'):
+                cookie=SimpleCookie(self.headers.get('Cookie',''))
+                session=session_key(cookie['luna'].value)
+                return self.send(200,self.server.app.vehicle_probe.action(self.path.rsplit('/',1)[-1],data,session))
             if self.path == '/api/consumption-tip':
                 if data.get('_advice_job'):
                     return self.send(200,self.server.app.consumption_advice.poll(data['_advice_job']))

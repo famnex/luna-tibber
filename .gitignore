@@ -64,3 +64,6 @@ last-measurement.json
 last-measurement.json.tmp
 
 grid-costs.sqlite3*
+
+vehicle-tibber-private.json
+vehicle-tibber-private.tmp
