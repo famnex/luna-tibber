@@ -12,7 +12,7 @@ class VehicleTests(unittest.TestCase):
         self.p=VehicleProbe(Path(self.tmp.name))
     def test_state_session_and_secret_storage(self):
         self.p.begin({'client_id':'client','client_secret':'secret'},'session')
-        url=REDIRECT+'?'+urlencode({'code':'code','state':self.p.pending['state']})
+        url=REDIRECT+'?'+urlencode({'code':'code','state':next(iter(self.p.pending))})
         with self.assertRaises(ValueError):self.p.finish({'callback_url':url},'other')
         with self.assertRaises(ValueError):self.p.finish({'callback_url':url.replace('localhost','evil.invalid')},'session')
         self.p.request=Mock(return_value={'access_token':'access','refresh_token':'refresh','expires_in':3600})
@@ -21,6 +21,17 @@ class VehicleTests(unittest.TestCase):
         self.assertEqual(self.p.path.stat().st_mode & 0o777,0o600)
         self.assertIn('code_verifier',self.p.request.call_args.args[1])
         with self.assertRaises(ValueError):self.p.finish({'callback_url':url},'session')
+    def test_two_links_remain_valid_and_missing_scheme(self):
+        self.p.begin({'client_id':'client','client_secret':'secret'},'session')
+        state=next(iter(self.p.pending))
+        verifier=self.p.pending[state]['verifier']
+        self.p.begin({'client_id':'client','client_secret':'secret'},'session')
+        self.p.request=Mock(return_value={'access_token':'access','refresh_token':'refresh'})
+        url=REDIRECT.removeprefix('http://')+'?'+urlencode({'code':'code','state':state})
+        self.p.finish({'callback_url':url},'session')
+        self.assertEqual(self.p.request.call_args.args[1]['code_verifier'],verifier)
+        self.assertNotIn(state,self.p.pending)
+
     def test_read_and_cache_without_commands(self):
         self.p.token=Mock(return_value='access')
         self.p.request=Mock(side_effect=[{'homes':[{'id':'home'}]}, {'devices':[{'id':'car','name':'Born'}]}, {'soc':42,'timestamp':'2026-11-15T12:00:00Z'}])

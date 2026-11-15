@@ -17,7 +17,7 @@ class VehicleProbe:
     def __init__(self, folder):
         self.path = folder / 'vehicle-tibber-private.json'
         self.lock = threading.Lock()
-        self.pending = None
+        self.pending = {}
         self.cache = None
         self.last_attempt = 0
         try:
@@ -64,7 +64,10 @@ class VehicleProbe:
             raise ValueError('Client-ID und Client-Secret eingeben.')
         verifier = secrets.token_urlsafe(48)
         state = secrets.token_urlsafe(32)
-        self.pending = dict(client_id=client, client_secret=secret, verifier=verifier,
+        self.pending = {k:v for k,v in self.pending.items() if v["expires"] > time.time()}
+        if len(self.pending)>=10:
+            raise ValueError("Zu viele offene Anmeldungen. Bitte zehn Minuten warten.")
+        self.pending[state] = dict(client_id=client, client_secret=secret, verifier=verifier,
                             state=state, session=session, expires=time.time()+600)
         challenge = base64.urlsafe_b64encode(hashlib.sha256(verifier.encode()).digest()).decode().rstrip('=')
         return {'url':'https://thewall.tibber.com/connect/authorize?' + urlencode(dict(
@@ -72,19 +75,34 @@ class VehicleProbe:
             state=state, code_challenge=challenge, code_challenge_method='S256'))}
 
     def finish(self, data, session):
-        pending = self.pending
-        if not pending or pending['expires'] < time.time() or pending['session'] != session:
-            raise ValueError('Anmeldung abgelaufen. Bitte neu beginnen.')
-        url = urlsplit(str(data.get('callback_url','')).strip())
-        expected = urlsplit(REDIRECT)
+        address = str(data.get('callback_url','')).strip()
+        if address.startswith('localhost:8099/'):
+            address = 'http://' + address
+        try:
+            url = urlsplit(address)
+            valid = (url.scheme == 'http' and url.hostname == 'localhost' and
+                     url.port == 8099 and url.path == '/tibber-callback' and
+                     url.username is None and url.password is None and not url.fragment)
+        except ValueError:
+            valid = False
+        if not valid:
+            raise ValueError('Adresse ungültig: die vollständige Rückleitung http://localhost:8099/tibber-callback?code=…&state=… einfügen.')
         query = parse_qs(url.query)
-        state = query.get('state',[''])[0]
-        if (url.scheme, url.netloc, url.path) != (expected.scheme, expected.netloc, expected.path) or not secrets.compare_digest(state, pending['state']):
-            raise ValueError('Rückleitungsadresse passt nicht zu dieser Anmeldung.')
+        if len(query.get('state',[])) != 1 or len(query.get('code',[])) != 1:
+            raise ValueError('Rückleitung unvollständig: genau ein code und ein state werden benötigt. Vollständige Browseradresse kopieren.')
+        state = query['state'][0]
+        pending = self.pending.get(state)
+        if not pending:
+            raise ValueError('Diese Rückleitung gehört zu keinem offenen Anmeldelink. Nach Serverneustart oder mit einem alten Link bitte die Anmeldung neu beginnen.')
+        if pending['expires'] < time.time():
+            self.pending.pop(state, None)
+            raise ValueError('Anmeldelink ist älter als zehn Minuten. Bitte neu beginnen.')
+        if pending['session'] != session:
+            raise ValueError('Anmeldung in einem anderen Browser begonnen. Rückleitung dort einfügen oder hier neu beginnen.')
         code = query.get('code',[''])[0]
         if not code:
             raise ValueError('Kein Anmeldecode vorhanden. Tibber-Freigabe prüfen.')
-        self.pending = None
+        self.pending.pop(state, None)
         credentials = {k:pending[k] for k in ('client_id','client_secret')}
         tokens = self.request('https://thewall.tibber.com/connect/token', dict(credentials,
             grant_type='authorization_code',code=code,redirect_uri=REDIRECT,code_verifier=pending['verifier']))
@@ -160,7 +178,7 @@ class VehicleProbe:
             if action=='finish': return self.finish(data,session)
             if action=='read': return self.probe()
             if action=='disconnect':
-                self.credentials={};self.pending=None;self.cache=None;self.last_attempt=0
+                self.credentials={};self.pending={};self.cache=None;self.last_attempt=0
                 self.path.unlink(missing_ok=True)
                 return self.status()
             raise ValueError('Unbekannte Fahrzeugaktion')
