@@ -40,8 +40,12 @@ def send_message(phone,key,text):
 
 
 class WhatsApp:
+    prefix="whatsapp"
+    address_field="phone"
+    provider="CallMeBot"
+    test_title="WhatsApp"
     def __init__(self,folder,start_worker=True):
-        self.path=folder/'whatsapp-private.json';self.events_path=folder/'whatsapp-events.json'
+        self.path=folder/(self.prefix+'-private.json');self.events_path=folder/(self.prefix+'-events.json')
         self.lock=threading.RLock();self.closed=threading.Event();self.queue=queue.Queue(100);self.pending=set()
         self.data=read(self.path,{'recipients':[],'car_alerts':True,'system_alerts':False})
         self.events=read(self.events_path,{});self.delivery={};self.sender=send_message
@@ -89,7 +93,7 @@ class WhatsApp:
                 last=self.events.get(key,{})
                 if key in self.pending or now-last.get('success',0)<cooldown or now-last.get('attempt',0)<(60 if category=='test' else 900):continue
                 if category!='test' and last.get('failures',0)>=3 and now-last.get('attempt',0)<86400:continue
-                try:self.queue.put_nowait((r['id'],r['phone'],r['key'],key,title+'\n'+body,category,now))
+                try:self.queue.put_nowait((r['id'],r[self.address_field],r['key'],key,title+'\n'+body,category,now))
                 except queue.Full:continue
                 self.pending.add(key);self.events[key]={**last,'attempt':now}
                 self.delivery[r['id']]={'state':'queued','at':now,'message':'Wartet auf Versand'};count+=1
@@ -97,7 +101,7 @@ class WhatsApp:
         return count
     def test(self,rid):
         if not any(r['id']==rid for r in self.data['recipients']):raise ValueError('Empfänger nicht gefunden.')
-        if not self.emit('test','LUNA · WhatsApp-Test','Testnachricht: Die Einrichtung funktioniert, wenn diese Nachricht bei dir ankommt.','test',60,rid):raise ValueError('Test bereits angefordert. Bitte mindestens eine Minute warten.')
+        if not self.emit('test','LUNA · '+self.test_title+'-Test','Testnachricht: Die Einrichtung funktioniert, wenn diese Nachricht bei dir ankommt.','test',60,rid):raise ValueError('Test bereits angefordert. Bitte mindestens eine Minute warten.')
         return self.status()
     def persist_events(self):
         cutoff=time.time()-14*86400;self.events={k:v for k,v in self.events.items() if v.get('attempt',0)>cutoff}
@@ -106,13 +110,13 @@ class WhatsApp:
         rid,phone,secret,key,text,category,created=item
         with self.lock:
             r=next((r for r in self.data['recipients'] if r['id']==rid),None)
-            valid=r and r['phone']==phone and r['key']==secret and (category=='test' or (r['enabled'] and self.data.get(category+'_alerts')))
+            valid=r and r[self.address_field]==phone and r['key']==secret and (category=='test' or (r['enabled'] and self.data.get(category+'_alerts')))
         if not valid or time.time()-created>600:
             with self.lock:self.pending.discard(key)
             return
         try:
             self.sender(phone,secret,text)
-            state='accepted';message='Von CallMeBot angenommen · Empfang am Handy prüfen'
+            state='accepted';message='Von '+self.provider+' angenommen · Empfang am Handy prüfen'
             success=True
         except Exception:
             state='failed';message='Versand nicht bestätigt · Schlüssel, Freischaltung und Internet prüfen';success=False

@@ -80,3 +80,8 @@ whatsapp-private.json
 whatsapp-private.tmp
 whatsapp-events.json
 whatsapp-events.tmp
+
+ntfy-private.json
+ntfy-private.tmp
+ntfy-events.json
+ntfy-events.tmp

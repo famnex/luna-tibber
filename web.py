@@ -184,6 +184,8 @@ class Dashboard:
         from whatsapp import WhatsApp
         from car_notifications import CarNotifier
         self.whatsapp=WhatsApp(folder,start_worker=start_worker)
+        from ntfy import Ntfy
+        self.ntfy=Ntfy(folder,start_worker=start_worker)
         self.car_notifier=CarNotifier(self)
         self.sample_failures=0
         self.price_failed_since=None
@@ -326,7 +328,9 @@ class Dashboard:
     def alert(self,key,title,body,cooldown=1800):
         contact=self.config().get('push_contact','')
         self.notifications.emit(key,title,body,'mailto:'+contact if contact else '',cooldown)
-        if key!='test':self.whatsapp.emit(key,title,body,'system',cooldown)
+        if key!='test':
+            self.whatsapp.emit(key,title,body,'system',cooldown)
+            self.ntfy.emit(key,title,body,'system',cooldown)
 
     def stop(self):
         # Called with lock held; collector needs lock, so poll process directly.
@@ -741,6 +745,7 @@ class Dashboard:
         self.closed.set()
         self.notifications.closed.set()
         self.whatsapp.closed.set()
+        self.ntfy.closed.set()
         with self.lock:
             self.stop()
 
@@ -806,6 +811,7 @@ class Handler(BaseHTTPRequestHandler):
         static = {'/':('web.html','text/html; charset=utf-8'),'/app.js':('app.js','application/javascript'),'/style.css':('style.css','text/css')}
         static['/cars-ui.js']=('cars-ui.js','application/javascript')
         static['/whatsapp-ui.js']=('whatsapp-ui.js','application/javascript')
+        static['/ntfy-ui.js']=('ntfy-ui.js','application/javascript')
         static['/cars-ui.css']=('cars-ui.css','text/css')
         static['/car-id3.webp']=('car-id3.webp','image/webp')
         static['/car-born.webp']=('car-born.webp','image/webp')
@@ -826,6 +832,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(401,{'error':'Bitte anmelden'})
         if self.path=='/vehicles':
             return self.send(200,(BASE/'vehicles.html').read_bytes(),'text/html; charset=utf-8')
+        if self.path=='/api/ntfy':
+            return self.send(200,self.server.app.ntfy.status())
         if self.path=='/api/whatsapp':
             return self.send(200,self.server.app.whatsapp.status())
         if self.path=='/api/car-advice':
@@ -916,6 +924,10 @@ class Handler(BaseHTTPRequestHandler):
                 return self.send(200,{'ok':True},cookie='luna=; HttpOnly; SameSite=Strict; Path=/; Max-Age=0')
             if not self.path.startswith('/api/'):
                 return self.send(404,{'error':'Nicht gefunden'})
+            if self.path.startswith('/api/ntfy/'):
+                action=self.path.rsplit('/',1)[-1]
+                service=self.server.app.ntfy
+                return self.send(200,service.test(data.get('id')) if action=='test' else service.change(action,data))
             if self.path.startswith('/api/whatsapp/'):
                 action=self.path.rsplit('/',1)[-1]
                 service=self.server.app.whatsapp

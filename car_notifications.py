@@ -39,7 +39,9 @@ class CarNotifier:
     def tick(self,now=None):
         from car_planning import advice
         now=now or datetime.now(timezone.utc);app=self.app
-        if not app.whatsapp.status()['car_alerts']:self.seen={};return
+        ntfy=getattr(app,'ntfy',None)
+        web_push=app.whatsapp.status()['car_alerts']
+        if not web_push and not (ntfy and ntfy.status()['car_alerts']):self.seen={};return
         c=app.config();d=advice(app.car_planning.read(),app.vehicle_probe.cache,c['timezone'],now,app.car_context.snapshot(c))
         current=alerts(d,now,c['timezone']);keys={a['key'] for a in current}
         self.seen={k:v for k,v in self.seen.items() if k in keys}
@@ -47,8 +49,9 @@ class CarNotifier:
             start=self.seen.setdefault(a['key'],now.timestamp())
             if now.timestamp()-start<60:continue # Two checks; no alert for a transient refresh.
             app.whatsapp.emit(a['key'],a['title'],a['body'],'car',43200)
+            if ntfy:ntfy.emit(a['key'],a['title'],a['body'],'car',43200)
             contact=c.get('push_contact','')
-            app.notifications.emit(a['key'],a['title'],a['body'],'mailto:'+contact if contact else '',43200)
+            if web_push:app.notifications.emit(a['key'],a['title'],a['body'],'mailto:'+contact if contact else '',43200)
     def worker(self):
         while not self.app.closed.is_set():
             try:self.tick()

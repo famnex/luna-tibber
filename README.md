@@ -1100,3 +1100,27 @@ Abstand zwischen Anfragen. Fehler werden ohne URL/Schlüssel ausgegeben.
 „Von CallMeBot angenommen“ ist keine Empfangsbestätigung des Handys.
 Tests verwenden einen simulierten Sender; ein echter Versand muss mit der
 eingerichteten Telefonnummer über die Testschaltfläche geprüft werden.
+
+
+### ntfy als Alternative zu WhatsApp
+
+Einstellungen → ntfy · Benachrichtigungen → ntfy einrichten. Der Assistent
+verlinkt die ntfy-App, erzeugt auf Wunsch ein zufälliges Topic und bietet eine
+Testnachricht. Auf allen gewünschten Geräten Server `https://ntfy.sh` und
+dasselbe Topic abonnieren; alternativ bis zu zehn getrennte Topics anlegen.
+Keine Telefonnummer, kein CallMeBot-Schlüssel erforderlich.
+
+Ungeschützte Topics sind für alle mit Kenntnis des Namens les- und beschreibbar.
+Der zufällige Name ist kein Ersatz für echte Zugriffskontrolle. Optional kann ein
+ntfy-Zugriffstoken für ein bereits geschütztes Topic hinterlegt werden; die Rechte
+müssen auf ntfy.sh eingerichtet sein. Nachrichten werden an ntfy.sh übermittelt.
+
+Auto-Hinweise und Systemfehler pro Dienst separat schalten. ntfy funktioniert
+auch bei ausgeschalteten WhatsApp-Hinweisen. Beide Dienste dürfen parallel
+aktiviert sein; dann wird über beide zugestellt. Bisherige Web-Push-Einstellungen
+bleiben erhalten. Server ist in dieser Version fest ntfy.sh.
+
+Schlüssel bleiben serverseitig; lokale Dateien `ntfy-private.json` und
+`ntfy-events.json` haben Modus 0600. Gleiche Warteschlange, Wiederholungsschutz
+und Testfunktion wie WhatsApp, aber unabhängig gespeicherte Versandereignisse.
+„Angenommen“ bestätigt den Server, nicht den tatsächlichen Handy-Empfang.
