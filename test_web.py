@@ -8,6 +8,14 @@ import luna
 import web
 
 class ScheduleTests(unittest.TestCase):
+    def test_planned_order_can_charge_to_100(self):
+        c={**luna.DEFAULT,'timezone':'Europe/Berlin'}
+        now=datetime(2026,11,16,7,tzinfo=timezone.utc)
+        data={'start':'2026-11-17T08:00','end_kind':'soc','target_soc':100}
+        self.assertEqual(web.planned_order(data,c,now)['target_soc'],100)
+        with self.assertRaises(ValueError):
+            web.planned_order({**data,'target_soc':101},c,now)
+
     def test_overnight_belongs_to_start_day(self):
         rows=[{'days':[4],'start':'23:00','end':'02:00','mode':'on'}]
         web.validate_schedules(rows)
