@@ -124,8 +124,8 @@ def planned_order(data, c, now=None):
             raise ValueError('Ende liegt in einer Zeitumstellung')
     elif kind == 'soc':
         target = data['target_soc']
-        if type(target) not in (int,float) or not 10 <= target <= 95:
-            raise ValueError('Ziel-SOC muss zwischen 10 und 95 Prozent liegen')
+        if type(target) not in (int,float) or not 10 <= target <= 100:
+            raise ValueError('Ziel-SOC muss zwischen 10 und 100 Prozent liegen')
     else:
         raise ValueError('Ende muss Uhrzeit oder SOC sein')
     if not 120 <= (end-start).total_seconds() <= c['max_session_minutes']*60:
