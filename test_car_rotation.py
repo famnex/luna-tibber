@@ -55,3 +55,24 @@ class RotationTests(unittest.TestCase):
         self.assertNotIn('Bitte umstecken',body)
         car['connector_status']='unknown';car['connected']=False
         self.assertIn('Anschlussstatus unbekannt',alerts(advice,self.now)[0]['body'])
+
+    def test_charging_suppresses_urgent_reminder_and_morning_waits(self):
+        car={'id':'a','name':'Born','soc':95,'connected':True,'connector_status':'connected','charging_status':'charging','rotation':{'start':'2026-11-16T00:00:00+01:00','end':'2026-11-16T06:00:00+01:00','target_soc':97,'kwh':1.1,'add_soc':2}}
+        d={'priority':'a','priority_kind':'rotation','rotation':{'status':'planned'},'vehicles':[car]}
+        self.assertEqual(alerts(d,datetime.fromisoformat('2026-11-16T00:00:00+01:00')),[])
+        car['charging_status']='idle';car['rotation']['start']='2026-11-16T22:00:00+01:00';car['rotation']['end']='2026-11-17T06:00:00+01:00'
+        self.assertEqual(alerts(d,datetime.fromisoformat('2026-11-16T06:00:00+01:00')),[])
+        car['rotation'].update(expected_start_soc=49.3,projected_before_kwh=25.1,kwh=26.22,add_soc=47.7)
+        message=alerts(d,datetime.fromisoformat('2026-11-16T18:00:00+01:00'))[0]['body']
+        self.assertIn('Nach den geplanten Fahrten',message)
+        self.assertIn('49,3 % → 97 %',message)
+
+    def test_rotation_exposes_future_start_instead_of_current_gap(self):
+        self.now=datetime.fromisoformat('2026-11-16T06:30:00+01:00')
+        self.cars[0]['soc']=95
+        for day in ('2026-11-16','2026-11-17','2026-11-18'):self.trip('a',day,100)
+        result=self.run_plan();self.assertEqual(result['status'],'planned')
+        slot=result['sessions'][0]
+        self.assertEqual(slot['current_soc'],95)
+        self.assertLess(slot['expected_start_soc'],95)
+        self.assertAlmostEqual(slot['kwh'],(slot['target_soc']-slot['expected_start_soc'])*.6,delta=.04)

@@ -17,7 +17,9 @@ def alerts(advice,now=None,zone='Europe/Berlin'):
         when=datetime.fromisoformat(deadline);hours=(when-now).total_seconds()/3600
         if not 0<=hours<=24:continue
         urgent=hours<=3;stage='urgent' if urgent else 'ahead'
-        if car.get('charging_status')=='charging' and not urgent:continue
+        if str(car.get('charging_status','')).lower()=='charging':continue
+        # Overnight reminders start at most twelve hours before the window.
+        if (rotation or stock) and hours>12:continue
         target=(rotation or stock or {}).get('target_soc',car.get('target_soc'))
         missing=(rotation or stock or {}).get('kwh',car.get('missing_kwh'))
         extra=rotation.get('add_soc') if rotation else (missing/car['capacity']*100 if car.get('capacity') else max(0,target-car['soc']))
@@ -36,13 +38,18 @@ def alerts(advice,now=None,zone='Europe/Berlin'):
         else:action=f"Die Ladung von {car['name']} reicht für {journey} nicht aus."
         if car.get('unreachable') and not rotation:
             body=action+' Eine volle Batterie reicht nicht: zusätzliches Zwischenladen einplanen.'
-        else:body=action+f" Mindestens ca. {number(extra)} Prozentpunkte ({number(missing)} kWh) nachladen; Ziel {target} %."
+        else:
+            if rotation and rotation.get('projected_before_kwh',0)>0.1:
+                body=action+f" Nach den geplanten Fahrten voraussichtlich {number(rotation['expected_start_soc'])} % → {target} %: ca. {number(missing)} kWh laden."
+            else:body=action+f" Mindestens ca. {number(extra)} Prozentpunkte ({number(missing)} kWh) nachladen; Ziel {target} %."
         if car.get('connector_status')=='connected' or car.get('connected'):
             body+=' Bereits angeschlossen – kein Umstecken nötig. Ladung in evcc einplanen, falls noch nicht geschehen.'
         elif car.get('connector_status') not in ('connected','disconnected'):
             body+=' Anschlussstatus unbekannt; Anschluss und Ladeplanung in evcc prüfen.'
         if first and advice.get('rotation',{}).get('status')=='conflict':body+=' Gemeinsamer Wochenplan hat einen Ladekonflikt; zusätzlichen Ladetermin prüfen.'
-        result.append({'key':f"ev:{car['id']}:{when.astimezone(tz).date()}:{stage}",'title':'LUNA · '+car['name'],'body':body})
+        night_end=(rotation or stock or {}).get('end')
+        key_date=datetime.fromisoformat(night_end).astimezone(tz).date() if night_end else when.astimezone(tz).date()
+        result.append({'key':f"ev:{car['id']}:{key_date}:{stage}",'title':'LUNA · '+car['name'],'body':body})
     return result
 
 

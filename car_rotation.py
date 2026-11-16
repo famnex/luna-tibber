@@ -33,6 +33,13 @@ def coordinate(plan,vehicles,zone,now,context=None):
     if any(prefix[j]>0 and energy[j]<floors[j]-0.001 for j in range(2)):return failure
     daily=[[demand(j,b,windows[i+1][1] if i<6 else horizon) for j in range(2)] for i,(a,b) in enumerate(windows)]
     allowed=[[not any(x<b and y>a for x,y in away[j]) for j in range(2)] for a,b in windows]
+    def depletion(j):
+        remaining=initial[j]
+        for departure,kwh in sorted(journeys[j]):
+            remaining-=kwh
+            if remaining<floors[j]-0.001:return departure.timestamp()
+        return float('inf')
+    deadlines=[depletion(j) for j in range(2)]
     best=None;best_score=None
     def search(i,e,schedule):
         nonlocal best,best_score
@@ -41,7 +48,7 @@ def coordinate(plan,vehicles,zone,now,context=None):
             active=[(k,j) for k,j in enumerate(schedule) if j is not None]
             first_car=active[0][1] if active else None
             bargain=sum(1 for k,j in active if vehicles[j].get('opportunity') and windows[k][0]<=datetime.fromisoformat(vehicles[j]['opportunity']['start'])<windows[k][1])
-            score=(len(active),-bargain,0 if first_car is None or vehicles[first_car]['connected'] else 1,-sum(k for k,j in active),tuple(2 if j is None else j for j in schedule))
+            score=(len(active),-bargain,deadlines[first_car] if first_car is not None else float('inf'),0 if first_car is None or vehicles[first_car]['connected'] else 1,-sum(k for k,j in active),tuple(2 if j is None else j for j in schedule))
             if best_score is None or score<best_score:best_score=score;best=schedule[:]
             return
         if best_score and sum(j is not None for j in schedule)>best_score[0]:return
@@ -67,6 +74,8 @@ def coordinate(plan,vehicles,zone,now,context=None):
             target=target_soc*caps[choice]/100
             if target>e[choice]+0.01:
                 sessions.append({'id':vehicles[choice]['id'],'name':vehicles[choice]['name'],'start':windows[i][0].isoformat(),'end':windows[i][1].isoformat(),
+                                 'current_soc':vehicles[choice]['soc'],'expected_start_soc':round(e[choice]/caps[choice]*100,1),
+                                 'projected_before_kwh':round(max(0,initial[choice]-e[choice]),2),
                                  'target_soc':target_soc,'kwh':round(target-e[choice],2),'add_soc':round((target-e[choice])/caps[choice]*100,1),'covers_until':(windows[next_own][1] if next_own<7 else horizon).isoformat(),
                                  'other_next_night':i<6 and best[i+1] is not None and best[i+1]!=choice})
                 e[choice]=target
