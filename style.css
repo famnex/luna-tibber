@@ -190,3 +190,19 @@ input[type=datetime-local]::-webkit-date-and-time-value{text-align:left}
 .soc-limit{text-align:right;margin-top:4px;font-size:10px!important;color:#f5dfa0!important}
 #perioddetails section{padding:12px 0;border-bottom:1px solid var(--line,#78948755)}#perioddetails p{margin:6px 0}.statcard .big{font-size:clamp(1.4rem,5vw,2rem)}
 .planning-tabs{margin-bottom:16px}.car-choices{padding-top:8px;border-top:1px solid var(--line,#78948755)}
+
+/* Unified energy overview: now -> SOC bar -> next action. */
+#batterystatus .battery-now-label{padding:0 20px 8px;font-size:11px;font-weight:650;letter-spacing:.06em;text-transform:uppercase;color:#c2d8cc}
+#batterystatus .battery-stats{grid-template-columns:minmax(0,1fr) minmax(0,1fr);padding:0 20px 16px;gap:14px}
+#batterystatus .soc-row{padding:4px 20px 14px}
+#batterystatus .soc-limit[hidden]{display:none!important}
+#batterystatus .battery-detail{border:0;padding:0 20px 14px;gap:3px}
+#batterystatus .battery-next{border-top:1px solid #ffffff27;padding:16px 20px 20px;background:#091b141c}
+#batterystatus .battery-next-header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:6px}
+#batterystatus .battery-next-header h3{margin:0;font-size:15px;font-weight:650}
+#batterystatus .battery-plan-pill{font-size:11px;font-weight:650;border-radius:999px;padding:4px 10px;background:#ffffff14;color:#cfe8d4}
+#batterystatus #nexttime{display:block;font-size:21px;font-weight:750;line-height:1.35;font-variant-numeric:tabular-nums}
+#batterystatus #nextaction{margin:2px 0 4px;font-size:16px;line-height:1.3;font-weight:650}
+#batterystatus #nextreason{color:#c2d8cc;font-size:11px;line-height:1.4}
+#batterystatus #nextreason:empty{display:none}
+@media(max-width:700px){#batterystatus .battery-now-label{padding:0 16px 8px}#batterystatus .battery-stats{padding:0 16px 14px;gap:10px}#batterystatus .soc-row{padding:4px 16px 12px}#batterystatus .battery-detail{padding:0 16px 12px}#batterystatus .battery-next{padding:14px 16px 18px}}
