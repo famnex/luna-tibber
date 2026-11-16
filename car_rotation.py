@@ -6,6 +6,7 @@ from car_context import estimate_trip
 
 
 def coordinate(plan,vehicles,zone,now,context=None):
+    from car_planning import trip_occurs
     local=now.astimezone(ZoneInfo(zone))
     if len(vehicles)!=2 or any('soc' not in r or not plan['profiles'].get(r['id'],{}).get('capacity') for r in vehicles):
         return {'status':'missing','sessions':[],'message':'Gemeinsame Planung benötigt aktuelle Ladestände und Kapazitäten beider Autos.'}
@@ -19,7 +20,7 @@ def coordinate(plan,vehicles,zone,now,context=None):
         for day_offset in range(-1,9):
             day=local.date()+timedelta(days=day_offset)
             for t in plan.get('trips',[]):
-                if t['vehicle']!=row['id'] or not (t['kind']=='weekly' and day.weekday() in t['days'] or t['kind']=='once' and t['date']==day.isoformat()):continue
+                if t['vehicle']!=row['id'] or not trip_occurs(plan,t,day):continue
                 depart=datetime.combine(day,time.fromisoformat(t['departure']),local.tzinfo)
                 home=datetime.combine(day,time.fromisoformat(t['return']),local.tzinfo)
                 if home<=depart:home+=timedelta(days=1)

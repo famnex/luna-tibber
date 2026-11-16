@@ -62,3 +62,47 @@ class AdviceTests(unittest.TestCase):
         self.add('GTX',50,50)
         t=dict(self.plan['trips'][0],id='second',departure='18:00',km=50);self.plan['trips'].append(t)
         r=self.run_advice()['vehicles'][0];self.assertEqual(r['missing_kwh'],2);self.assertIn('18:00',r['deadline'])
+
+class HolidayTests(unittest.TestCase):
+    def test_inclusive_dates_and_one_off_exceptions(self):
+        from car_planning import trip_occurs
+        from datetime import date
+        plan={'holidays':[{'start':'2026-11-16','end':'2026-11-20'}]}
+        weekly={'kind':'weekly','days':list(range(7))}
+        for day,expected in [(15,True),(16,False),(18,False),(20,False),(21,True)]:
+            self.assertEqual(trip_occurs(plan,weekly,date(2026,11,day)),expected)
+        self.assertTrue(trip_occurs(plan,{'kind':'once','date':'2026-11-18'},date(2026,11,18)))
+
+    def test_persistence_validation_and_legacy_save(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=CarPlanning(Path(folder))
+            data=store.read();data['holidays']=[{'id':'h','name':'Ferien','start':'2026-11-16','end':'2026-11-20'}]
+            saved=store.save(data);self.assertEqual(saved,store.read())
+            saved.pop('holidays');saved=store.save(saved)
+            self.assertEqual(len(saved['holidays']),1)
+            saved['holidays'][0]['end']='2026-11-15'
+            with self.assertRaises(ValueError):store.save(saved)
+            self.assertEqual(store.read()['holidays'][0]['end'],'2026-11-20')
+            data=store.read();data['holidays']=[]
+            self.assertEqual(store.save(data)['holidays'],[])
+
+    def test_both_vehicle_plans_and_estimates_exclude_routines(self):
+        from car_planning import advice
+        from datetime import datetime,timezone
+        now=datetime(2026,11,15,12,tzinfo=timezone.utc)
+        plan={'profiles':{},'trips':[],'holidays':[{'start':'2026-11-15','end':'2026-11-30'}]}
+        devices=[]
+        for vid in ['born','id3']:
+            plan['profiles'][vid]={'name':vid,'consumption':18,'capacity':60,'reserve':20}
+            plan['trips'].append({'id':vid,'vehicle':vid,'kind':'weekly','days':list(range(7)),'km':100,'departure':'08:00','return':'17:00'})
+            devices.append({'device':{'id':vid},'details':{'capabilities':[{'id':'storage.stateOfCharge','value':30}]}})
+        snapshot={'fetched_at':now.timestamp(),'devices':devices}
+        result=advice(plan,snapshot,now=now)
+        self.assertEqual(result['estimates'],[])
+        self.assertEqual(result['rotation']['sessions'],[])
+        self.assertIsNone(result['priority'])
+        plan['trips'].append(dict(plan['trips'][0],id='special',kind='once',date='2026-11-17',km=150))
+        result=advice(plan,snapshot,now=now)
+        self.assertEqual([e['id'] for e in result['estimates']],['special'])
+        self.assertEqual(result['priority'],'born')
+        self.assertTrue(result['rotation']['sessions'])
