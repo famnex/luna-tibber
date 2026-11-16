@@ -70,8 +70,6 @@ document.addEventListener('DOMContentLoaded',()=>{
  const details=(label,...nodes)=>{const d=document.createElement('details'),s=document.createElement('summary');s.textContent=label;d.append(s,...nodes);return d;};
  const toggles=document.createElement('div');toggles.className='chart-toggles';toggles.setAttribute('role','group');toggles.setAttribute('aria-label','Diagrammkurven');$('pricechart').before(toggles);toggles.append($('pvlegend'),$('batterylegend'));
  const close=document.createElement('button');close.type='button';close.className='dialog-close';close.textContent='×';close.setAttribute('aria-label','Dialog schließen');close.onclick=()=> $('ordercancel').click();$('ordertitle').before(close);
- const target=$('cardtarget').parentElement;
- const batteryDetails=details('Akku-Details',target);$('batterystatus').append(batteryDetails);
  const sample=$('sampletime');sample.tabIndex=0;sample.setAttribute('role','button');sample.setAttribute('aria-label','Genauen Messzeitpunkt anzeigen');
  const stamp=document.createElement('small');stamp.hidden=true;sample.after(stamp);
  function showStamp(){stamp.hidden=!stamp.hidden;stamp.textContent=sample.title||'Noch kein Messzeitpunkt';sample.setAttribute('aria-expanded',String(!stamp.hidden));}
