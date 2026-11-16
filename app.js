@@ -139,7 +139,7 @@ function fillSettings(s,secrets){
 function setDashboardLoading(active){
  const root=$('dashboard');root.classList.toggle('dashboard-loading',active);
  root.setAttribute('aria-busy',String(active));
- const ids=['modebadge','flowstate','price','cardtarget','cardplan','nexttime','nextaction','nextreason','todayphases','pricechart'];
+ const ids=['modebadge','flowstate','price','nexttime','nextaction','nextreason','todayphases','pricechart'];
  for(const id of ids){const el=$(id);if(el){el.classList.toggle('skeleton',active);if(active)el.setAttribute('aria-label','Wird geladen');else el.removeAttribute('aria-label');}}
  for(const el of document.querySelectorAll('#overview button, #overview select')){
   if(active&&!el.disabled){el.dataset.startupDisabled='1';el.disabled=true;}
@@ -410,11 +410,14 @@ function renderBatteryCard(d){
  $('flowstate').textContent=!fresh?'Noch keine Messung':charging?'ϟ Lädt':discharging?'Entlädt':'Bereit';
  $('powerdirection').textContent=charging?'↑ Laden':discharging?'↓ Entladen':fresh?'Batterieleistung':'Messung abwarten';
  const target=d.mode==='planned'&&d.planned?d.planned.target_soc:d.settings.target_soc;
- $('cardtarget').textContent=Number.isFinite(target)?target.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'—';$('soclimit').textContent='Limit '+$('cardtarget').textContent;
+ const showLimit=Number.isFinite(target)&&target<100;
+ $('soclimit').hidden=!showLimit;
+ $('soclimit').textContent=showLimit?'Limit '+target.toLocaleString('de-DE',{maximumFractionDigits:1})+' %':'';
+ $('soctarget').style.visibility=showLimit?'visible':'hidden';
  $('socfill').setAttribute('width',fresh?Math.min(1000,Math.max(0,t.soc*10)):0);
- $('soctarget').setAttribute('x1',target*10);$('soctarget').setAttribute('x2',target*10);
- $('socgraphic').setAttribute('aria-label',fresh?`Akkustand ${t.soc} Prozent, Ziel ${target} Prozent`:'Akkustand veraltet oder unbekannt');
- const phase=phaseInfo(d);$('cardstatus').textContent=deviceEvidence(d);$('cardstatus').hidden=!d.fault&&!['stop','discharge-sync'].includes(d.job)&&!/[🔒✓]/u.test($('cardstatus').textContent)&&fresh;$('cardplan').textContent=d.mode==='smart'?'Plan · '+compactPlan(d):phase[1];
+ $('soctarget').setAttribute('x1',showLimit?target*10:0);$('soctarget').setAttribute('x2',showLimit?target*10:0);
+ $('socgraphic').setAttribute('aria-label',fresh?`Akkustand ${t.soc} Prozent${Number.isFinite(target)?', Ladeziel '+target+' Prozent':''}`:'Akkustand veraltet oder unbekannt');
+ $('cardstatus').textContent=deviceEvidence(d);$('cardstatus').hidden=!d.fault&&!['stop','discharge-sync'].includes(d.job)&&!/[🔒✓]/u.test($('cardstatus').textContent)&&fresh;
  $('timerlabel').textContent=d.mode==='on'?'MANUELL · RESTZEIT':'RESTZEIT';
  drawCountdown();
 }
