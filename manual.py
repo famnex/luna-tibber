@@ -62,7 +62,7 @@ def upsert(rows, data, c, now=None):
     start=now if not data.get('start') else local_time(data['start'],c['timezone'])
     if start<now: start=now # Editing an active intervention takes effect now.
     target=data.get('target_soc',c['target_soc']) if end_kind=='soc' else c['target_soc']
-    if type(target) not in (int,float) or not math.isfinite(target) or not 10<=target<=95:raise ValueError('Ziel-SOC: 10 bis 95 %')
+    if type(target) not in (int,float) or not math.isfinite(target) or not 10<=target<=100:raise ValueError('Ziel-SOC: 10 bis 100 %')
     end=None if end_kind=='forever' else start+timedelta(minutes=c['max_session_minutes']) if end_kind=='soc' else local_time(data['end'],c['timezone'])
     minimum=180 if kind=='charge' else 120
     if end and (end-start).total_seconds()<minimum:raise ValueError('Ladefenster mindestens drei Minuten; Entladesperre mindestens zwei Minuten')
