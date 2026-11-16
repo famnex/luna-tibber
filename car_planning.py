@@ -9,7 +9,17 @@ class CarPlanning:
     def __init__(self, folder):
         self.path=folder/'car-planning.json';self.lock=threading.Lock()
     def read(self):
-        try:return json.loads(self.path.read_text())
+        try:
+            data=json.loads(self.path.read_text())
+            # Preserve existing shared holidays as independently editable per-car copies.
+            periods=[]
+            for h in data.get('holidays',[]):
+                if h.get('vehicle'):periods.append(h)
+                else:
+                    for i,vid in enumerate(sorted(data.get('profiles',{}))):
+                        periods.append(dict(h,id=h['id'][:70]+'-car-'+str(i),vehicle=vid))
+            data['holidays']=periods
+            return data
         except FileNotFoundError:return {'revision':0,'profiles':{},'trips':[],'holidays':[]}
     def save(self, data):
         with self.lock:
@@ -53,10 +63,12 @@ class CarPlanning:
                 if not isinstance(h,dict):raise ValueError('Ungültiger Urlaub')
                 hid=str(h.get('id',''))
                 if not hid or len(hid)>100 or hid in period_ids:raise ValueError('Urlaub benötigt eine eindeutige ID')
+                vid=str(h.get('vehicle',''))
+                if vid not in cleaned:raise ValueError('Urlaub benötigt ein gültiges Fahrzeug.')
                 start=date.fromisoformat(str(h.get('start','')));end=date.fromisoformat(str(h.get('end','')))
                 if end<start:raise ValueError('Urlaubsende muss nach dem Beginn liegen.')
                 period_ids.add(hid)
-                periods.append({'id':hid,'name':str(h.get('name','Urlaub'))[:80], 'start':start.isoformat(),'end':end.isoformat()})
+                periods.append({'id':hid,'vehicle':vid,'name':str(h.get('name','Urlaub'))[:80], 'start':start.isoformat(),'end':end.isoformat()})
             result={'revision':old['revision']+1,'profiles':cleaned,'trips':rows,'holidays':sorted(periods,key=lambda h:h['start'])}
             tmp=self.path.with_suffix('.tmp');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:json.dump(result,f)
@@ -67,7 +79,7 @@ def trip_occurs(plan, trip, day):
     key=day.isoformat()
     if trip['kind']=='once':return trip['date']==key
     return (day.weekday() in trip['days'] and
-            not any(h['start']<=key<=h['end'] for h in plan.get('holidays',[])))
+            not any(h.get('vehicle')==trip['vehicle'] and h['start']<=key<=h['end'] for h in plan.get('holidays',[])))
 
 
 def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):

@@ -67,8 +67,8 @@ class HolidayTests(unittest.TestCase):
     def test_inclusive_dates_and_one_off_exceptions(self):
         from car_planning import trip_occurs
         from datetime import date
-        plan={'holidays':[{'start':'2026-11-16','end':'2026-11-20'}]}
-        weekly={'kind':'weekly','days':list(range(7))}
+        plan={'holidays':[{'vehicle':'born','start':'2026-11-16','end':'2026-11-20'}]}
+        weekly={'vehicle':'born','kind':'weekly','days':list(range(7))}
         for day,expected in [(15,True),(16,False),(18,False),(20,False),(21,True)]:
             self.assertEqual(trip_occurs(plan,weekly,date(2026,11,day)),expected)
         self.assertTrue(trip_occurs(plan,{'kind':'once','date':'2026-11-18'},date(2026,11,18)))
@@ -76,21 +76,21 @@ class HolidayTests(unittest.TestCase):
     def test_persistence_validation_and_legacy_save(self):
         with tempfile.TemporaryDirectory() as folder:
             store=CarPlanning(Path(folder))
-            data=store.read();data['holidays']=[{'id':'h','name':'Ferien','start':'2026-11-16','end':'2026-11-20'}]
+            data=store.read();data['profiles']={'born':{'name':'Born'}};data['holidays']=[{'id':'h','vehicle':'born','name':'Ferien','start':'2026-11-16','end':'2026-11-20'}]
             saved=store.save(data);self.assertEqual(saved,store.read())
             saved.pop('holidays');saved=store.save(saved)
             self.assertEqual(len(saved['holidays']),1)
             saved['holidays'][0]['end']='2026-11-15'
             with self.assertRaises(ValueError):store.save(saved)
             self.assertEqual(store.read()['holidays'][0]['end'],'2026-11-20')
-            data=store.read();data['holidays']=[]
+            data=store.read();data['profiles']={'born':{'name':'Born'}};data['holidays']=[]
             self.assertEqual(store.save(data)['holidays'],[])
 
     def test_both_vehicle_plans_and_estimates_exclude_routines(self):
         from car_planning import advice
         from datetime import datetime,timezone
         now=datetime(2026,11,15,12,tzinfo=timezone.utc)
-        plan={'profiles':{},'trips':[],'holidays':[{'start':'2026-11-15','end':'2026-11-30'}]}
+        plan={'profiles':{},'trips':[],'holidays':[{'vehicle':v,'start':'2026-11-15','end':'2026-11-30'} for v in ['born','id3']]}
         devices=[]
         for vid in ['born','id3']:
             plan['profiles'][vid]={'name':vid,'consumption':18,'capacity':60,'reserve':20}
@@ -106,3 +106,25 @@ class HolidayTests(unittest.TestCase):
         self.assertEqual([e['id'] for e in result['estimates']],['special'])
         self.assertEqual(result['priority'],'born')
         self.assertTrue(result['rotation']['sessions'])
+
+    def test_holiday_only_pauses_selected_vehicle(self):
+        from car_planning import trip_occurs
+        from datetime import date
+        plan={'holidays':[{'vehicle':'born','start':'2026-11-16','end':'2026-11-20'}]}
+        trip={'vehicle':'born','kind':'weekly','days':[0]}
+        day=date(2026,11,16)
+        self.assertFalse(trip_occurs(plan,trip,day))
+        self.assertTrue(trip_occurs(plan,dict(trip,vehicle='id3'),day))
+        self.assertTrue(trip_occurs(plan,dict(trip,kind='once',date=day.isoformat()),day))
+
+    def test_existing_shared_holidays_migrate_to_independent_copies(self):
+        import json
+        with tempfile.TemporaryDirectory() as folder:
+            store=CarPlanning(Path(folder))
+            store.path.write_text(json.dumps({'revision':1,'profiles':{'born':{},'id3':{}},'trips':[], 'holidays':[{'id':'old','name':'Ferien','start':'2026-12-01','end':'2026-12-10'}]}))
+            data=store.read()
+            self.assertEqual({h['vehicle'] for h in data['holidays']},{'born','id3'})
+            self.assertEqual(len({h['id'] for h in data['holidays']}),2)
+            data['holidays']=[h for h in data['holidays'] if h['vehicle']=='id3']
+            store.save(data)
+            self.assertEqual([h['vehicle'] for h in store.read()['holidays']],['id3'])
