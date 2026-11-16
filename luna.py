@@ -73,7 +73,7 @@ def validate(c):
     # Legacy configuration key: no fixed application reserve remains.
     c["reserve_soc"] = 0.0
     for key in ("ev_protection_enabled","ev_start_hour","ev_end_hour","morning_buffer_kwh"):c.pop(key,None)
-    for key, low, high in [("pv_buffer_pct",0,30),("morning_buffer_pct",0,100),("diagnosis_tolerance_pct",1,100),("battery_idle_w",0,300),("battery_floor_soc",0,30),("pv_latitude",-90,90),("pv_longitude",-180,180),("pv_kwp",0,100),("pv_tilt",0,90),("pv_azimuth",-180,180),("pv_ac_limit_kw",0.1,100),("pv_factor",0,1),("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 95), ("charge_power_w", 200, 5000),
+    for key, low, high in [("pv_buffer_pct",0,30),("morning_buffer_pct",0,100),("diagnosis_tolerance_pct",1,100),("battery_idle_w",0,300),("battery_floor_soc",0,30),("pv_latitude",-90,90),("pv_longitude",-180,180),("pv_kwp",0,100),("pv_tilt",0,90),("pv_azimuth",-180,180),("pv_ac_limit_kw",0.1,100),("pv_factor",0,1),("extra_load_kwh",0,50),("base_load_w", 0, 10000), ("battery_capacity_kwh", 0, 100), ("target_soc", 10, 100), ("charge_power_w", 200, 5000),
                             ("roundtrip_efficiency", 0.5, 1), ("wear_ct_kwh", 0, 100),
                             ("min_saving_ct_kwh", 0, 100), ("max_buy_ct_kwh", -100, 100), ("max_session_minutes", 2, 240)]:
         value = c[key]
