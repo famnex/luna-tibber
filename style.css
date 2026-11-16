@@ -210,7 +210,7 @@ input[type=datetime-local]::-webkit-date-and-time-value{text-align:left}
 /* The SOC gauge stays above live metrics; the divider separates present from next. */
 #batterystatus .soc-row{padding:4px 20px 18px}
 #batterystatus .battery-stats{padding:0 20px 18px}
-#batterystatus .battery-current{padding:16px 20px 18px;border-top:1px solid #ffffff27}
+#batterystatus .battery-current{padding:16px 20px 18px}
 #batterystatus .battery-current h3{margin:0 0 6px;font-size:14px;font-weight:650;color:#c2d8cc}
 #batterystatus .battery-current #cardplan{margin:0 0 7px;font-size:16px;font-weight:600;line-height:1.4;color:#f0f9f1}
 #batterystatus .battery-current #cardstatus{display:block;font-size:12px;color:#b4e5ad;margin-bottom:6px}
