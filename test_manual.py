@@ -24,7 +24,8 @@ class ManualTests(unittest.TestCase):
     def test_dst_and_session_limit(self):
         with self.assertRaisesRegex(ValueError,'Zeitumstellung'):manual.local_time('2026-10-25T02:30','Europe/Berlin')
         with self.assertRaises(ValueError):self.item(end=121)
-        with self.assertRaises(ValueError):self.item(end_kind='soc',target_soc=99)
+        self.assertEqual(self.item(end_kind='soc',target_soc=100)['target_soc'],100)
+        with self.assertRaises(ValueError):self.item(end_kind='soc',target_soc=101)
     def test_persistent_completed_expired_serial(self):
         with tempfile.TemporaryDirectory() as tmp:
             folder=Path(tmp);row=self.item()
