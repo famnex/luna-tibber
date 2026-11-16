@@ -11,6 +11,10 @@ from huawei_solar import register_names as rn, register_values as rv
 from huawei_solar.registers import REGISTERS
 
 class LogicTests(unittest.TestCase):
+    def test_soc_limit_allows_full_charge(self):
+        self.assertEqual(luna.validate({**luna.DEFAULT,'target_soc':100})['target_soc'],100)
+        with self.assertRaises(ValueError):luna.validate({**luna.DEFAULT,'target_soc':101})
+
     def test_live_reload_keeps_planned_target_and_manual_order(self):
         with tempfile.TemporaryDirectory() as tmp:
             path=Path(tmp)/'config.json'
