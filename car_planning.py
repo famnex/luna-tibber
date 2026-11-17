@@ -19,8 +19,9 @@ class CarPlanning:
                     for i,vid in enumerate(sorted(data.get('profiles',{}))):
                         periods.append(dict(h,id=h['id'][:70]+'-car-'+str(i),vehicle=vid))
             data['holidays']=periods
+            data.setdefault('connection_reminder',{'enabled':True,'time':'18:00','repeat':False})
             return data
-        except FileNotFoundError:return {'revision':0,'profiles':{},'trips':[],'holidays':[]}
+        except FileNotFoundError:return {'revision':0,'profiles':{},'trips':[],'holidays':[],'connection_reminder':{'enabled':True,'time':'18:00','repeat':False}}
     def save(self, data):
         with self.lock:
             old=self.read()
@@ -69,7 +70,16 @@ class CarPlanning:
                 if end<start:raise ValueError('Urlaubsende muss nach dem Beginn liegen.')
                 period_ids.add(hid)
                 periods.append({'id':hid,'vehicle':vid,'name':str(h.get('name','Urlaub'))[:80], 'start':start.isoformat(),'end':end.isoformat()})
-            result={'revision':old['revision']+1,'profiles':cleaned,'trips':rows,'holidays':sorted(periods,key=lambda h:h['start'])}
+            reminder=data.get('connection_reminder',old.get('connection_reminder',{}))
+            if not isinstance(reminder,dict):raise ValueError('Ungültige Anschluss-Erinnerung.')
+            hour=reminder.get('time','18:00')
+            if not isinstance(hour,str) or len(hour)!=5 or hour[2]!=':':raise ValueError('Erinnerungszeit als HH:MM eingeben.')
+            try:parsed=time.fromisoformat(hour)
+            except ValueError:raise ValueError('Ungültige Erinnerungszeit.') from None
+            if parsed.strftime('%H:%M')!=hour:raise ValueError('Erinnerungszeit als HH:MM eingeben.')
+            if type(reminder.get('enabled',True)) is not bool or type(reminder.get('repeat',False)) is not bool:raise ValueError('Ungültige Erinnerungseinstellung.')
+            preference={'enabled':reminder.get('enabled',True),'time':hour,'repeat':reminder.get('repeat',False)}
+            result={'revision':old['revision']+1,'profiles':cleaned,'trips':rows,'holidays':sorted(periods,key=lambda h:h['start']),'connection_reminder':preference}
             tmp=self.path.with_suffix('.tmp');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:json.dump(result,f)
             os.replace(tmp,self.path);return result
