@@ -128,3 +128,12 @@ class HolidayTests(unittest.TestCase):
             data['holidays']=[h for h in data['holidays'] if h['vehicle']=='id3']
             store.save(data)
             self.assertEqual([h['vehicle'] for h in store.read()['holidays']],['id3'])
+
+    def test_reminder_time_persists_and_rejects_invalid_time(self):
+        with tempfile.TemporaryDirectory() as folder:
+            store=CarPlanning(Path(folder));data=store.read()
+            data['reminder_time']='18:30';saved=store.save(data)
+            self.assertEqual(store.read()['reminder_time'],'18:30')
+            saved['reminder_time']='25:00'
+            with self.assertRaises(ValueError):store.save(saved)
+            self.assertEqual(store.read()['reminder_time'],'18:30')

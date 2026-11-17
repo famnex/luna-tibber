@@ -69,7 +69,10 @@ class CarPlanning:
                 if end<start:raise ValueError('Urlaubsende muss nach dem Beginn liegen.')
                 period_ids.add(hid)
                 periods.append({'id':hid,'vehicle':vid,'name':str(h.get('name','Urlaub'))[:80], 'start':start.isoformat(),'end':end.isoformat()})
-            result={'revision':old['revision']+1,'profiles':cleaned,'trips':rows,'holidays':sorted(periods,key=lambda h:h['start'])}
+            reminder=str(data.get('reminder_time',old.get('reminder_time','18:00')))
+            if len(reminder)!=5:raise ValueError('Erinnerungszeit als HH:MM eingeben')
+            time.fromisoformat(reminder)
+            result={'reminder_time':reminder,'revision':old['revision']+1,'profiles':cleaned,'trips':rows,'holidays':sorted(periods,key=lambda h:h['start'])}
             tmp=self.path.with_suffix('.tmp');fd=os.open(tmp,os.O_WRONLY|os.O_CREAT|os.O_TRUNC,0o600)
             with os.fdopen(fd,'w') as f:json.dump(result,f)
             os.replace(tmp,self.path);return result

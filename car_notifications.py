@@ -1,11 +1,14 @@
 """Background EV reminders based on the same advice shown on the dashboard."""
-from datetime import datetime,timezone
+from datetime import datetime,timezone,timedelta
 from zoneinfo import ZoneInfo
 import time
 
 
-def alerts(advice,now=None,zone='Europe/Berlin'):
+def alerts(advice,now=None,zone='Europe/Berlin',reminder_time='18:00'):
     now=now or datetime.now(timezone.utc);result=[];tz=ZoneInfo(zone)
+    local=now.astimezone(tz)
+    reminder_hour,reminder_minute=map(int,reminder_time.split(':'))
+    if (local.hour,local.minute)<(reminder_hour,reminder_minute):return []
     def number(value):return f'{value:.1f}'.rstrip('0').rstrip('.').replace('.',',')
     for car in advice.get('vehicles',[]):
         rotation=car.get('rotation') if advice.get('priority_kind')=='rotation' and advice.get('priority')==car['id'] else None
@@ -16,10 +19,12 @@ def alerts(advice,now=None,zone='Europe/Berlin'):
         if not deadline:continue
         when=datetime.fromisoformat(deadline);hours=(when-now).total_seconds()/3600
         if not 0<=hours<=24:continue
-        urgent=hours<=3;stage='urgent' if urgent else 'ahead'
+        stage='evening'
+        if car.get('connected') or car.get('connector_status')=='connected':continue
+        # Only the upcoming evening/night, never a reminder to swap during the night.
+        local_when=when.astimezone(tz)
+        if local_when>=local.replace(hour=0,minute=0,second=0,microsecond=0)+timedelta(days=1,hours=7):continue
         if str(car.get('charging_status','')).lower()=='charging':continue
-        # Overnight reminders start at most twelve hours before the window.
-        if (rotation or stock) and hours>12:continue
         target=(rotation or stock or {}).get('target_soc',car.get('target_soc'))
         missing=(rotation or stock or {}).get('kwh',car.get('missing_kwh'))
         extra=rotation.get('add_soc') if rotation else (missing/car['capacity']*100 if car.get('capacity') else max(0,target-car['soc']))
@@ -47,6 +52,8 @@ def alerts(advice,now=None,zone='Europe/Berlin'):
         elif car.get('connector_status') not in ('connected','disconnected'):
             body+=' Anschlussstatus unbekannt; Anschluss und Ladeplanung in evcc prüfen.'
         if first and advice.get('rotation',{}).get('status')=='conflict':body+=' Gemeinsamer Wochenplan hat einen Ladekonflikt; zusätzlichen Ladetermin prüfen.'
+        label='Heute' if day==0 else 'Morgen' if day==1 else when.astimezone(tz).strftime('%d.%m.%Y')
+        body+=' '+label+' · '+when.astimezone(tz).strftime('%H:%M')+' Uhr.'
         night_end=(rotation or stock or {}).get('end')
         key_date=datetime.fromisoformat(night_end).astimezone(tz).date() if night_end else when.astimezone(tz).date()
         result.append({'key':f"ev:{car['id']}:{key_date}:{stage}",'title':'LUNA · '+car['name'],'body':body})
@@ -62,7 +69,7 @@ class CarNotifier:
         web_push=app.whatsapp.status()['car_alerts']
         if not web_push and not (ntfy and ntfy.status()['car_alerts']):self.seen={};return
         c=app.config();d=advice(app.car_planning.read(),app.vehicle_probe.cache,c['timezone'],now,app.car_context.snapshot(c))
-        current=alerts(d,now,c['timezone']);keys={a['key'] for a in current}
+        current=alerts(d,now,c['timezone'],app.car_planning.read().get('reminder_time','18:00'));keys={a['key'] for a in current}
         self.seen={k:v for k,v in self.seen.items() if k in keys}
         for a in current:
             start=self.seen.setdefault(a['key'],now.timestamp())
