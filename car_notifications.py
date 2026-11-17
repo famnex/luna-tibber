@@ -1,56 +1,80 @@
-"""Background EV reminders based on the same advice shown on the dashboard."""
-from datetime import datetime,timezone
+"""Evening EV connection reminders based on the same read-only nightly plan as the dashboard."""
+from datetime import datetime, timedelta, time, timezone
 from zoneinfo import ZoneInfo
-import time
 
 
-def alerts(advice,now=None,zone='Europe/Berlin'):
-    now=now or datetime.now(timezone.utc);result=[];tz=ZoneInfo(zone)
+def alerts(advice, now=None, zone='Europe/Berlin', settings=None):
+    """Notify at the chosen local clock time only when tonight's car needs plugging in.
+
+    A nightly session spans 22:00–06:00. 18:00 refers to the evening *before*
+    that night, never to the following afternoon. Repeats are opt-in and
+    stop when the charging window begins, so no night-time swaps are requested.
+    """
+    now=now or datetime.now(timezone.utc)
+    tz=ZoneInfo(zone)
+    local=now.astimezone(tz)
+    preference=settings or {'enabled':True,'time':'18:00','repeat':False}
+    if preference.get('enabled',True) is not True:return []
+    try:chosen=time.fromisoformat(preference.get('time','18:00'))
+    except (ValueError,TypeError):chosen=time(18)
+    priority=next((v for v in advice.get('vehicles',[]) if v.get('id')==advice.get('priority')),None)
+    if not priority or priority.get('charging_status')=='charging':return []
+    # No connection reminder when the selected car is already plugged in.
+    if priority.get('connected') or priority.get('connector_status')=='connected':return []
+    rotation=priority.get('rotation') if advice.get('priority_kind')=='rotation' else None
+    stock=priority.get('opportunity') if advice.get('priority_kind')=='stock' else None
+    planned=rotation or stock
+    if advice.get('rotation',{}).get('status')=='planned' and not planned:return []
+    if planned:
+        start=datetime.fromisoformat(planned['start']).astimezone(tz)
+        end=datetime.fromisoformat(planned['end']).astimezone(tz) if planned.get('end') else start+timedelta(hours=8)
+        # At 02:00 it is still the night of the previous calendar day.
+        night_day=start.date()-timedelta(days=1) if start.hour<6 else start.date()
+    else:
+        # If the joint plan cannot provide a night, fall back to the imminent
+        # uncovered departure, to avoid silently hiding an urgent need.
+        if not priority.get('deadline'):return []
+        end=datetime.fromisoformat(priority['deadline']).astimezone(tz)
+        night_day=end.date()-timedelta(days=1) if end.hour<22 else end.date()
+        start=datetime.combine(night_day,time(22),tzinfo=tz)
+    reminder_at=datetime.combine(night_day,chosen,tzinfo=tz)
+    if chosen.hour<6:reminder_at+=timedelta(days=1)
+    # A reminder set to 18:00 is eligible until the 22:00 charging window.
+    # Explicitly configured late times are respected; never alert after its end.
+    cutoff=start if reminder_at<start else end
+    if not reminder_at<=local<cutoff:return []
+    if end<=local:return []
+    # Repeat every full hour after the chosen time, only if enabled and the
+    # requested car is still disconnected. No hourly alerts after 22:00.
+    elapsed=int((local-reminder_at).total_seconds()//3600)
+    if elapsed and preference.get('repeat') is True:
+        if local>=start:return []
+        stage='repeat-'+str(elapsed)
+    else:
+        stage='initial'
+    others=[v.get('name','anderes Auto') for v in advice['vehicles']
+            if v.get('id')!=priority['id'] and (v.get('connected') or v.get('connector_status')=='connected')]
+    if others:
+        action=', '.join(others)+' ist angesteckt. Bitte auf '+priority['name']+' umstecken.'
+    elif priority.get('connector_status')=='disconnected':
+        action=priority['name']+' bitte anschließen. Aktuell ist kein Auto angeschlossen.'
+    else:
+        action='Bitte prüfen, ob '+priority['name']+' angeschlossen ist (Anschlussstatus unbekannt).'
+    target=(planned or {}).get('target_soc',priority.get('target_soc'))
+    need=(planned or {}).get('kwh',priority.get('missing_kwh'))
     def number(value):return f'{value:.1f}'.rstrip('0').rstrip('.').replace('.',',')
-    for car in advice.get('vehicles',[]):
-        rotation=car.get('rotation') if advice.get('priority_kind')=='rotation' and advice.get('priority')==car['id'] else None
-        # A coordinated plan notifies only the car assigned to the next night.
-        if advice.get('rotation',{}).get('status')=='planned' and not rotation:continue
-        stock=car.get('opportunity') if advice.get('priority_kind')=='stock' and advice.get('priority')==car['id'] else None
-        deadline=(rotation or stock or {}).get('start') or car.get('deadline')
-        if not deadline:continue
-        when=datetime.fromisoformat(deadline);hours=(when-now).total_seconds()/3600
-        if not 0<=hours<=24:continue
-        urgent=hours<=3;stage='urgent' if urgent else 'ahead'
-        if str(car.get('charging_status','')).lower()=='charging':continue
-        # Overnight reminders start at most twelve hours before the window.
-        if (rotation or stock) and hours>12:continue
-        target=(rotation or stock or {}).get('target_soc',car.get('target_soc'))
-        missing=(rotation or stock or {}).get('kwh',car.get('missing_kwh'))
-        extra=rotation.get('add_soc') if rotation else (missing/car['capacity']*100 if car.get('capacity') else max(0,target-car['soc']))
-        first=car['id']==advice.get('priority');disconnected=car.get('connector_status')=='disconnected'
-        day=(when.astimezone(tz).date()-now.astimezone(tz).date()).days
-        night='diese Nacht' if day==0 or (day==1 and when.astimezone(tz).hour<7) else 'morgen Nacht' if day==1 else 'am '+when.astimezone(tz).strftime('%d.%m.')
-        journey='die morgige Fahrt' if day==1 else 'die heutige Fahrt' if day==0 else 'die Fahrt am '+when.astimezone(tz).strftime('%d.%m.')
-        need_time=night if rotation or stock else ('vor der morgigen Fahrt' if day==1 else 'vor der heutigen Fahrt' if day==0 else 'vor der Fahrt am '+when.astimezone(tz).strftime('%d.%m.'))
-        others=[r['name'] for r in advice['vehicles'] if r['id']!=car['id'] and r.get('connected')]
-        if first and disconnected and others:
-            action=f"{', '.join(others)} ist angesteckt, aber {car['name']} muss {need_time} laden. Bitte umstecken."
-        elif first and disconnected and all(r.get('connector_status')=='disconnected' for r in advice['vehicles']):
-            action=f"Kein Auto ist angesteckt. {car['name']} muss {need_time} laden."
-        elif rotation or stock:
-            action=f"{car['name']} {'kann günstig' if stock else 'muss'} {night} laden."
-        else:action=f"Die Ladung von {car['name']} reicht für {journey} nicht aus."
-        if car.get('unreachable') and not rotation:
-            body=action+' Eine volle Batterie reicht nicht: zusätzliches Zwischenladen einplanen.'
-        else:
-            if rotation and rotation.get('projected_before_kwh',0)>0.1:
-                body=action+f" Nach den geplanten Fahrten voraussichtlich {number(rotation['expected_start_soc'])} % → {target} %: ca. {number(missing)} kWh laden."
-            else:body=action+f" Mindestens ca. {number(extra)} Prozentpunkte ({number(missing)} kWh) nachladen; Ziel {target} %."
-        if car.get('connector_status')=='connected' or car.get('connected'):
-            body+=' Bereits angeschlossen – kein Umstecken nötig. Ladung in evcc einplanen, falls noch nicht geschehen.'
-        elif car.get('connector_status') not in ('connected','disconnected'):
-            body+=' Anschlussstatus unbekannt; Anschluss und Ladeplanung in evcc prüfen.'
-        if first and advice.get('rotation',{}).get('status')=='conflict':body+=' Gemeinsamer Wochenplan hat einen Ladekonflikt; zusätzlichen Ladetermin prüfen.'
-        night_end=(rotation or stock or {}).get('end')
-        key_date=datetime.fromisoformat(night_end).astimezone(tz).date() if night_end else when.astimezone(tz).date()
-        result.append({'key':f"ev:{car['id']}:{key_date}:{stage}",'title':'LUNA · '+car['name'],'body':body})
-    return result
+    soc=priority.get('soc')
+    before=rotation.get('expected_start_soc') if rotation else None
+    levels='🔋 '+number(soc)+' %' if isinstance(soc,(int,float)) else ''
+    if isinstance(before,(int,float)) and abs(before-soc)>0.2:levels+=' ↘ '+number(before)+' %'
+    if isinstance(target,(int,float)):levels+=' → '+number(target)+' %'
+    if isinstance(need,(int,float)):levels+=' · +'+number(need)+' kWh'
+    context='Diese Nacht ist eine Ladung für '+priority['name']+' vorgesehen. ' if planned else 'Vor der nächsten Fahrt muss '+priority['name']+' laden. '
+    if priority.get('unreachable') and not rotation:
+        context+='Eine volle Batterie reicht nicht; Zwischenladen einplanen. '
+    return [{'key':f"ev:{priority['id']}:{night_day.isoformat()}:{stage}",
+             'title':'LUNA · '+('Umstecken' if others else 'Anschließen')+': '+priority['name'],
+             'body':context+action+((' '+levels) if levels else '')}]
 
 
 class CarNotifier:
@@ -61,8 +85,9 @@ class CarNotifier:
         ntfy=getattr(app,'ntfy',None)
         web_push=app.whatsapp.status()['car_alerts']
         if not web_push and not (ntfy and ntfy.status()['car_alerts']):self.seen={};return
-        c=app.config();d=advice(app.car_planning.read(),app.vehicle_probe.cache,c['timezone'],now,app.car_context.snapshot(c))
-        current=alerts(d,now,c['timezone']);keys={a['key'] for a in current}
+        c=app.config();plan=app.car_planning.read()
+        d=advice(plan,app.vehicle_probe.cache,c['timezone'],now,app.car_context.snapshot(c))
+        current=alerts(d,now,c['timezone'],plan.get('connection_reminder'));keys={a['key'] for a in current}
         self.seen={k:v for k,v in self.seen.items() if k in keys}
         for a in current:
             start=self.seen.setdefault(a['key'],now.timestamp())
