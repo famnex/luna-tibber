@@ -4,11 +4,27 @@ from zoneinfo import ZoneInfo
 import time
 
 
-def alerts(advice,now=None,zone='Europe/Berlin',reminder_time='18:00'):
+def alerts(advice,now=None,zone='Europe/Berlin',reminder_time='18:00',morning_time='08:00'):
     now=now or datetime.now(timezone.utc);result=[];tz=ZoneInfo(zone)
     local=now.astimezone(tz)
+    morning_hour,morning_minute=map(int,morning_time.split(':'))
+    if (morning_hour,morning_minute)<=(local.hour,local.minute)<(15,0):
+        opportunity=advice.get('pv_opportunity')
+        rotation=next((s for s in advice.get('rotation',{}).get('sessions',[]) if datetime.fromisoformat(s['start']).astimezone(tz).date()==local.date() and 6<=datetime.fromisoformat(s['start']).astimezone(tz).hour<18 and datetime.fromisoformat(s['end'])>now),None)
+        slot=rotation or opportunity
+        if slot:
+            car=next((v for v in advice.get('vehicles',[]) if v['id']==slot['id']),None)
+            if car and not car.get('connected') and car.get('connector_status')!='connected' and str(car.get('charging_status','')).lower()!='charging':
+                start=datetime.fromisoformat(slot['start']).astimezone(tz).strftime('%H:%M')
+                is_pv=slot.get('source')=='pv' or slot is opportunity
+                if is_pv:
+                    body=f"Heute ab ca. {start} Uhr PV-Überschuss für {car['name']}: bis zu {slot['kwh']:.1f} kWh. Hausspeicher voraussichtlich voll. Wenn verfügbar, morgens anschließen und PV-Laden in evcc einplanen."
+                else:
+                    body=f"{car['name']} heute für das günstige Fenster ab {start} Uhr anschließen. Ca. {slot['kwh']:.1f} kWh bis {slot['target_soc']} % in evcc einplanen."
+                if car.get('connector_status') not in ('connected','disconnected'):body+=' Anschlussstatus unbekannt; bitte prüfen.'
+                result.append({'key':f"ev:{car['id']}:{local.date()}:morning",'title':'LUNA · '+car['name'],'body':body})
     reminder_hour,reminder_minute=map(int,reminder_time.split(':'))
-    if (local.hour,local.minute)<(reminder_hour,reminder_minute):return []
+    if (local.hour,local.minute)<(reminder_hour,reminder_minute):return result
     def number(value):return f'{value:.1f}'.rstrip('0').rstrip('.').replace('.',',')
     for car in advice.get('vehicles',[]):
         rotation=car.get('rotation') if advice.get('priority_kind')=='rotation' and advice.get('priority')==car['id'] else None
@@ -68,8 +84,8 @@ class CarNotifier:
         ntfy=getattr(app,'ntfy',None)
         web_push=app.whatsapp.status()['car_alerts']
         if not web_push and not (ntfy and ntfy.status()['car_alerts']):self.seen={};return
-        c=app.config();d=advice(app.car_planning.read(),app.vehicle_probe.cache,c['timezone'],now,app.car_context.snapshot(c))
-        current=alerts(d,now,c['timezone'],app.car_planning.read().get('reminder_time','18:00'));keys={a['key'] for a in current}
+        c=app.config();d=advice(app.car_planning.read(),app.vehicle_probe.cache,c['timezone'],now,app.car_advice_context() if hasattr(app,'car_advice_context') else app.car_context.snapshot(c))
+        current=alerts(d,now,c['timezone'],app.car_planning.read().get('reminder_time','18:00'),c.get('pv_reminder_time','08:00'));keys={a['key'] for a in current}
         self.seen={k:v for k,v in self.seen.items() if k in keys}
         for a in current:
             start=self.seen.setdefault(a['key'],now.timestamp())

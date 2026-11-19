@@ -39,7 +39,7 @@ def get(c, folder, fetch, now=None):
                     start,end=datetime.fromisoformat(row['start']),datetime.fromisoformat(row['end'])
                     if start.tzinfo is None or end.tzinfo is None or end<=start or not math.isfinite(row['ct']):
                         raise ValueError('Invalid cached price')
-                    rows.append({'start':start,'end':end,'ct':row['ct']})
+                    rows.append({**row,'start':start,'end':end})
         except (OSError,ValueError,KeyError,TypeError):
             rows,stamp,attempt=[],0,0
         local=now.astimezone(ZoneInfo(c.get('timezone','Europe/Berlin')))
@@ -55,6 +55,9 @@ def get(c, folder, fetch, now=None):
         try:
             prices=fetch(c)
             if not prices:raise ValueError('Keine Tibber-Preise')
+            from forecast import learn
+            try:learn(c,folder,prices,now)
+            except (OSError,ValueError,TypeError):pass
             merged={r['start']:r for r in rows}
             merged.update({r['start']:r for r in prices})
             rows=sorted(merged.values(),key=lambda r:r['start'])

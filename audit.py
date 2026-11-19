@@ -24,7 +24,7 @@ EVENT_KEYS=('soc','battery_power_w','battery_status','max_charge_power_w','ac_ch
 
 
 def clean(value,secrets=()):
-    if isinstance(value,dict):return {str(k):clean(v,secrets) for k,v in value.items() if k not in ('password','tibber_token','expected_serial','host','username','pv_latitude','pv_longitude','tibber_home_id')}
+    if isinstance(value,dict):return {str(k):clean(v,secrets) for k,v in value.items() if k not in ('password','tibber_token','energyforecast_api_key','expected_serial','host','username','pv_latitude','pv_longitude','tibber_home_id')}
     if isinstance(value,(list,tuple)):return [clean(x,secrets) for x in value]
     if isinstance(value,datetime):return value.isoformat()
     if isinstance(value,str):
@@ -93,7 +93,7 @@ class Journal:
         # Never persist account discovery, serial numbers or raw third-party output.
         if kind in ('home_selection_required','prices','connected'):return
         stamp=datetime.fromisoformat(event.get('time',datetime.now(timezone.utc).isoformat())).timestamp()
-        secrets=tuple(c.get(k) for k in ('password','tibber_token','expected_serial','host','tibber_home_id'))
+        secrets=tuple(c.get(k) for k in ('password','tibber_token','energyforecast_api_key','expected_serial','host','tibber_home_id'))
         d=clean({k:event[k] for k in EVENT_KEYS if k in event},secrets)
         dispatch=event.get('dispatch') or {}
         if dispatch:

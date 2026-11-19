@@ -85,3 +85,7 @@ ntfy-private.json
 ntfy-private.tmp
 ntfy-events.json
 ntfy-events.tmp
+
+price-addons.json
+energyforecast.json
+.forecast-*

@@ -33,13 +33,15 @@ DEFAULT = {
     "night_start_hour": 0, "night_end_hour": 6,
     "use_start_hour": 6, "use_end_hour": 9, "timezone": "Europe/Berlin",
 }
+from forecast import DEFAULTS as FORECAST_DEFAULTS
+DEFAULT.update(FORECAST_DEFAULTS)
 QUERY = '''{ viewer { homes { id appNickname currentSubscription {
  priceInfo(resolution: QUARTER_HOURLY) {
- today { total startsAt currency } tomorrow { total startsAt currency }
+ today { total energy tax startsAt currency } tomorrow { total energy tax startsAt currency }
  } } } } }'''
 
 CONNECTION_KEYS={'host','port','unit_id','expected_serial','username','password','wifi_enabled'}
-PASSIVE_KEYS={'statistics_enabled','push_contact','reserve_soc'}
+PASSIVE_KEYS={'statistics_enabled','push_contact','reserve_soc'} | set(FORECAST_DEFAULTS)
 
 def runtime_settings(c,path,target_soc=None):
     """Reload local configuration only; never reconnect or reset a running order."""
@@ -70,6 +72,8 @@ def write_json(path, data):
     os.chmod(path, 0o600)
 
 def validate(c):
+    from forecast import validate as validate_forecast
+    validate_forecast(c)
     # Legacy configuration key: no fixed application reserve remains.
     c["reserve_soc"] = 0.0
     for key in ("ev_protection_enabled","ev_start_hour","ev_end_hour","morning_buffer_kwh"):c.pop(key,None)
@@ -143,6 +147,9 @@ def fetch_prices(c):
             raise ValueError("Preis-Zeitzone fehlt")
         start = start.astimezone(timezone.utc)
         prices[start] = {"start": start, "end": start + timedelta(minutes=15), "ct": value * 100}
+        for field in ("energy", "tax"):
+            component=item.get(field)
+            if type(component) in (int,float) and math.isfinite(component):prices[start][field+"_ct"]=component*100
     return sorted(prices.values(), key=lambda p: p["start"])
 
 def economics_plan(c, prices, now):

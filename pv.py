@@ -25,7 +25,7 @@ def fingerprint(c):
 def fetch(c):
     query=dict(latitude=c['pv_latitude'],longitude=c['pv_longitude'],
                hourly='global_tilted_irradiance',tilt=c['pv_tilt'],azimuth=c['pv_azimuth'],
-               timezone='GMT',timeformat='unixtime',forecast_days=3)
+               timezone='GMT',timeformat='unixtime',forecast_days=8)
     with urlopen('https://api.open-meteo.com/v1/forecast?'+urlencode(query),timeout=15) as r:
         data=json.loads(r.read(2_000_000))
     return parse(c,data)

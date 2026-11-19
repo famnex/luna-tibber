@@ -172,6 +172,10 @@ def advice(plan, snapshot, zone='Europe/Berlin', now=None, context=None):
             result['priority']=opportunities[0]['id'];result['priority_kind']='stock'
     from car_rotation import coordinate
     result['rotation']=coordinate(plan,result['vehicles'],zone,now,context)
+    if context and context.get('energy_settings'):
+        from car_energy import optimise,pv_opportunity
+        result['rotation']=optimise(plan,result['vehicles'],result['rotation'],zone,now,context)
+        result['pv_opportunity']=pv_opportunity(result['vehicles'],context.get('pv_surplus',[]),context['energy_settings'],zone,now)
     if result['rotation']['status']=='planned':
         result['warnings']=[w for w in result['warnings'] if not w.startswith('Beide Autos brauchen Ladung.')]
         sessions=result['rotation']['sessions']

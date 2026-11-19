@@ -27,7 +27,7 @@ import updater
 
 BASE = Path(__file__).resolve().parent
 MODES = {'off', 'smart'}
-SECRETS = {'password', 'tibber_token'}
+SECRETS = {'password', 'tibber_token', 'energyforecast_api_key'}
 
 def read(path, default):
     try:
@@ -178,6 +178,8 @@ class Dashboard:
         self.car_planning=CarPlanning(folder)
         from car_context import CarContext
         self.car_context=CarContext(folder)
+        from forecast import Forecast
+        self.forecast=Forecast(folder)
         from audit import Journal
         self.journal=Journal(folder)
         self.notifications=Notifications(folder,start_worker=start_worker)
@@ -204,6 +206,7 @@ class Dashboard:
             threading.Thread(target=self.car_notifier.worker,daemon=True).start()
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
+            threading.Thread(target=self.forecast_worker,daemon=True).start()
     def backfill_grid_costs(self):
         try:self.grid_costs.backfill(self.config())
         except Exception:self.events.append({'event':'statistics_error','message':'Historische Bezugskosten konnten nicht ergänzt werden; erneuter Versuch beim nächsten Start.'})
@@ -649,6 +652,21 @@ class Dashboard:
             self.launch('charge',target_soc=order['target_soc'])
             order['phase'] = 'charging'
 
+    def forecast_worker(self):
+        while not self.closed.is_set():
+            try:self.forecast.refresh(self.config())
+            except Exception:pass
+            self.closed.wait(30)
+
+    def car_advice_context(self):
+        c=self.config();now=datetime.now(timezone.utc)
+        context=self.car_context.snapshot(c)
+        forecast=self.forecast.snapshot(c,self.price_data,now)
+        from pv import read as read_pv
+        from car_energy import pv_surplus
+        return {**context,'forecast_prices':forecast['prices'],'energy_settings':forecast['settings'],
+                'pv_surplus':pv_surplus(c,read_pv(c,self.folder,now)['rows'],self.display_measurement(c),now)}
+
     def price_worker(self):
         price_revision=None;pv_at=-300.0
         from price_cache import revision,poll_interval
@@ -836,9 +854,12 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,self.server.app.ntfy.status())
         if self.path=='/api/whatsapp':
             return self.send(200,self.server.app.whatsapp.status())
+        if self.path=='/api/price-forecast':
+            app=self.server.app
+            return self.send(200,app.forecast.snapshot(app.config(),app.price_data))
         if self.path=='/api/car-advice':
             from car_planning import advice
-            return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone'],context=self.server.app.car_context.snapshot(self.server.app.config())))
+            return self.send(200,advice(self.server.app.car_planning.read(),self.server.app.vehicle_probe.cache,self.server.app.config()['timezone'],context=self.server.app.car_advice_context()))
         if self.path=='/api/car-planning':
             return self.send(200,self.server.app.car_planning.read())
         if self.path=='/api/vehicles':

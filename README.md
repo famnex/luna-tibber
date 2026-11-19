@@ -1147,3 +1147,86 @@ Push-Texte sind kurz: Anlass/benötigtes Auto, gegebenenfalls Umstecken, zusätz
 Prozentpunkte und kWh sowie Ziel-SOC. Prozentpunkte bezeichnen die nachzuladende
 Menge, nicht das Ladeziel. Bei gemeinsamer Planung wird nur für das als Nächstes
 eingeplante Auto erinnert.
+
+## Mehrtagespreise und PV-Ladeempfehlungen für Fahrzeuge
+
+Unter **Einstellungen → Preisprognose & PV-Ladehinweise** den Energyforecast-
+API-v2-Schlüssel hinterlegen. Alternativ `ENERGYFORECAST_API_KEY` in der Umgebung
+des Webdienstes setzen (bei systemd über dessen EnvironmentFile, danach Neustart).
+Der Konfigurationswert hat Vorrang. Ein leeres Schlüsselfeld behält den bisherigen
+Schlüssel. Zum vollständigen Entfernen den Konfigurationswert auf `""` setzen und
+gegebenenfalls die Umgebungsvariable entfernen.
+
+| Konfiguration | Standard | Bedeutung |
+|---|---:|---|
+| `energyforecast_api_key` | leer | Geheimer API-Schlüssel, alternativ ENV |
+| `forecast_state` | `HE` | Bundesland für landesweite Feiertage |
+| `forecast_min_saving_ct` | 5 | Mindest-Preisvorteil zum Vorziehen (ct/kWh) |
+| `car_charge_kw` | 11 | Angenommene tatsächlich verfügbare AC-Ladeleistung |
+| `car_charge_efficiency` | 0,90 | Anteil der Ladeenergie, der im Auto ankommt |
+| `pv_car_min_kwh` | 3 | Mindestenergie für PV-Empfehlungen (im Auto) |
+| `pv_reminder_time` | 08:00 | Frühester Versand von Tages-/PV-Hinweisen |
+
+Energyforecast wird unabhängig vom Dashboard im Hintergrund alle sechs Stunden
+abgerufen, bei Fehlern frühestens nach 15 Minuten erneut. Ein gespeicherter Abruf
+ist höchstens 24 Stunden nutzbar. Die API v2 liefert `price_ct_kwh` als Börsenpreis
+in ct/kWh; ihr bereits berechneter `total_ct_kwh` wird nicht verwendet.
+Der tatsächliche Horizont hängt vom gebuchten Energyforecast-Tarif ab.
+Offizielle Schnittstelle: https://www.energyforecast.de/integrations?locale=de
+
+Bei jedem erfolgreichen Tibber-Abruf lernt `price-addons.json` für lokale
+Viertelstunden und Tagestypen (`weekday` / `weekend`, einschließlich landesweiter
+Feiertage) den Brutto-Aufschlag:
+
+`addon_ct = total_EUR * 100 - energy_EUR * 100 * 1.19`
+
+Die neueste datierte Beobachtung pro Feld ersetzt die vorherige. Der gespeicherte
+Aufschlag gilt maximal 35 Tage; fehlende Felder werden nicht aus anderen
+Tagestypen erfunden. Beim erstmaligen Start können deshalb insbesondere
+Wochenend-Prognosen noch fehlen. Kontowechsel, Zuhause, Zeitzone oder Bundesland
+trennen das Profil. Kommunale Sonderfeiertage (z. B. Mariä Himmelfahrt in Teilen
+Bayerns) sind nicht enthalten. Saisonale Tarifänderungen werden erst gelernt,
+wenn Tibber entsprechende Preise liefert. Zeitvariable Netzentgelte können nur
+abgebildet werden, soweit sie in Tibbers `total` enthalten sind. Monatliche
+Grundgebühren werden nicht auf kWh umgelegt.
+
+Veröffentlichte Tibber-`total`-Werte haben stets Vorrang. Nur fehlende Zeitpunkte
+werden mit `Börsenprognose * 1.19 + gelerntem Aufschlag` ergänzt. Die neue Karte
+zeigt vollständige, zeitgewichtete Fensterdurchschnitte für 00–05 und 11–15 Uhr.
+`≈` kennzeichnet Prognosen; die Trendgrenze beträgt ±3 ct gegenüber dem Mittel
+der verfügbaren Preiszeitreihe. Datenlücken erscheinen als Strich.
+
+Die bestehende gemeinsame Sieben-Nächte-Bedarfsplanung bleibt Ausgangspunkt.
+Ein zusätzlicher Optimierungsschritt sucht zusammenhängende, ausreichend lange
+Ladeblöcke und prüft bis zu drei Tage frühere Nacht-/Mittagsfenster innerhalb der
+verfügbaren Preise. Änderungen werden nur übernommen, wenn ein zeitlicher Replay
+aller erfassten Fahrten Reserve, Kapazität, Abwesenheiten, einen gemeinsamen
+Anschluss und höchstens ein Auto pro Nacht einhält. Das ist eine begrenzte
+Verbesserung des bestehenden Plans, keine Garantie eines globalen Kostenminimums.
+Bei fehlenden Preisen bleibt der bisherige Plan erhalten; bei nicht bestätigbarer
+Ladezeit erscheint ein Hinweis. Die angenommene Ladeleistung muss zur evcc-
+Konfiguration passen. Alle Energiemengen der Empfehlungen beziehen sich auf den
+Autoakku; Kosten berücksichtigen den eingestellten Ladewirkungsgrad.
+
+Die PV-Prognose wird aus der bestehenden konservativen Open-Meteo-AC-Prognose
+(jetzt bis zu acht Tage) berechnet. Vom aktuellen Hausakku-SOC aus werden Grundlast,
+Zusatzverbräuche, Eigenverbrauch und Speicherverluste abgezogen. Erst nach
+prognostizierten **100 % Hausakku** zählt verbleibende Energie als PV-Überschuss.
+Ohne höchstens eine Stunde alte Hausakku-Messung oder bei einer Prognoselücke
+wird kein belastbarer Überschussplan erstellt. Geplante Netzladung des Hausakkus
+wird nicht als garantierte zusätzliche Energie angenommen. Unter 1,4 kW Überschuss
+wird kein EV-Ladeblock angesetzt; dies ist eine Annahme für einphasiges PV-Laden.
+
+PV kann eine geplante Netzladung teilweise ersetzen. Die Energie wird dabei nur
+einmal auf beide Autos verteilt. Zusätzlich gibt es einen ausdrücklich bedingten
+Morgenhinweis, wenn Überschuss erwartet wird, aber die Verfügbarkeit des Autos
+nicht feststeht. Ein solcher Hinweis reduziert den gesicherten Fahrbedarf nicht.
+Der Hinweis nennt den erwarteten Überschussbeginn, sobald der Hausspeicher voll
+ist. Für bekannte Mittags-Netzladefenster gilt ebenfalls die Morgen-Erinnerung.
+Angeschlossene oder ladende Fahrzeuge erhalten keine Ansteckerinnerung. Die
+bestehenden Abendhinweise, Versandkanäle und Wiederholungssperren bleiben aktiv.
+
+**LUNA empfiehlt; evcc steuert.** Es werden keine Wallbox-Befehle gesendet und
+keine prognostizierten Mehrtagespreise in die Hausakku-Regelung eingespeist.
+Die Prognose-Endpunkte lesen ausschließlich Caches und führen keine Netzabfragen
+aus. API-Schlüssel werden nicht in Statusantworten oder Diagnoseexporte aufgenommen.
