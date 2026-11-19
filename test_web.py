@@ -37,6 +37,24 @@ class DashboardTests(unittest.TestCase):
         self.folder=Path(self.tmp.name)
         self.app=web.Dashboard(self.folder,start_worker=False)
     def tearDown(self):self.tmp.cleanup()
+    def test_startup_settings_and_update_do_not_depend_on_planner(self):
+        self.app.save_settings({'energyforecast_api_key':'not-public'})
+        with patch('web.smart_preview',side_effect=RuntimeError('planner unavailable')):
+            state=self.app.startup_snapshot()
+        self.assertIn('settings',state)
+        self.assertIn('update',state)
+        self.assertTrue(state['secrets_set']['energyforecast_api_key'])
+        self.assertNotIn('not-public',json.dumps(state))
+
+    def test_planner_failure_keeps_dashboard_available(self):
+        with patch('web.smart_preview',side_effect=ValueError('private-details')):
+            state=self.app.snapshot()
+        self.assertIn('ValueError',state['planning_error'])
+        self.assertNotIn('private-details',json.dumps(state,default=str))
+        self.assertIn('settings',state)
+        self.assertIn('update',state)
+        self.assertFalse(state['smart_preview']['complete'])
+
     def test_templates_persist_without_device_and_do_not_change_orders(self):
         self.app.action('template-save',{'name':'Waschen','duration_minutes':90,'kwh':1.5})
         rows=web.read(self.folder/'consumption-templates.json',[])

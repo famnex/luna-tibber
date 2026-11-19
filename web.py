@@ -244,7 +244,9 @@ class Dashboard:
     def startup_snapshot(self):
         # Independent of the planner lock; the cache is replaced as a whole.
         c=self.config()
-        return {'measurement':self.display_measurement(c),'timezone':c['timezone'],
+        return {'settings':{k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')},
+                'secrets_set':{k:bool(c.get(k)) for k in SECRETS},'update':self.update_status(),
+                'measurement':self.display_measurement(c),'timezone':c['timezone'],
                 'server_time':datetime.now(timezone.utc).isoformat()}
 
     def preflight(self, c, commissioning=True):
@@ -723,42 +725,53 @@ class Dashboard:
             self.launch('sample')
 
     def snapshot(self):
-        with self.lock:
-            c = self.config()
-            settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')}
-            missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
-            prices = self.price_data
-            now = datetime.now(timezone.utc)
-            from pv import attach as attach_pv
-            c=attach_pv(c,self.folder,now)
-            request=read(self.folder/'discharge-request.json',{})
-            hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
-            prior=read(self.folder/'discharge-status.json',{})
-            c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
-            from manual import load as load_orders
-            all_orders=load_orders(self.folder,c['expected_serial'],now)
-            c['_orders']=[r for r in all_orders if r['kind'] in ('hold','charge')]
-            if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
+        # Display computation must not hold the controller/update mutex.
+        c = self.config()
+        settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')}
+        missing = [label for key,label in [('expected_serial','Seriennummer'),('password','Installateurpasswort'),('tibber_token','Tibber-Token')] if not c[key]]
+        prices = self.price_data
+        now = datetime.now(timezone.utc)
+        from pv import attach as attach_pv
+        c=attach_pv(c,self.folder,now)
+        request=read(self.folder/'discharge-request.json',{})
+        hold_until=datetime.fromisoformat(request['until']) if request.get('until') else None
+        prior=read(self.folder/'discharge-status.json',{})
+        c['_guard_held']=bool(prior.get('locked') and prior.get('source')=='smart')
+        from manual import load as load_orders
+        all_orders=load_orders(self.folder,c['expected_serial'],now)
+        c['_orders']=[r for r in all_orders if r['kind'] in ('hold','charge')]
+        if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
+        planning_error=''
+        try:
             preview=smart_preview(c,prices,now,self.telemetry,hold_until)
             from smart import planned_economics
             plan=planned_economics(c,prices,preview)
             from dispatch import timeline
             dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
-            current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
-            wifi = read(Path('/etc/luna-wifi.json'),{})
-            return {'consumption_templates':read(self.folder/'consumption-templates.json',[]),'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
-                    'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
-                    'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
-                    'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
-                    'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
-                    'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
-                    'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
-                    'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
-                    'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
-                    'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
-                    'server_time':datetime.now(timezone.utc).isoformat(),
-                    'wifi':{k:wifi.get(k) for k in ('interface','ssid','host')},
-                    'events':list(self.events)[-12:]}
+        except Exception as exc:
+            # Keep account, updates and measured state usable on planner errors.
+            planning_error='Planberechnung fehlgeschlagen ('+type(exc).__name__+'). Einstellungen und Update bleiben verfügbar.'
+            from smart import plan as empty_plan,planned_economics
+            preview=empty_plan(c,[],now,None)
+            preview['reason']=planning_error
+            plan=planned_economics(c,[],preview)
+            from dispatch import timeline
+            dispatch=timeline(c,[],now,None,preview,None)
+        current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
+        wifi = read(Path('/etc/luna-wifi.json'),{})
+        return {'consumption_templates':read(self.folder/'consumption-templates.json',[]),'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
+                'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
+                'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
+                'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
+                'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
+                'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
+                'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
+                'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
+                'planning_error':planning_error,'price_error':self.price_error,'prices':prices,'schedules':self.schedules,
+                'remaining_seconds':max(0,int(self.until-time.monotonic())) if self.until else None,
+                'server_time':datetime.now(timezone.utc).isoformat(),
+                'wifi':{k:wifi.get(k) for k in ('interface','ssid','host')},
+                'events':list(self.events)[-12:]}
     def close(self):
         self.closed.set()
         self.notifications.closed.set()
@@ -905,7 +918,8 @@ class Handler(BaseHTTPRequestHandler):
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):
             self.server.app.request_sample(fast=self.path.endswith('?fast=1'))
-            return self.send(200,self.server.app.snapshot())
+            try:return self.send(200,self.server.app.snapshot())
+            except Exception as exc:return self.send(503,{'error':'Statusabruf fehlgeschlagen ('+type(exc).__name__+'). Einstellungen und Update bleiben verfügbar.'})
         self.send(404,{'error':'Nicht gefunden'})
     def do_POST(self):
         if not self.host_ok() or self.headers.get('X-Luna') != '1' or self.headers.get('Content-Type') != 'application/json':
