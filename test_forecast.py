@@ -23,6 +23,27 @@ class ForecastTests(unittest.TestCase):
         self.assertEqual(len(data['profile']['weekday']),1)
         learn({**self.c,'tibber_home_id':'other'},self.folder,[],self.now)
         self.assertEqual(json.loads((self.folder/'price-addons.json').read_text())['profile'],{})
+    def test_full_historical_day_fills_weekend_and_refreshes(self):
+        start=datetime(2026,11,18,23,tzinfo=UTC)
+        rows=[self.row(start+timedelta(minutes=i*15),30+i/100) for i in range(96)]
+        learn(self.c,self.folder,rows,self.now)
+        profile=json.loads((self.folder/'price-addons.json').read_text())['profile']
+        self.assertEqual(len(profile['latest']),96)
+        a=datetime(2026,11,21,8,tzinfo=UTC)
+        pred=[{'start':a,'end':a+timedelta(minutes=15),'wholesale_ct':10}]
+        out=merge(self.c,[],pred,profile,self.now)
+        self.assertTrue(out[0]['addon_fallback']);self.assertAlmostEqual(out[0]['ct'],30.36)
+        # Partial newer data must not destroy the complete fallback day.
+        learn(self.c,self.folder,[self.row(start+timedelta(days=1),90)],self.now)
+        profile=json.loads((self.folder/'price-addons.json').read_text())['profile']
+        self.assertEqual(len(profile['latest']),96)
+        learn(self.c,self.folder,[self.row(start+timedelta(days=1,minutes=i*15),40) for i in range(96)],self.now)
+        profile=json.loads((self.folder/'price-addons.json').read_text())['profile']
+        self.assertAlmostEqual(merge(self.c,[],pred,profile,self.now)[0]['ct'],40)
+        learn(self.c,self.folder,[self.row(a,45)],self.now)
+        profile=json.loads((self.folder/'price-addons.json').read_text())['profile']
+        self.assertFalse(merge(self.c,[],pred,profile,self.now)[0]['addon_fallback'])
+
     def test_holidays_and_weekends(self):
         self.assertEqual(day_type(date(2026,12,25),'HE'),'weekend')
         self.assertEqual(day_type(date(2026,11,21),'HE'),'weekend')

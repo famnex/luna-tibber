@@ -79,16 +79,25 @@ def learn(c: dict, folder: Path, rows: list, now: datetime) -> None:
     path=Path(folder)/'price-addons.json'
     try:data=json.loads(path.read_text())
     except (OSError,ValueError):data={}
+    before=json.dumps(data,sort_keys=True)
     if data.get('account')!=account(c):data={'account':account(c),'profile':{}}
+    days={}
     zone=ZoneInfo(c.get('timezone','Europe/Berlin'))
     for r in sorted(rows,key=lambda r:r['start']):
         energy=r.get('energy_ct')
         if not isinstance(energy,(int,float)) or not math.isfinite(energy):continue
         start=instant(r['start']);local=start.astimezone(zone)
         bucket=data['profile'].setdefault(day_type(local.date(),c.get('forecast_state','HE')),{});key=local.strftime('%H:%M')
+        days.setdefault(local.date().isoformat(),{})[key]={'ct':r['ct']-energy*1.19,'observed':start.isoformat()}
         if key not in bucket or instant(bucket[key]['observed'])<=start:
             bucket[key]={'ct':r['ct']-energy*1.19,'observed':start.isoformat()}
-    atomic(path,data)
+    # A complete local clock-day is a fallback, including cached historical days.
+    complete=[(day,values) for day,values in days.items() if len(values)==96]
+    if complete:
+        day,values=max(complete)
+        previous=data['profile'].get('latest',{})
+        if not previous or max(v['observed'] for v in previous.values())<=max(v['observed'] for v in values.values()):data['profile']['latest']=values
+    if json.dumps(data,sort_keys=True)!=before:atomic(path,data)
 
 def parse(payload: dict, now: datetime) -> list:
     if payload.get('generated_at') and not -300<=(now-instant(payload['generated_at'])).total_seconds()<=86400:raise ValueError('Veraltete Prognose')
@@ -108,8 +117,11 @@ def merge(c: dict, exact: list, predicted: list, profile: dict, now: datetime) -
     for r in predicted:
         a,b=instant(r['start']),instant(r['end']);local=a.astimezone(zone)
         slot=profile.get(day_type(local.date(),c.get('forecast_state','HE')),{}).get(local.strftime('%H:%M'))
-        if not slot or not -2<= (now-instant(slot['observed'])).total_seconds()/86400<=35:continue
-        rows[a]={'start':a,'end':b,'ct':r['wholesale_ct']*1.19+slot['ct'],'source':'forecast'}
+        fallback=False
+        if not slot or not -2<=(now-instant(slot['observed'])).total_seconds()/86400<=35:
+            slot=profile.get('latest',{}).get(local.strftime('%H:%M'));fallback=True
+        if not slot or not -2<=(now-instant(slot['observed'])).total_seconds()/86400<=35:continue
+        rows[a]={'start':a,'end':b,'ct':r['wholesale_ct']*1.19+slot['ct'],'source':'forecast','addon_fallback':fallback}
     for r in exact:
         a,b=instant(r['start']),instant(r['end'])
         rows[a]={'start':a,'end':b,'ct':r['ct'],'source':'tibber'}
@@ -175,4 +187,6 @@ class Forecast:
         enabled=bool(c.get('energyforecast_api_key') or os.getenv('ENERGYFORECAST_API_KEY'))
         rows=merge(c,exact,(cache or {}).get('rows',[]) if enabled else [],profile,now)
         return {'prices':rows,'days':overview(rows,now,c.get('timezone','Europe/Berlin')),'configured':enabled,'fetched_at':(cache or {}).get('fetched_at'),'error':self.error,
+                'provider_until':max((r['end'] for r in (cache or {}).get('rows',[])),default=None),
+                'addon_fallback':any(r.get('addon_fallback') for r in rows),
                 'profile_slots':{k:len(v) for k,v in profile.items()},'settings':{k:c.get(k,v) for k,v in DEFAULTS.items() if k!='energyforecast_api_key'}}

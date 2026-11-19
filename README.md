@@ -1181,9 +1181,13 @@ Feiertage) den Brutto-Aufschlag:
 `addon_ct = total_EUR * 100 - energy_EUR * 100 * 1.19`
 
 Die neueste datierte Beobachtung pro Feld ersetzt die vorherige. Der gespeicherte
-Aufschlag gilt maximal 35 Tage; fehlende Felder werden nicht aus anderen
-Tagestypen erfunden. Beim erstmaligen Start können deshalb insbesondere
-Wochenend-Prognosen noch fehlen. Kontowechsel, Zuhause, Zeitzone oder Bundesland
+Aufschlag gilt maximal 35 Tage. Fehlt ein passendes Tagestyp-Profil, dient das
+zuletzt vollständig bekannte Tibber-Tagesprofil mit 96 lokalen Viertelstunden
+als gekennzeichnete Schätzung. Auch gespeicherte vergangene Tage werden genutzt.
+Neue veröffentlichte Preise aktualisieren das Profil; bereits passende
+Werktags-/Wochenendprofile haben Vorrang. Ohne irgendein vollständiges Profil
+können noch Lücken bleiben. Die Oberfläche nennt zusätzlich das von
+Energyforecast tatsächlich gelieferte Ende des Prognosehorizonts. Kontowechsel, Zuhause, Zeitzone oder Bundesland
 trennen das Profil. Kommunale Sonderfeiertage (z. B. Mariä Himmelfahrt in Teilen
 Bayerns) sind nicht enthalten. Saisonale Tarifänderungen werden erst gelernt,
 wenn Tibber entsprechende Preise liefert. Zeitvariable Netzentgelte können nur
