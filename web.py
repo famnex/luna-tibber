@@ -137,6 +137,9 @@ class Dashboard:
         self.folder = folder
         self.config_path = folder/'config.json'
         self.lock = threading.RLock()
+        self.preview_lock = threading.Lock()
+        self.preview_cache = None
+        self.preview_running = False
         from consumption_advice import BackgroundAdvice
         self.consumption_advice=BackgroundAdvice()
         self.proc = None
@@ -716,15 +719,66 @@ class Dashboard:
             self.hourly_sample_at=time.monotonic()
             self.request_sample()
 
-    def request_sample(self, fast=False):
+    def request_sample(self, fast=False, nonblocking=False):
         # Visible browser or hourly history task. Reuse ongoing controller measurements.
-        with self.lock:
+        if not self.lock.acquire(blocking=not nonblocking):return
+        try:
             if self.update_preparing or updater.busy(self.folder) or self.proc or not self.config_path.exists() or time.monotonic()-self.sample_at < (10 if fast else 60):
                 return
             self.sample_at = time.monotonic()
             self.launch('sample')
+        finally:self.lock.release()
 
-    def snapshot(self):
+    def cached_preview(self,c,prices,now,telemetry,hold_until):
+        """One display calculation at a time; HTTP never waits for the planner.
+
+        Cached results are reused only with matching planning inputs and for
+        at most 60 seconds. This cache never feeds device control.
+        """
+        from smart import plan as empty_plan, planned_economics
+        from dispatch import timeline
+        # Exclude display-only PV age, but include all actual forecast rows.
+        inputs={**c,'_pv':{k:v for k,v in c.get('_pv',{}).items() if k not in ('age_seconds','reason')}}
+        fresh=bool(telemetry.get('time') and 0<=(now-datetime.fromisoformat(telemetry['time'])).total_seconds()<=90)
+        key=hashlib.sha256(json.dumps([inputs,prices,telemetry.get('soc') if fresh else None,telemetry.get('max_charge_power_w'),hold_until],sort_keys=True,default=str).encode()).hexdigest()
+        with self.preview_lock:
+            cached=self.preview_cache
+            valid=cached and cached[0]==key and time.monotonic()-cached[1]<60
+            if not self.preview_running and (not valid or time.monotonic()-cached[1]>=15):
+                self.preview_running=True
+                def calculate():
+                    started=time.monotonic()
+                    ident=threading.get_ident()
+                    def report_slow():
+                        import traceback
+                        frame=sys._current_frames().get(ident)
+                        if frame:
+                            print('LUNA: Dashboard-Berechnung seit 8 Sekunden aktiv; Aufrufstelle:',file=sys.stderr,flush=True)
+                            traceback.print_stack(frame,file=sys.stderr)
+                    watchdog=threading.Timer(8,report_slow);watchdog.daemon=True;watchdog.start()
+                    try:
+                        preview=smart_preview(c,prices,now,telemetry,hold_until)
+                        result=(preview,planned_economics(c,prices,preview),timeline(c,prices,now,preview['soc'],preview,hold_until),'',self.journal.soc_series())
+                    except Exception as exc:
+                        import traceback
+                        traceback.print_exc()
+                        preview=empty_plan(c,[],now,None)
+                        message='Planberechnung fehlgeschlagen ('+type(exc).__name__+').'
+                        preview['reason']=message
+                        result=(preview,planned_economics(c,[],preview),timeline(c,[],now,None,preview,None),message,[])
+                    finally:
+                        watchdog.cancel()
+                        with self.preview_lock:
+                            if 'result' in locals():self.preview_cache=(key,time.monotonic(),result)
+                            self.preview_running=False
+                        if time.monotonic()-started>=2:print('LUNA: Dashboard-Berechnung %.1f Sekunden'%(time.monotonic()-started),file=sys.stderr,flush=True)
+                threading.Thread(target=calculate,daemon=True).start()
+            if valid:return (*cached[2],False)
+        preview=empty_plan(c,[],now,None)
+        preview['reason']='Plan wird im Hintergrund berechnet'
+        return preview,planned_economics(c,[],preview),timeline(c,[],now,None,preview,None),'',[],True
+
+    def snapshot(self, cached=False):
         # Display computation must not hold the controller/update mutex.
         c = self.config()
         settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')}
@@ -741,29 +795,35 @@ class Dashboard:
         all_orders=load_orders(self.folder,c['expected_serial'],now)
         c['_orders']=[r for r in all_orders if r['kind'] in ('hold','charge')]
         if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
-        planning_error=''
-        try:
-            preview=smart_preview(c,prices,now,self.telemetry,hold_until)
-            from smart import planned_economics
-            plan=planned_economics(c,prices,preview)
-            from dispatch import timeline
-            dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
-        except Exception as exc:
-            # Keep account, updates and measured state usable on planner errors.
-            planning_error='Planberechnung fehlgeschlagen ('+type(exc).__name__+'). Einstellungen und Update bleiben verfügbar.'
-            from smart import plan as empty_plan,planned_economics
-            preview=empty_plan(c,[],now,None)
-            preview['reason']=planning_error
-            plan=planned_economics(c,[],preview)
-            from dispatch import timeline
-            dispatch=timeline(c,[],now,None,preview,None)
+        planning_pending=False
+        battery_history=[]
+        if cached:
+            preview,plan,dispatch,planning_error,battery_history,planning_pending=self.cached_preview(c,prices,now,dict(self.telemetry),hold_until)
+        else:
+            planning_error=''
+            try:
+                preview=smart_preview(c,prices,now,self.telemetry,hold_until)
+                from smart import planned_economics
+                plan=planned_economics(c,prices,preview)
+                from dispatch import timeline
+                dispatch=timeline(c,prices,now,preview['soc'],preview,hold_until)
+            except Exception as exc:
+                # Keep account, updates and measured state usable on planner errors.
+                planning_error='Planberechnung fehlgeschlagen ('+type(exc).__name__+'). Einstellungen und Update bleiben verfügbar.'
+                from smart import plan as empty_plan,planned_economics
+                preview=empty_plan(c,[],now,None)
+                preview['reason']=planning_error
+                plan=planned_economics(c,[],preview)
+                from dispatch import timeline
+                dispatch=timeline(c,[],now,None,preview,None)
+            battery_history=self.journal.soc_series()
         current = next((p['ct'] for p in prices if p['start']<=now<p['end']),None)
         wifi = read(Path('/etc/luna-wifi.json'),{})
         return {'consumption_templates':read(self.folder/'consumption-templates.json',[]),'manual_orders':all_orders,'manual_occurrences':__import__('consumption').upcoming(all_orders,now),'consumption_forecast':__import__('consumption').intervals(c.get('_consumption_rules',[]),now,now+timedelta(hours=48)),'discharge':{'request':read(self.folder/'discharge-request.json',{}),'status':read(self.folder/'discharge-status.json',{}),'restore_pending':(self.folder/'discharge-restore.json').exists()},'mode':self.mode,'planned':self.planned,'job':self.job,'fault':self.fault,'settings':settings,
                 'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                 'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                 'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
-                'battery_history':self.journal.soc_series(),'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
+                'planning_pending':planning_pending,'battery_history':battery_history,'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
                 'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                 'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                 'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
@@ -917,8 +977,8 @@ class Handler(BaseHTTPRequestHandler):
         if self.path=='/api/history':
             return self.send(200,self.server.app.history.summary(self.server.app.config()))
         if self.path in ('/api/status','/api/status?fast=1'):
-            self.server.app.request_sample(fast=self.path.endswith('?fast=1'))
-            try:return self.send(200,self.server.app.snapshot())
+            self.server.app.request_sample(fast=self.path.endswith('?fast=1'),nonblocking=True)
+            try:return self.send(200,self.server.app.snapshot(cached=True))
             except Exception as exc:return self.send(503,{'error':'Statusabruf fehlgeschlagen ('+type(exc).__name__+'). Einstellungen und Update bleiben verfügbar.'})
         self.send(404,{'error':'Nicht gefunden'})
     def do_POST(self):

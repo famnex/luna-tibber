@@ -37,6 +37,46 @@ class DashboardTests(unittest.TestCase):
         self.folder=Path(self.tmp.name)
         self.app=web.Dashboard(self.folder,start_worker=False)
     def tearDown(self):self.tmp.cleanup()
+    def test_slow_planner_does_not_block_status_or_start_duplicate_jobs(self):
+        import threading, time
+        entered=threading.Event();release=threading.Event()
+        original=web.smart_preview
+        def slow(*args,**kwargs):
+            entered.set();release.wait(3)
+            return original(*args,**kwargs)
+        with patch('web.smart_preview',side_effect=slow) as calculate:
+            try:
+                started=time.monotonic()
+                first=self.app.snapshot(cached=True)
+                self.assertTrue(entered.wait(1))
+                second=self.app.snapshot(cached=True)
+                self.assertLess(time.monotonic()-started,1)
+                self.assertTrue(first['planning_pending'])
+                self.assertIn('settings',first)
+                self.assertIn('current_price',first)
+                self.assertEqual(calculate.call_count,1)
+            finally:release.set()
+            for _ in range(100):
+                if not self.app.preview_running:break
+                time.sleep(.01)
+            completed=self.app.snapshot(cached=True)
+            self.assertFalse(completed['planning_pending'])
+            self.assertEqual(calculate.call_count,1)
+
+    def test_busy_controller_does_not_block_display_sample_request(self):
+        import threading,time
+        held=threading.Event();release=threading.Event()
+        def hold():
+            with self.app.lock:
+                held.set();release.wait(3)
+        worker=threading.Thread(target=hold);worker.start()
+        try:
+            self.assertTrue(held.wait(1))
+            started=time.monotonic()
+            self.app.request_sample(nonblocking=True)
+            self.assertLess(time.monotonic()-started,.2)
+        finally:release.set();worker.join()
+
     def test_startup_settings_and_update_do_not_depend_on_planner(self):
         self.app.save_settings({'energyforecast_api_key':'not-public'})
         with patch('web.smart_preview',side_effect=RuntimeError('planner unavailable')):
