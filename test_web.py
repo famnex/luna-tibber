@@ -47,7 +47,7 @@ class DashboardTests(unittest.TestCase):
         with patch('web.smart_preview',side_effect=slow) as calculate:
             try:
                 started=time.monotonic()
-                first=self.app.snapshot(cached=True)
+                first=self.app.snapshot(cached=True,refresh_preview=True)
                 self.assertTrue(entered.wait(1))
                 second=self.app.snapshot(cached=True)
                 self.assertLess(time.monotonic()-started,1)
@@ -61,6 +61,39 @@ class DashboardTests(unittest.TestCase):
                 time.sleep(.01)
             completed=self.app.snapshot(cached=True)
             self.assertFalse(completed['planning_pending'])
+            self.assertEqual(calculate.call_count,1)
+
+    def test_ui_reads_never_start_calculation(self):
+        with patch('web.smart_preview') as calculate:
+            for _ in range(3):
+                self.assertTrue(self.app.snapshot(cached=True)['planning_pending'])
+            calculate.assert_not_called()
+            self.assertFalse(self.app.preview_running)
+
+    def test_worker_prepares_and_retains_plan_without_browser(self):
+        import threading,time
+        original=web.smart_preview
+        with patch('web.smart_preview',wraps=original) as calculate:
+            worker=threading.Thread(target=self.app.preview_worker)
+            worker.start()
+            try:
+                for _ in range(100):
+                    if self.app.preview_cache:break
+                    time.sleep(.01)
+                self.assertIsNotNone(self.app.preview_cache)
+            finally:self.app.closed.set();worker.join(2)
+            # Returning to the app after the previous 60-second expiry keeps data.
+            cache=list(self.app.preview_cache);cache[1]-=120
+            self.app.preview_cache=tuple(cache)
+            state=self.app.snapshot(cached=True)
+            self.assertFalse(state['planning_pending'])
+            self.assertFalse(state['planning_refreshing'])
+            self.assertEqual(calculate.call_count,1)
+            # Changed input retains the last plan, labeled, without UI calculation.
+            self.app.save_settings({'base_load_w':800})
+            state=self.app.snapshot(cached=True)
+            self.assertFalse(state['planning_pending'])
+            self.assertTrue(state['planning_refreshing'])
             self.assertEqual(calculate.call_count,1)
 
     def test_busy_controller_does_not_block_display_sample_request(self):

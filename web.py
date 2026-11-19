@@ -210,6 +210,7 @@ class Dashboard:
             threading.Thread(target=self.worker,daemon=True).start()
             threading.Thread(target=self.price_worker,daemon=True).start()
             threading.Thread(target=self.forecast_worker,daemon=True).start()
+            threading.Thread(target=self.preview_worker,daemon=True).start()
     def backfill_grid_costs(self):
         try:self.grid_costs.backfill(self.config())
         except Exception:self.events.append({'event':'statistics_error','message':'Historische Bezugskosten konnten nicht ergänzt werden; erneuter Versuch beim nächsten Start.'})
@@ -657,6 +658,14 @@ class Dashboard:
             self.launch('charge',target_soc=order['target_soc'])
             order['phase'] = 'charging'
 
+    def preview_worker(self):
+        # Owned by the server, including when every browser is closed.
+        while not self.closed.is_set():
+            try:self.snapshot(cached=True, refresh_preview=True)
+            except Exception as exc:
+                print('LUNA: Vorschau-Worker: '+type(exc).__name__,file=sys.stderr,flush=True)
+            self.closed.wait(5)
+
     def forecast_worker(self):
         while not self.closed.is_set():
             try:self.forecast.refresh(self.config())
@@ -729,11 +738,13 @@ class Dashboard:
             self.launch('sample')
         finally:self.lock.release()
 
-    def cached_preview(self,c,prices,now,telemetry,hold_until):
+    def cached_preview(self,c,prices,now,telemetry,hold_until,refresh=False):
         """One display calculation at a time; HTTP never waits for the planner.
 
-        Cached results are reused only with matching planning inputs and for
-        at most 60 seconds. This cache never feeds device control.
+        Only the server worker may schedule work. Recalculate on changed inputs
+        or after five minutes. Keep the previous display during refresh, clearly
+        marked, for at most 30 minutes and never across account/device changes.
+        This cache never feeds device control.
         """
         from smart import plan as empty_plan, planned_economics
         from dispatch import timeline
@@ -741,10 +752,11 @@ class Dashboard:
         inputs={**c,'_pv':{k:v for k,v in c.get('_pv',{}).items() if k not in ('age_seconds','reason')}}
         fresh=bool(telemetry.get('time') and 0<=(now-datetime.fromisoformat(telemetry['time'])).total_seconds()<=90)
         key=hashlib.sha256(json.dumps([inputs,prices,telemetry.get('soc') if fresh else None,telemetry.get('max_charge_power_w'),hold_until],sort_keys=True,default=str).encode()).hexdigest()
+        identity=(c.get('expected_serial'),c.get('tibber_home_id'),c.get('tibber_token'),self.mode)
         with self.preview_lock:
             cached=self.preview_cache
-            valid=cached and cached[0]==key and time.monotonic()-cached[1]<60
-            if not self.preview_running and (not valid or time.monotonic()-cached[1]>=15):
+            valid=cached and cached[0]==key and cached[3]==identity and time.monotonic()-cached[1]<300
+            if refresh and not self.preview_running and not valid:
                 self.preview_running=True
                 def calculate():
                     started=time.monotonic()
@@ -769,16 +781,17 @@ class Dashboard:
                     finally:
                         watchdog.cancel()
                         with self.preview_lock:
-                            if 'result' in locals():self.preview_cache=(key,time.monotonic(),result)
+                            if 'result' in locals():self.preview_cache=(key,time.monotonic(),result,identity,now.isoformat())
                             self.preview_running=False
                         if time.monotonic()-started>=2:print('LUNA: Dashboard-Berechnung %.1f Sekunden'%(time.monotonic()-started),file=sys.stderr,flush=True)
                 threading.Thread(target=calculate,daemon=True).start()
-            if valid:return (*cached[2],False)
+            if cached and cached[3]==identity and time.monotonic()-cached[1]<1800:
+                return (*cached[2],False,not valid,cached[4])
         preview=empty_plan(c,[],now,None)
         preview['reason']='Plan wird im Hintergrund berechnet'
-        return preview,planned_economics(c,[],preview),timeline(c,[],now,None,preview,None),'',[],True
+        return preview,planned_economics(c,[],preview),timeline(c,[],now,None,preview,None),'',[],True,False,None
 
-    def snapshot(self, cached=False):
+    def snapshot(self, cached=False, refresh_preview=False):
         # Display computation must not hold the controller/update mutex.
         c = self.config()
         settings = {k:v for k,v in c.items() if k not in SECRETS and k not in ('mode','reserve_soc') and not k.startswith('_')}
@@ -796,9 +809,11 @@ class Dashboard:
         c['_orders']=[r for r in all_orders if r['kind'] in ('hold','charge')]
         if self.mode=='off' and c['_orders']:c={**c,'_orders_only':True,'smart_discharge_enabled':True}
         planning_pending=False
+        planning_refreshing=False
+        planning_computed_at=None
         battery_history=[]
         if cached:
-            preview,plan,dispatch,planning_error,battery_history,planning_pending=self.cached_preview(c,prices,now,dict(self.telemetry),hold_until)
+            preview,plan,dispatch,planning_error,battery_history,planning_pending,planning_refreshing,planning_computed_at=self.cached_preview(c,prices,now,dict(self.telemetry),hold_until,refresh=refresh_preview)
         else:
             planning_error=''
             try:
@@ -823,7 +838,7 @@ class Dashboard:
                 'secrets_set':{k:bool(c[k]) for k in SECRETS},'missing':missing,
                 'commissioned':read(self.folder/'commissioned.json',{}).get('serial') == c['expected_serial'] and bool(c['expected_serial']),
                 'pv_forecast':{**{k:v for k,v in c['_pv'].items() if k!='rows'},'series':[{**r,'start':r['start'].isoformat(),'end':r['end'].isoformat()} for r in c['_pv']['rows']]},'smart_preview':preview,'dispatch_preview':dispatch,'push':self.notifications.status(),'update':self.update_status(),
-                'planning_pending':planning_pending,'battery_history':battery_history,'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
+                'planning_pending':planning_pending,'planning_refreshing':planning_refreshing,'planning_computed_at':planning_computed_at,'battery_history':battery_history,'meter_test':read(self.folder/'meter-test.json',{}),'telemetry':self.telemetry,'display_telemetry':self.display_measurement(c),'device':self.device,'economics':plan,'current_price':current,
                 'comparison':next_day_comparison(c,prices,now,0 if now.astimezone(ZoneInfo(c['timezone'])).hour < c['night_end_hour'] else 1),
                 'comparisons':{key:next_day_comparison(c,prices,now,offset) for key,offset in [('today',0),('tomorrow',1)]},
                 'price_age_seconds':max(0,int(time.time()-self.price_fetched_at)) if self.price_fetched_at else None,
